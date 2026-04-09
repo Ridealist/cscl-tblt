@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -23,6 +24,11 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("agent")
 
+# AGENT_MODE: "pipeline" (STT-LLM-TTS) 또는 "realtime" (OpenAI Realtime API)
+AGENT_MODE = os.getenv("AGENT_MODE", "pipeline")
+
+log.info("Agent mode: %s", AGENT_MODE)
+
 server = AgentServer()
 
 
@@ -32,7 +38,9 @@ class Assistant(Agent):
 
 
 def prewarm(proc: JobProcess):
-    proc.userdata["vad"] = silero.VAD.load()
+    # Silero VAD는 pipeline 모드에서만 필요
+    if AGENT_MODE == "pipeline":
+        proc.userdata["vad"] = silero.VAD.load()
 
 
 server.setup_fnc = prewarm
@@ -43,16 +51,23 @@ async def _run(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name}
     conv_logger = ConversationLogger(ctx.room.name)
 
-    session = AgentSession(
-        stt=inference.STT(model="deepgram/nova-3", language="multi"),
-        llm=inference.LLM(model="openai/gpt-4o-mini"),
-        tts=inference.TTS(
-            model="cartesia/sonic-3", voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"
-        ),
-        turn_detection=MultilingualModel(),
-        vad=ctx.proc.userdata["vad"],
-        preemptive_generation=True,
-    )
+    if AGENT_MODE == "realtime":
+        from livekit.plugins import openai as openai_plugin
+
+        session = AgentSession(
+            llm=openai_plugin.realtime.RealtimeModel(voice="coral"),
+        )
+    else:
+        session = AgentSession(
+            stt=inference.STT(model="deepgram/nova-3", language="multi"),
+            llm=inference.LLM(model="openai/gpt-4o-mini"),
+            tts=inference.TTS(
+                model="cartesia/sonic-3", voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"
+            ),
+            turn_detection=MultilingualModel(),
+            vad=ctx.proc.userdata["vad"],
+            preemptive_generation=True,
+        )
 
     @session.on("user_speech_committed")
     def on_user_speech(ev):
@@ -79,24 +94,27 @@ async def _run(ctx: JobContext) -> None:
     def on_active_speakers_changed(speakers):
         if not speakers:
             return
-        local_identity = ctx.room.local_participant.identity
-        for speaker in speakers:
-            if speaker.identity != local_identity:
-                session.room_io.set_participant(speaker.identity)
-                break
+        try:
+            local_identity = ctx.room.local_participant.identity
+            for speaker in speakers:
+                if speaker.identity != local_identity:
+                    session.room_io.set_participant(speaker.identity)
+                    break
+        except RuntimeError:
+            pass
 
     ctx.room.on("active_speakers_changed", on_active_speakers_changed)
 
-    await session.say(
+    GREETING = (
         "Hello! I'm your English speaking practice partner. "
         "Feel free to start talking whenever you're ready!"
     )
 
-
-# @server.rtc_session()
-# async def auto_agent(ctx: JobContext):
-#     """자동 dispatch: 참가자가 입장하면 LiveKit Cloud가 자동으로 실행."""
-#     await _run(ctx)
+    if AGENT_MODE == "realtime":
+        # Realtime 모드: 별도 TTS 없이 모델이 직접 음성 생성
+        await session.generate_reply(instructions=GREETING)
+    else:
+        await session.say(GREETING)
 
 
 @server.rtc_session(agent_name="my-agent")
