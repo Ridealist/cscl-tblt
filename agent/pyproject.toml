@@ -1,0 +1,21 @@
+[project]
+name = "english-speaking-agent"
+version = "0.1.0"
+requires-python = ">=3.10, <3.15"
+dependencies = [
+    "livekit-agents[silero,turn-detector]~=1.4",
+    "python-dotenv",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+
+[tool.uv]
+package = false

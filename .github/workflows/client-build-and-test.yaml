@@ -1,0 +1,39 @@
+name: Client — Lint and Build
+permissions:
+  contents: read
+  pull-requests: read
+on:
+  push:
+    branches: [main]
+    paths: [client/**]
+  pull_request:
+    branches: [main]
+    paths: [client/**]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - name: Use Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: 'pnpm'
+          cache-dependency-path: client/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: ESLint
+        run: pnpm lint
+
+      - name: Prettier
+        run: pnpm format:check
+
+      - name: Ensure build succeeds
+        run: pnpm build

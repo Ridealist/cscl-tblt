@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>English Speaking Practice</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- 입장 화면 -->
+  <div id="join-screen" class="screen">
+    <h1>English Speaking Practice</h1>
+    <input id="name-input" type="text" placeholder="이름을 입력하세요" maxlength="30" />
+    <button id="join-btn">입장하기</button>
+    <p id="join-error" class="error hidden"></p>
+  </div>
+
+  <!-- 통화 화면 -->
+  <div id="call-screen" class="screen hidden">
+    <header>
+      <span id="room-label">Room: —</span>
+      <button id="leave-btn">나가기</button>
+    </header>
+
+    <div id="participants"></div>
+
+    <div id="controls">
+      <button id="mic-btn" class="mic-on">🎙 마이크 ON</button>
+      <button id="dispatch-btn">🤖 에이전트 생성</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
