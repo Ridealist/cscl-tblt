@@ -49,7 +49,22 @@ server.setup_fnc = prewarm
 async def _run(ctx: JobContext) -> None:
     """자동/수동 dispatch 공통 세션 로직."""
     ctx.log_context_fields = {"room": ctx.room.name}
-    conv_logger = ConversationLogger(ctx.room.name)
+    conv_logger = ConversationLogger(ctx.job.room.sid, ctx.room.name)
+
+    # 참가자 registry: identity -> name
+    participant_names: dict[str, str] = {}
+
+    def _register_participant(p) -> None:
+        participant_names[p.identity] = p.name or p.identity
+
+    # 이미 연결된 참가자 등록 (에이전트 자신 포함)
+    for p in ctx.room.remote_participants.values():
+        _register_participant(p)
+
+    ctx.room.on("participant_connected", lambda p: _register_participant(p))
+
+    # 현재 발화 중인 참가자 (로컬 에이전트 제외한 유저)
+    current_speaker: dict[str, str | None] = {"identity": None, "name": None}
 
     if AGENT_MODE == "realtime":
         from livekit.plugins import openai as openai_plugin
@@ -69,17 +84,24 @@ async def _run(ctx: JobContext) -> None:
             preemptive_generation=True,
         )
 
-    @session.on("user_speech_committed")
-    def on_user_speech(ev):
-        text = getattr(ev, "transcript", "") or getattr(ev, "text", "")
-        if text:
-            conv_logger.log("user", text)
+    @session.on("conversation_item_added")
+    def on_conversation_item(ev):
+        item = ev.item
+        if not hasattr(item, "role") or not hasattr(item, "text_content"):
+            return
+        text = item.text_content
+        if not text:
+            return
 
-    @session.on("agent_speech_committed")
-    def on_agent_speech(ev):
-        text = getattr(ev, "transcript", "") or getattr(ev, "text", "")
-        if text:
-            conv_logger.log("agent", text)
+        if item.role == "user":
+            conv_logger.log(
+                role="user",
+                text=text,
+                participant_identity=current_speaker["identity"],
+                participant_name=current_speaker["name"],
+            )
+        elif item.role == "assistant":
+            conv_logger.log(role="agent", text=text)
 
     await session.start(
         agent=Assistant(),
@@ -90,18 +112,23 @@ async def _run(ctx: JobContext) -> None:
     )
     await ctx.connect()
 
-    # Active speaker가 바뀔 때마다 linked participant를 전환
+    # Active speaker가 바뀔 때마다 current_speaker와 linked participant를 갱신
     def on_active_speakers_changed(speakers):
         if not speakers:
             return
-        try:
-            local_identity = ctx.room.local_participant.identity
-            for speaker in speakers:
-                if speaker.identity != local_identity:
+        local_identity = ctx.room.local_participant.identity
+        for speaker in speakers:
+            if speaker.identity != local_identity:
+                # room_io 실패와 무관하게 항상 발화자 기록
+                current_speaker["identity"] = speaker.identity
+                current_speaker["name"] = participant_names.get(
+                    speaker.identity, speaker.identity
+                )
+                try:
                     session.room_io.set_participant(speaker.identity)
-                    break
-        except RuntimeError:
-            pass
+                except RuntimeError:
+                    pass
+                break
 
     ctx.room.on("active_speakers_changed", on_active_speakers_changed)
 

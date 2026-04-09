@@ -9,28 +9,43 @@ log = logging.getLogger(__name__)
 
 
 class ConversationLogger:
-    def __init__(self, room_name: str):
+    def __init__(self, session_id: str, room_name: str):
         LOGS_DIR.mkdir(exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.path = LOGS_DIR / f"{room_name}_{ts}.json"
+        ts = datetime.now().strftime("%y%m%d_%H:%M")
+        self.path = LOGS_DIR / f"{session_id}--{ts}.json"
         self.room = room_name
+        self.session_id = session_id
         self.entries: list[dict] = []
         log.info("Conversation log: %s", self.path)
 
-    def log(self, role: str, text: str) -> None:
-        """role: 'user' | 'agent'"""
-        entry = {
+    def log(
+        self,
+        role: str,
+        text: str,
+        participant_identity: str | None = None,
+        participant_name: str | None = None,
+    ) -> None:
+        """
+        role: 'user' | 'agent'
+        participant_identity: LiveKit participant identity (user only)
+        participant_name: LiveKit participant name (user only)
+        """
+        entry: dict = {
             "timestamp": datetime.now().isoformat(),
             "role": role,
             "text": text,
         }
+        if participant_identity:
+            entry["participant_identity"] = participant_identity
+        if participant_name:
+            entry["participant_name"] = participant_name
         self.entries.append(entry)
         self._save()
 
     def _save(self) -> None:
         with open(self.path, "w", encoding="utf-8") as f:
             json.dump(
-                {"room": self.room, "entries": self.entries},
+                {"session_id": self.session_id, "room": self.room, "entries": self.entries},
                 f,
                 ensure_ascii=False,
                 indent=2,

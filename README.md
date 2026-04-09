@@ -28,9 +28,10 @@ CSCL_TBLT/
 │   └── uv.lock
 │
 ├── client/               # 브라우저 클라이언트
-│   ├── index.html        # 심플 클라이언트 (HTML/JS)
-│   ├── app.js
-│   ├── style.css
+│   ├── static/           # 심플 클라이언트 (HTML/JS) — python -m http.server 전용
+│   │   ├── index.html
+│   │   ├── app.js
+│   │   └── style.css
 │   ├── app/              # Next.js 클라이언트 (고급)
 │   └── .env.local        # Next.js용 환경변수 (git 추적 안 됨)
 │
@@ -116,7 +117,7 @@ uv run python main.py dev
 
 ```bash
 # 터미널 3 — 심플 HTML 클라이언트
-cd client
+cd client/static
 python -m http.server 3000
 ```
 
@@ -192,14 +193,17 @@ uv run pytest tests/ -v
 
 ```
 logs/
-└── english-practice_20260409_142300.json
+└── RM_9GkS7d8BWCsf--260409_14:23.json
 ```
+
+파일명 형식: `{session_id}_{started_at}.json`
 
 ```json
 {
+  "session_id": "RM_9GkS7d8BWCsf",
   "room": "english-practice",
   "entries": [
-    { "timestamp": "2026-04-09T14:23:05", "role": "user",  "text": "Hello!" },
+    { "timestamp": "2026-04-09T14:23:05", "role": "user",  "text": "Hello!", "participant_identity": "user_1234", "participant_name": "고준보" },
     { "timestamp": "2026-04-09T14:23:07", "role": "agent", "text": "Hi! How are you today?" }
   ]
 }
@@ -213,7 +217,7 @@ logs/
 |------|------|
 | AI 시스템 프롬프트 수정 | `agent/prompt.py` |
 | STT / LLM / TTS 모델 변경 | `agent/main.py` |
-| 토큰 서버 포트 변경 | `server/main.py` + `client/app.js` 상단 `SERVER` 변수 |
+| 토큰 서버 포트 변경 | `server/main.py` + `client/static/app.js` 상단 `SERVER` 변수 |
 | Room 이름 변경 | `.env` → `ROOM_NAME` |
 | 에이전트 이름 변경 | `.env` → `AGENT_NAME` (agent/main.py의 `agent_name`과 일치시킬 것) |
 | 로그 저장 위치 변경 | `agent/logger.py` → `LOGS_DIR` |
