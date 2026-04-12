@@ -1,23 +1,22 @@
 'use client';
 
+import { useState } from 'react';
 import { useTheme } from 'next-themes';
 import { AnimatePresence, motion } from 'motion/react';
 import { useSessionContext } from '@livekit/components-react';
 import type { AppConfig } from '@/app-config';
 import { AgentSessionView_01 } from '@/components/agents-ui/blocks/agent-session-view-01';
+import { LobbyView } from '@/components/app/lobby-view';
 import { WelcomeView } from '@/components/app/welcome-view';
 
 const MotionWelcomeView = motion.create(WelcomeView);
+const MotionLobbyView = motion.create(LobbyView);
 const MotionSessionView = motion.create(AgentSessionView_01);
 
 const VIEW_MOTION_PROPS = {
   variants: {
-    visible: {
-      opacity: 1,
-    },
-    hidden: {
-      opacity: 0,
-    },
+    visible: { opacity: 1 },
+    hidden: { opacity: 0 },
   },
   initial: 'hidden',
   animate: 'visible',
@@ -30,22 +29,28 @@ const VIEW_MOTION_PROPS = {
 
 interface ViewControllerProps {
   appConfig: AppConfig;
+  onJoin: (participantName: string, roomName: string) => void;
 }
 
-export function ViewController({ appConfig }: ViewControllerProps) {
-  const { isConnected, start } = useSessionContext();
+export function ViewController({ appConfig, onJoin }: ViewControllerProps) {
+  const { isConnected } = useSessionContext();
   const { resolvedTheme } = useTheme();
+  const [showLobby, setShowLobby] = useState(false);
 
   return (
     <AnimatePresence mode="wait">
       {/* Welcome view */}
-      {!isConnected && (
+      {!isConnected && !showLobby && (
         <MotionWelcomeView
           key="welcome"
           {...VIEW_MOTION_PROPS}
           startButtonText={appConfig.startButtonText}
-          onStartCall={start}
+          onStartCall={() => setShowLobby(true)}
         />
+      )}
+      {/* Lobby view */}
+      {!isConnected && showLobby && (
+        <MotionLobbyView key="lobby" {...VIEW_MOTION_PROPS} onJoin={onJoin} />
       )}
       {/* Session view */}
       {isConnected && (

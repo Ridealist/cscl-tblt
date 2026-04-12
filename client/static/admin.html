@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin — Conversation Monitor</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 16px 24px;
+      background: #1a1d27;
+      border-bottom: 1px solid #2d3148;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    header h1 { font-size: 16px; font-weight: 600; letter-spacing: 0.05em; }
+
+    #status {
+      margin-left: auto;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #4ade80;
+    }
+    .dot.disconnected { background: #f87171; }
+
+    #meta {
+      padding: 12px 24px;
+      background: #13161f;
+      border-bottom: 1px solid #2d3148;
+      font-size: 12px;
+      color: #94a3b8;
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+
+    #meta span b { color: #e2e8f0; }
+
+    /* 참가자 범례 */
+    #legend {
+      padding: 10px 24px;
+      background: #13161f;
+      border-bottom: 1px solid #2d3148;
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      min-height: 40px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+    }
+
+    .legend-swatch {
+      width: 12px; height: 12px;
+      border-radius: 3px;
+    }
+
+    #log {
+      flex: 1;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow-y: auto;
+    }
+
+    .empty {
+      color: #475569;
+      font-size: 14px;
+      text-align: center;
+      margin-top: 80px;
+    }
+
+    .message {
+      display: flex;
+      gap: 12px;
+      max-width: 720px;
+    }
+
+    .message.agent { align-self: flex-start; }
+    .message.user  { align-self: flex-end; flex-direction: row-reverse; }
+
+    .avatar {
+      width: 34px; height: 34px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 15px;
+      flex-shrink: 0;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .bubble {
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.55;
+      max-width: 560px;
+    }
+
+    .message.agent .bubble {
+      background: #1e2235;
+      border-top-left-radius: 2px;
+    }
+
+    /* user bubble는 JS에서 인라인으로 색상 적용 */
+    .message.user .bubble {
+      border-top-right-radius: 2px;
+    }
+
+    .meta-row {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 4px;
+    }
+
+    .message.user .meta-row { text-align: right; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🛡 Admin — Conversation Monitor</h1>
+  <div id="status">
+    <span class="dot disconnected" id="dot"></span>
+    <span id="status-text">연결 중...</span>
+  </div>
+</header>
+
+<div id="meta">
+  <span>Session: <b id="m-session">—</b></span>
+  <span>Room: <b id="m-room">—</b></span>
+  <span>File: <b id="m-file">—</b></span>
+  <span>Turns: <b id="m-turns">0</b></span>
+</div>
+
+<div id="legend"></div>
+
+<div id="log">
+  <p class="empty" id="empty">대화를 기다리는 중...</p>
+</div>
+
+<script>
+  const SERVER     = "http://localhost:8000";
+  const logEl      = document.getElementById("log");
+  const legendEl   = document.getElementById("legend");
+  const emptyEl    = document.getElementById("empty");
+  const dotEl      = document.getElementById("dot");
+  const statusText = document.getElementById("status-text");
+
+  // 참가자별 색상 팔레트 (avatar bg, bubble bg, bubble border)
+  const USER_PALETTES = [
+    { avatar: "#7c3aed", bubble: "#2d1f52", border: "#7c3aed" }, // 보라
+    { avatar: "#0891b2", bubble: "#0c2e3a", border: "#0891b2" }, // 청록
+    { avatar: "#d97706", bubble: "#3a2500", border: "#d97706" }, // 황금
+    { avatar: "#16a34a", bubble: "#0d2e1a", border: "#16a34a" }, // 초록
+    { avatar: "#e11d48", bubble: "#3a0f1c", border: "#e11d48" }, // 빨강
+    { avatar: "#ea580c", bubble: "#3a1800", border: "#ea580c" }, // 주황
+  ];
+
+  // identity → 팔레트 매핑 (첫 등장 순서대로 배정)
+  const participantMap = new Map(); // identity → { name, palette, initial }
+
+  function getPalette(identity, name) {
+    if (!participantMap.has(identity)) {
+      const idx = participantMap.size % USER_PALETTES.length;
+      const initial = (name || identity || "?")[0].toUpperCase();
+      participantMap.set(identity, { name, palette: USER_PALETTES[idx], initial });
+    }
+    return participantMap.get(identity);
+  }
+
+  function setConnected(ok) {
+    dotEl.className  = "dot" + (ok ? "" : " disconnected");
+    statusText.textContent = ok ? "실시간 연결됨" : "연결 끊김 — 재연결 중...";
+  }
+
+  function fmt(isoStr) {
+    const d = new Date(isoStr);
+    return d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+
+  function renderLegend() {
+    legendEl.innerHTML = "";
+    if (participantMap.size === 0) return;
+
+    for (const [, { name, palette, initial }] of participantMap) {
+      const item = document.createElement("div");
+      item.className = "legend-item";
+      item.innerHTML = `
+        <span class="legend-swatch" style="background:${palette.avatar}"></span>
+        <span>${name || initial}</span>`;
+      legendEl.appendChild(item);
+    }
+  }
+
+  function render(data) {
+    document.getElementById("m-session").textContent = data.session_id || "—";
+    document.getElementById("m-room").textContent    = data.room       || "—";
+    document.getElementById("m-file").textContent    = data._filename  || "—";
+    document.getElementById("m-turns").textContent   = (data.entries || []).length;
+
+    // 참가자 맵 갱신 (기존 정보 유지)
+    for (const entry of (data.entries || [])) {
+      if (entry.role === "user" && entry.participant_identity) {
+        const name = entry.participant_name || entry.participant_identity;
+        getPalette(entry.participant_identity, name);
+      }
+    }
+    renderLegend();
+
+    logEl.innerHTML = "";
+
+    if (!data.entries || data.entries.length === 0) {
+      logEl.appendChild(emptyEl);
+      return;
+    }
+
+    for (const entry of data.entries) {
+      const isAgent = entry.role === "agent";
+      const msg = document.createElement("div");
+      msg.className = `message ${entry.role}`;
+
+      if (isAgent) {
+        msg.innerHTML = `
+          <div class="avatar" style="background:#312e81">🤖</div>
+          <div>
+            <div class="bubble">
+              ${entry.text}
+            </div>
+            <div class="meta-row">Agent · ${fmt(entry.timestamp)}</div>
+          </div>`;
+      } else {
+        const identity = entry.participant_identity || "unknown";
+        const name     = entry.participant_name || identity;
+        const { palette, initial } = getPalette(identity, name);
+
+        msg.innerHTML = `
+          <div class="avatar" style="background:${palette.avatar}">${initial}</div>
+          <div>
+            <div class="bubble" style="background:${palette.bubble}; border: 1px solid ${palette.border}33;">
+              ${entry.text}
+            </div>
+            <div class="meta-row">${name} · ${fmt(entry.timestamp)}</div>
+          </div>`;
+      }
+
+      logEl.appendChild(msg);
+    }
+
+    logEl.lastElementChild?.scrollIntoView({ behavior: "smooth" });
+  }
+
+  function connect() {
+    const es = new EventSource(`${SERVER}/logs/stream`);
+
+    es.onopen = () => setConnected(true);
+
+    es.onmessage = (e) => {
+      try { render(JSON.parse(e.data)); }
+      catch (err) { console.error("parse error", err); }
+    };
+
+    es.onerror = () => {
+      setConnected(false);
+      es.close();
+      setTimeout(connect, 3000);
+    };
+  }
+
+  connect();
+</script>
+</body>
+</html>

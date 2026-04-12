@@ -87,7 +87,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
                 className="hidden size-6 dark:block"
               />
             </a>
-            <span className="text-foreground font-mono text-xs font-bold tracking-wider uppercase">
+            {/* <span className="text-foreground font-mono text-xs font-bold tracking-wider uppercase">
               Built with{' '}
               <a
                 target="_blank"
@@ -97,7 +97,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
               >
                 LiveKit Agents
               </a>
-            </span>
+            </span> */}
           </header>
 
           {children}

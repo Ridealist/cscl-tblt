@@ -10,6 +10,7 @@ import {
 } from '@/components/agents-ui/agent-control-bar';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { cn } from '@/lib/shadcn/utils';
+import { ParticipantList } from './participant-list';
 import { TileLayout } from './tile-view';
 
 const MotionMessage = motion.create(Shimmer);
@@ -205,6 +206,7 @@ export function AgentSessionView_01({
       {...props}
     >
       <Fade top className="absolute inset-x-4 top-0 z-10 h-40" />
+      <ParticipantList />
       {/* transcript */}
 
       <div className="absolute top-0 bottom-[135px] flex w-full flex-col md:bottom-[170px]">

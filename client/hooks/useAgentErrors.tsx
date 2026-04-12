@@ -1,7 +1,7 @@
 import { ReactNode, useEffect } from 'react';
 import { toast as sonnerToast } from 'sonner';
 import { useAgent, useSessionContext } from '@livekit/components-react';
-import { WarningIcon } from '@phosphor-icons/react';
+import { WarningIcon } from '@phosphor-icons/react/dist/ssr';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 interface ToastProps {

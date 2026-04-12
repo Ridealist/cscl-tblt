@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { TokenSource } from 'livekit-client';
 import { useSession } from '@livekit/components-react';
 import { WarningIcon } from '@phosphor-icons/react/dist/ssr';
@@ -27,10 +27,30 @@ interface AppProps {
 }
 
 export function App({ appConfig }: AppProps) {
+  const sessionInfoRef = useRef<{ participantName: string; roomName: string } | null>(null);
+  const [, forceRender] = useState(0);
+
   const tokenSource = useMemo(() => {
-    return typeof process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT === 'string'
-      ? getSandboxTokenSource(appConfig)
-      : TokenSource.endpoint('/api/token');
+    if (typeof process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT === 'string') {
+      return getSandboxTokenSource(appConfig);
+    }
+    return TokenSource.custom(async () => {
+      const info = sessionInfoRef.current;
+      const roomConfig = appConfig.agentName
+        ? { agents: [{ agent_name: appConfig.agentName }] }
+        : undefined;
+
+      const res = await fetch('/api/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          participant_name: info?.participantName,
+          room_name: info?.roomName,
+          room_config: roomConfig,
+        }),
+      });
+      return res.json();
+    });
   }, [appConfig]);
 
   const session = useSession(
@@ -38,11 +58,20 @@ export function App({ appConfig }: AppProps) {
     appConfig.agentName ? { agentName: appConfig.agentName } : undefined
   );
 
+  const handleJoin = useCallback(
+    (participantName: string, roomName: string) => {
+      sessionInfoRef.current = { participantName, roomName };
+      forceRender((n) => n + 1);
+      session.start({ tracks: { microphone: { enabled: false } } });
+    },
+    [session]
+  );
+
   return (
     <AgentSessionProvider session={session}>
       <AppSetup />
       <main className="grid h-svh grid-cols-1 place-content-center">
-        <ViewController appConfig={appConfig} />
+        <ViewController appConfig={appConfig} onJoin={handleJoin} />
       </main>
       <StartAudioButton label="Start Audio" />
       <Toaster

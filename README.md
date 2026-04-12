@@ -1,6 +1,6 @@
 # English Speaking Practice — CSCL TBLT
 
-LiveKit 기반 AI 영어 말하기 연습 시스템. 한국어권 대학생을 위한 실시간 음성 대화 에이전트.
+LiveKit 기반 AI 영어 대화 실습 시스템. TBLT(Task-Based Language Teaching) 방식으로, AI 캐릭터 **Alex**(한국 거주 외국인 초등학생)와 **주말 약속 만들기** 태스크를 수행하는 실시간 음성 대화 에이전트. 대상: 한국어권 대학생.
 
 ## 프로젝트 구조
 
@@ -79,7 +79,7 @@ LIVEKIT_URL=wss://your-project.livekit.cloud
 LIVEKIT_API_KEY=your_api_key
 LIVEKIT_API_SECRET=your_api_secret
 
-# 룸 및 에이전트 이름 (변경 시 client/app.js와 일치시킬 것)
+# 채팅방 및 에이전트 이름 (변경 시 client/app.js와 일치시킬 것)
 ROOM_NAME=english-practice
 AGENT_NAME=my-agent
 
@@ -181,9 +181,23 @@ uv run pytest tests/ -v
 ```
 
 테스트 내용 (`tests/test_conversation.py`):
-- 5턴 자연스러운 대화 흐름 검증
-- 문법 오류 발화에 대한 적절한 반응 확인
-- 역질문에 대한 응답 확인
+- 5턴 대화 흐름 검증 (주말 약속 만들기 태스크)
+- 문법 오류 발화에 대한 Alex의 자연스러운 반응 확인
+- 역질문(주말 활동)에 대한 응답 확인
+
+---
+
+## 관리자 모니터링
+
+토큰 서버(`server/`)가 실행 중일 때, 브라우저에서 아래 주소에 접속하면 진행 중인 대화를 실시간으로 확인할 수 있습니다.
+
+```
+http://localhost:3000/admin.html
+```
+
+- 가장 최근 세션의 대화 로그를 1초 단위로 갱신
+- 참가자 이름, 발화 시각, 역할(User/Agent) 표시
+- 서버 연결이 끊기면 자동 재연결
 
 ---
 
@@ -216,7 +230,7 @@ logs/
 | 항목 | 위치 |
 |------|------|
 | AI 시스템 프롬프트 수정 | `agent/prompt.py` |
-| STT / LLM / TTS 모델 변경 | `agent/main.py` |
+| STT / LLM / TTS 모델 변경 | `agent/main.py` (현재: STT `deepgram/nova-3`, LLM `openai/gpt-4.1-mini`, TTS `cartesia/sonic-3`) |
 | 토큰 서버 포트 변경 | `server/main.py` + `client/static/app.js` 상단 `SERVER` 변수 |
 | Room 이름 변경 | `.env` → `ROOM_NAME` |
 | 에이전트 이름 변경 | `.env` → `AGENT_NAME` (agent/main.py의 `agent_name`과 일치시킬 것) |

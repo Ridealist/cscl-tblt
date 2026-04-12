@@ -42,10 +42,10 @@ export async function POST(req: Request) {
       ? RoomConfiguration.fromJson(body.room_config, { ignoreUnknownFields: true })
       : new RoomConfiguration();
 
-    // Generate participant token
-    const participantName = 'user';
-    const participantIdentity = `voice_assistant_user_${Math.floor(Math.random() * 10_000)}`;
-    const roomName = `voice_assistant_room_${Math.floor(Math.random() * 10_000)}`;
+    // Use provided name/room or fall back to random values
+    const participantName = body?.participant_name?.trim() || 'user';
+    const participantIdentity = `${participantName}_${Math.floor(Math.random() * 10_000)}`;
+    const roomName = body?.room_name?.trim() || `room_${Math.floor(Math.random() * 10_000)}`;
 
     const participantToken = await createParticipantToken(
       { identity: participantIdentity, name: participantName },

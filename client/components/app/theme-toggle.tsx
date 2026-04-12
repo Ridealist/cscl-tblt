@@ -1,7 +1,7 @@
 'use client';
 
 import { useTheme } from 'next-themes';
-import { MonitorIcon, MoonIcon, SunIcon } from '@phosphor-icons/react';
+import { MonitorIcon, MoonIcon, SunIcon } from '@phosphor-icons/react/dist/ssr';
 import { cn } from '@/lib/shadcn/utils';
 
 interface ThemeToggleProps {
