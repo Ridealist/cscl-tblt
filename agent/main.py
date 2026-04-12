@@ -95,10 +95,6 @@ async def _run(ctx: JobContext) -> None:
         # 이름(First Name)만 사용 — "Junbo Koh" → "Junbo"
         participant_names[p.identity] = full_name.split()[0] if full_name else full_name
 
-    # 이미 연결된 참가자 등록
-    for p in ctx.room.remote_participants.values():
-        _register_participant(p)
-
     # 현재 발화자 추적
     current_speaker: dict[str, str | None] = {"identity": None, "name": None}
 
@@ -158,6 +154,10 @@ async def _run(ctx: JobContext) -> None:
             audio_input=room_io.AudioInputOptions(),
         ),
     )
+
+    # ctx.connect()가 완료된 이후이므로 remote_participants가 확정됨
+    for p in ctx.room.remote_participants.values():
+        _register_participant(p)
 
     # ── 이벤트 핸들러 등록 ──────────────────────────────────────────────
 
