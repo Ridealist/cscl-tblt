@@ -30,6 +30,10 @@ export interface AppConfig {
 
   // LiveKit Cloud Sandbox configuration
   sandboxId?: string;
+
+  // 반/그룹 사전 설정
+  numClasses?: number;
+  numGroupsPerClass?: number;
 }
 
 export const APP_CONFIG_DEFAULTS: AppConfig = {
@@ -69,4 +73,8 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
 
   // LiveKit Cloud Sandbox configuration
   sandboxId: undefined,
+
+  // 반/그룹 사전 설정 (서버 전용 환경변수)
+  numClasses: parseInt(process.env.NUM_CLASSES ?? '3'),
+  numGroupsPerClass: parseInt(process.env.NUM_GROUPS_PER_CLASS ?? '4'),
 };
