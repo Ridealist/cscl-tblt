@@ -18,6 +18,7 @@ from livekit.agents import llm
 from livekit.plugins import silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
+from egress_recorder import EgressRecorder
 from logger import ConversationLogger
 from prompt import build_prompt, _clean_names
 
@@ -86,6 +87,7 @@ async def _run(ctx: JobContext) -> None:
     """dispatch 공통 세션 로직."""
     ctx.log_context_fields = {"room": ctx.room.name}
     conv_logger = ConversationLogger(ctx.job.room.sid, ctx.room.name)
+    egress = EgressRecorder(ctx.room.name, conv_logger.session_id)
 
     # 참가자 registry: identity → name
     participant_names: dict[str, str] = {}
@@ -153,6 +155,15 @@ async def _run(ctx: JobContext) -> None:
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(),
         ),
+    )
+
+    # 룸 연결 완료 후 Egress 녹음 시작
+    await egress.start()
+
+    # 룸 종료 시 Egress 자동 중지
+    ctx.room.on(
+        "disconnected",
+        lambda: asyncio.ensure_future(egress.stop()),
     )
 
     # ctx.connect()가 완료된 이후이므로 remote_participants가 확정됨
