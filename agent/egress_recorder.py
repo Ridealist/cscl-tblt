@@ -11,7 +11,7 @@ log = logging.getLogger(__name__)
 class EgressRecorder:
     """LiveKit Egress API를 통한 룸 전체 오디오 녹음.
 
-    모든 참가자(학생 + AI)의 음성을 혼합하여 S3에 MP4 파일로 저장한다.
+    모든 참가자(학생 + AI)의 음성을 혼합하여 S3에 MP3 파일로 저장한다.
 
     사용법:
         egress = EgressRecorder(room_name, session_id)
@@ -25,7 +25,7 @@ class EgressRecorder:
         self.session_id = session_id
         self.egress_id: str | None = None
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self._filepath = f"recordings/{room_name}--{ts}.mp4"
+        self._filepath = f"recordings/{room_name}--{ts}.mp3"
 
     def _make_client(self) -> api.LiveKitAPI:
         return api.LiveKitAPI(
@@ -57,7 +57,7 @@ class EgressRecorder:
                     audio_only=True,
                     file_outputs=[
                         api.EncodedFileOutput(
-                            file_type=api.EncodedFileType.MP4,
+                            file_type=api.EncodedFileType.MP3,
                             filepath=self._filepath,
                             s3=self._s3_upload(),
                         )
