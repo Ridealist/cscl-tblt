@@ -9,16 +9,18 @@ interface Settings {
   activeClass: number;
 }
 
-// ─── 에이전트 배치 섹션 ────────────────────────────────────────────────────────
+// ─── 룸 관리 섹션 ─────────────────────────────────────────────────────────────
 
-interface AgentStatus {
+interface RoomStatus {
   room: string;
-  hasAgent: boolean | null; // null = 로딩 중
+  numParticipants: number | null; // null = 로딩 중
+  hasAgent: boolean | null;       // null = 로딩 중
 }
 
 function AgentDispatchSection({ activeClass, numGroupsPerClass }: { activeClass: number; numGroupsPerClass: number }) {
-  const [statuses, setStatuses] = useState<AgentStatus[]>([]);
+  const [statuses, setStatuses] = useState<RoomStatus[]>([]);
   const [dispatching, setDispatching] = useState<string | null>(null);
+  const [terminating, setTerminating] = useState<string | null>(null);
   const [message, setMessage] = useState<{ room: string; text: string; ok: boolean } | null>(null);
 
   const roomNames = Array.from(
@@ -27,19 +29,29 @@ function AgentDispatchSection({ activeClass, numGroupsPerClass }: { activeClass:
   );
 
   const fetchStatuses = useCallback(async () => {
-    setStatuses(roomNames.map((room) => ({ room, hasAgent: null })));
-    const results = await Promise.all(
-      roomNames.map(async (room) => {
-        try {
-          const res = await fetch(`/api/dispatch?room=${encodeURIComponent(room)}`);
-          const data = await res.json();
-          return { room, hasAgent: data.hasAgent as boolean };
-        } catch {
-          return { room, hasAgent: false };
-        }
-      }),
+    setStatuses(roomNames.map((room) => ({ room, numParticipants: null, hasAgent: null })));
+
+    // 참가자 수와 에이전트 상태를 병렬로 조회
+    const [roomsRes, ...agentResults] = await Promise.all([
+      fetch('/api/rooms').then((r) => r.json()).catch(() => ({ rooms: [] })),
+      ...roomNames.map((room) =>
+        fetch(`/api/dispatch?room=${encodeURIComponent(room)}`)
+          .then((r) => r.json())
+          .catch(() => ({ hasAgent: false })),
+      ),
+    ]);
+
+    const participantMap = new Map<string, number>(
+      (roomsRes.rooms ?? []).map((r: { name: string; numParticipants: number }) => [r.name, r.numParticipants]),
     );
-    setStatuses(results);
+
+    setStatuses(
+      roomNames.map((room, i) => ({
+        room,
+        numParticipants: participantMap.get(room) ?? 0,
+        hasAgent: (agentResults[i] as { hasAgent: boolean }).hasAgent,
+      })),
+    );
   }, [activeClass, numGroupsPerClass]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -69,12 +81,36 @@ function AgentDispatchSection({ activeClass, numGroupsPerClass }: { activeClass:
     }
   }
 
+  async function handleTerminate(room: string) {
+    if (!window.confirm(`[${room}] 방의 모든 참가자가 퇴장됩니다.\n세션을 종료하시겠습니까?`)) return;
+    setTerminating(room);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/rooms/terminate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ room }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage({ room, text: '세션이 종료되었습니다.', ok: true });
+        await fetchStatuses();
+      } else {
+        setMessage({ room, text: data.error ?? '세션 종료 실패', ok: false });
+      }
+    } catch {
+      setMessage({ room, text: '요청 중 오류가 발생했습니다.', ok: false });
+    } finally {
+      setTerminating(null);
+    }
+  }
+
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-foreground text-sm font-semibold">에이전트 배치 현황</h2>
-          <p className="text-muted-foreground text-xs">에이전트가 없는 방에만 수동 배치가 가능합니다.</p>
+          <h2 className="text-foreground text-sm font-semibold">룸 현황 및 관리</h2>
+          <p className="text-muted-foreground text-xs">에이전트 수동 배치 및 세션 종료를 제어합니다.</p>
         </div>
         <button
           onClick={fetchStatuses}
@@ -85,33 +121,56 @@ function AgentDispatchSection({ activeClass, numGroupsPerClass }: { activeClass:
       </div>
 
       <div className="flex flex-col gap-2">
-        {statuses.map(({ room, hasAgent }) => (
-          <div key={room} className="border-border flex items-center justify-between rounded-lg border px-4 py-2.5">
-            <div className="flex items-center gap-2.5">
-              <span className="text-foreground text-sm font-medium">{room}</span>
-              {hasAgent === null ? (
-                <span className="text-muted-foreground text-xs">확인 중...</span>
-              ) : hasAgent ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
-                  <span className="size-1.5 rounded-full bg-green-500" />
-                  에이전트 활성
-                </span>
-              ) : (
-                <span className="text-muted-foreground inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium">
-                  <span className="size-1.5 rounded-full bg-gray-400" />
-                  에이전트 없음
-                </span>
-              )}
+        {statuses.map(({ room, numParticipants, hasAgent }) => {
+          const loading = numParticipants === null || hasAgent === null;
+          const isActive = (numParticipants ?? 0) > 0;
+          return (
+            <div key={room} className="border-border flex items-center justify-between rounded-lg border px-4 py-2.5">
+              {/* 방 이름 + 상태 뱃지 */}
+              <div className="flex items-center gap-2">
+                <span className="text-foreground text-sm font-medium">{room}</span>
+                {loading ? (
+                  <span className="text-muted-foreground text-xs">확인 중...</span>
+                ) : (
+                  <>
+                    {isActive && (
+                      <span className="text-muted-foreground text-xs">{numParticipants}명</span>
+                    )}
+                    {hasAgent ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+                        <span className="size-1.5 rounded-full bg-green-500" />
+                        에이전트 활성
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium">
+                        <span className="size-1.5 rounded-full bg-gray-400" />
+                        에이전트 없음
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* 액션 버튼 */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleDispatch(room)}
+                  disabled={hasAgent !== false || dispatching === room}
+                  className="rounded-md border px-3 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 enabled:border-blue-500 enabled:text-blue-600 enabled:hover:bg-blue-50"
+                >
+                  {dispatching === room ? '배치 중...' : '수동 배치'}
+                </button>
+                <button
+                  onClick={() => handleTerminate(room)}
+                  disabled={!isActive || terminating === room}
+                  className="rounded-md border px-3 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 enabled:border-red-400 enabled:text-red-500 enabled:hover:bg-red-50"
+                >
+                  {terminating === room ? '종료 중...' : '세션 종료'}
+                </button>
+              </div>
             </div>
-            <button
-              onClick={() => handleDispatch(room)}
-              disabled={hasAgent !== false || dispatching === room}
-              className="rounded-md border px-3 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 enabled:border-blue-500 enabled:text-blue-600 enabled:hover:bg-blue-50"
-            >
-              {dispatching === room ? '배치 중...' : '수동 배치'}
-            </button>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {message && (
