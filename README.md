@@ -365,7 +365,7 @@ After=network.target
 [Service]
 User=ubuntu
 WorkingDirectory=/opt/cscl-tblt/agent
-ExecStart=/home/ubuntu/.local/bin/uv run python main.py start --num-workers 3
+ExecStart=/home/ubuntu/.local/bin/uv run python main.py start
 Restart=always
 RestartSec=5
 EnvironmentFile=/opt/cscl-tblt/.env
