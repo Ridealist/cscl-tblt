@@ -235,3 +235,272 @@ logs/
 | Room 이름 변경 | `.env` → `ROOM_NAME` |
 | 에이전트 이름 변경 | `.env` → `AGENT_NAME` (agent/main.py의 `agent_name`과 일치시킬 것) |
 | 로그 저장 위치 변경 | `agent/logger.py` → `LOGS_DIR` |
+
+---
+
+## 프로덕션 배포 (AWS EC2)
+
+### 현재 배포 환경
+
+| 항목 | 값 |
+|------|-----|
+| 서버 | AWS EC2 `m5.large` (2 vCPU, 8GB RAM) |
+| OS | Ubuntu 22.04 LTS |
+| 도메인 | `tblt-agent.net` (AWS Route 53) |
+| 서버 IP | `3.35.234.204` |
+| 프로젝트 경로 | `/opt/cscl-tblt/` |
+| Agent 프로세스 관리 | systemd (`cscl-agent.service`) |
+| Client 프로세스 관리 | PM2 (`cscl-client`) |
+| 리버스 프록시 | nginx + Let's Encrypt SSL |
+| 음성 녹음 저장소 | AWS S3 (`tblt-agent-recordings`, `ap-northeast-2`) |
+
+### 서버 디렉토리 구조
+
+```
+/opt/cscl-tblt/
+├── .env                  # Agent 환경변수 (EnvironmentFile)
+├── config.json           # 반/그룹 설정 (Next.js API가 읽음)
+├── logs/                 # 대화 로그 JSON (자동 생성)
+├── agent/                # Python Agent
+│   └── .venv/            # uv로 생성된 가상환경
+└── client/               # Next.js 클라이언트
+    └── .env.local        # Next.js 환경변수
+```
+
+> `logs/`와 `config.json`은 `client/`의 API 라우트(`../logs`, `../config.json`)가 직접 참조하므로
+> Next.js와 Agent가 반드시 같은 서버에 있어야 합니다. Vercel 등 별도 호스팅 불가.
+
+---
+
+### 최초 서버 세팅 절차
+
+#### 1. 패키지 설치
+
+```bash
+sudo add-apt-repository ppa:deadsnakes/ppa -y
+sudo apt-get update && sudo apt-get upgrade -y
+sudo apt-get install -y python3.11 python3.11-venv python3-pip git nginx
+
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
+
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+sudo npm install -g pnpm pm2
+```
+
+#### 2. 코드 업로드
+
+```bash
+# GitHub 사용 시
+cd /opt
+sudo git clone <repo_url> cscl-tblt
+sudo chown -R ubuntu:ubuntu cscl-tblt
+
+# 로컬에서 직접 전송 시 (로컬 터미널에서 실행)
+scp -i your-key.pem -r /path/to/CSCL_TBLT ubuntu@<서버_IP>:/opt/cscl-tblt
+```
+
+#### 3. 환경변수 설정
+
+**`/opt/cscl-tblt/.env`** (Agent용):
+
+```env
+LIVEKIT_URL=wss://cscl-t8duxbt1.livekit.cloud
+LIVEKIT_API_KEY=<값>
+LIVEKIT_API_SECRET=<값>
+OPENAI_API_KEY=<값>
+
+S3_BUCKET=tblt-agent-recordings
+S3_REGION=ap-northeast-2
+AWS_ACCESS_KEY=<값>
+AWS_SECRET_ACCESS_KEY=<값>
+S3_ENDPOINT=
+```
+
+**`/opt/cscl-tblt/client/.env.local`** (Next.js용):
+
+```env
+LIVEKIT_URL=wss://cscl-t8duxbt1.livekit.cloud
+LIVEKIT_API_KEY=<값>
+LIVEKIT_API_SECRET=<값>
+```
+
+> `S3_ENDPOINT`는 AWS S3 사용 시 반드시 비워두어야 합니다. 값을 넣으면 Egress 업로드 실패.
+> Cloudflare R2 등 S3 호환 스토리지 사용 시에만 `https://...` 형식으로 입력.
+
+#### 4. config.json 생성
+
+```bash
+cat > /opt/cscl-tblt/config.json << 'EOF'
+{
+  "numClasses": 4,
+  "numGroupsPerClass": 4,
+  "classStart": 1,
+  "activeClass": 1
+}
+EOF
+```
+
+반/그룹 수 변경은 `https://tblt-agent.net/admin` 페이지 또는 이 파일 직접 수정.
+
+#### 5. Turn Detector 모델 다운로드 (최초 1회 필수)
+
+```bash
+cd /opt/cscl-tblt/agent
+uv sync
+uv run python main.py download-files
+```
+
+> 이 단계를 건너뛰면 세션 시작 시 `languages.json not found` 에러로 Agent가 즉시 종료됩니다.
+
+#### 6. Agent systemd 서비스 등록
+
+```bash
+sudo tee /etc/systemd/system/cscl-agent.service << 'EOF'
+[Unit]
+Description=CSCL TBLT Agent
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/opt/cscl-tblt/agent
+ExecStart=/home/ubuntu/.local/bin/uv run python main.py start --num-workers 3
+Restart=always
+RestartSec=5
+EnvironmentFile=/opt/cscl-tblt/.env
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable cscl-agent
+sudo systemctl start cscl-agent
+```
+
+상태 확인: `sudo systemctl status cscl-agent`
+로그 확인: `sudo journalctl -u cscl-agent -f`
+
+#### 7. Client 빌드 및 PM2 실행
+
+```bash
+cd /opt/cscl-tblt/client
+pnpm install
+pnpm build
+pm2 start "pnpm start" --name cscl-client --cwd /opt/cscl-tblt/client
+pm2 save
+pm2 startup  # 출력된 명령어를 복사해서 실행
+```
+
+#### 8. nginx + SSL 설정
+
+```bash
+# Let's Encrypt 인증서 발급 (도메인 DNS A 레코드가 서버 IP를 가리키고 있어야 함)
+sudo apt-get install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d tblt-agent.net
+
+# nginx 설정 (certbot 실행 후 수동으로 확인/교체)
+sudo tee /etc/nginx/sites-available/cscl << 'EOF'
+server {
+    listen 80;
+    server_name tblt-agent.net;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name tblt-agent.net;
+
+    ssl_certificate /etc/letsencrypt/live/tblt-agent.net/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/tblt-agent.net/privkey.pem;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+EOF
+
+sudo ln -s /etc/nginx/sites-available/cscl /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default   # 기본 페이지 비활성화
+sudo nginx -t && sudo systemctl restart nginx
+```
+
+> EC2 보안 그룹 인바운드 규칙에 포트 80(HTTP), 443(HTTPS), 22(SSH)가 열려있어야 합니다.
+
+---
+
+### 코드 업데이트 배포 절차
+
+```bash
+cd /opt/cscl-tblt
+
+# 코드 pull (GitHub 사용 시)
+git pull
+
+# Agent 재시작
+sudo systemctl restart cscl-agent
+
+# Client 재빌드 및 재시작
+cd client
+pnpm build
+pm2 restart cscl-client
+```
+
+---
+
+### 서비스 상태 확인
+
+```bash
+# Agent 상태
+sudo systemctl status cscl-agent
+sudo journalctl -u cscl-agent --no-pager | tail -30
+
+# Client 상태
+pm2 list
+pm2 logs cscl-client --lines 30
+
+# nginx 상태
+sudo systemctl status nginx
+sudo nginx -t
+```
+
+---
+
+### 코드 수정 사항 (로컬 → 프로덕션 전환 시 적용된 내용)
+
+| 파일 | 수정 내용 | 이유 |
+|------|-----------|------|
+| `client/app/api/token/route.ts` | `NODE_ENV !== 'development'` 체크 블록 제거 | 프로덕션 모드에서 토큰 발급 차단 해제 |
+| `client/next.config.ts` | `eslint: { ignoreDuringBuilds: true }` 추가 | prettier 포맷 에러로 인한 빌드 실패 해결 |
+| `agent/egress_recorder.py` | `StartRoomCompositeEgressRequest` → `RoomCompositeEgressRequest` | 실제 설치된 livekit API 클래스명과 일치 |
+| `agent/egress_recorder.py` | `S3_ENDPOINT` 값이 `http`로 시작하는 경우만 사용 | 주석 문자열이 엔드포인트로 전달되는 오류 방지 |
+
+---
+
+### 음성 녹음 (Egress)
+
+세션 시작 시 자동으로 LiveKit Egress API가 호출되어 모든 참가자(학생 + AI) 음성이 혼합된 MP4 파일이 S3에 저장됩니다.
+
+- **저장 경로**: `s3://tblt-agent-recordings/recordings/{룸명}--{타임스탬프}.mp4`
+- **트리거**: `session.start()` 직후 자동 시작
+- **종료**: 룸 `disconnected` 이벤트 발생 시 자동 종료
+- **관련 코드**: `agent/egress_recorder.py`
+
+> Egress는 LiveKit Cloud 인프라에서 실행되므로 서버 부하 없음.
+> 단, S3 버킷 및 IAM 권한(`s3:PutObject`) 설정이 되어 있어야 함.
+
+---
+
+### 부하 및 사양 참고
+
+- **동시 30명 = 15개 Agent 세션** (2인 1그룹)
+- **병목**: Silero VAD (10ms 단위 로컬 신경망 추론, 세션당 ~8~12% CPU)
+- **STT/LLM/TTS**: LiveKit Cloud inference에서 처리 — 서버 부하 없음
+- `m5.large` (8GB RAM)으로 15세션 안정 운영 확인
+- t3 계열은 지속 부하 시 CPU 크레딧 소진으로 스로틀링 발생 — 비권장
