@@ -1,12 +1,126 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 
 interface Settings {
   numClasses: number;
   numGroupsPerClass: number;
   classStart: number;
   activeClass: number;
+}
+
+// ─── 에이전트 배치 섹션 ────────────────────────────────────────────────────────
+
+interface AgentStatus {
+  room: string;
+  hasAgent: boolean | null; // null = 로딩 중
+}
+
+function AgentDispatchSection({ activeClass, numGroupsPerClass }: { activeClass: number; numGroupsPerClass: number }) {
+  const [statuses, setStatuses] = useState<AgentStatus[]>([]);
+  const [dispatching, setDispatching] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ room: string; text: string; ok: boolean } | null>(null);
+
+  const roomNames = Array.from(
+    { length: numGroupsPerClass },
+    (_, i) => `${activeClass}반-${i + 1}그룹`,
+  );
+
+  const fetchStatuses = useCallback(async () => {
+    setStatuses(roomNames.map((room) => ({ room, hasAgent: null })));
+    const results = await Promise.all(
+      roomNames.map(async (room) => {
+        try {
+          const res = await fetch(`/api/dispatch?room=${encodeURIComponent(room)}`);
+          const data = await res.json();
+          return { room, hasAgent: data.hasAgent as boolean };
+        } catch {
+          return { room, hasAgent: false };
+        }
+      }),
+    );
+    setStatuses(results);
+  }, [activeClass, numGroupsPerClass]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    fetchStatuses();
+  }, [fetchStatuses]);
+
+  async function handleDispatch(room: string) {
+    setDispatching(room);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ room }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage({ room, text: '에이전트 배치 요청을 전송했습니다.', ok: true });
+        await fetchStatuses();
+      } else {
+        setMessage({ room, text: data.error ?? '배치 실패', ok: false });
+      }
+    } catch {
+      setMessage({ room, text: '요청 중 오류가 발생했습니다.', ok: false });
+    } finally {
+      setDispatching(null);
+    }
+  }
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-foreground text-sm font-semibold">에이전트 배치 현황</h2>
+          <p className="text-muted-foreground text-xs">에이전트가 없는 방에만 수동 배치가 가능합니다.</p>
+        </div>
+        <button
+          onClick={fetchStatuses}
+          className="text-muted-foreground hover:text-foreground text-xs underline underline-offset-2 transition-colors"
+        >
+          새로고침
+        </button>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {statuses.map(({ room, hasAgent }) => (
+          <div key={room} className="border-border flex items-center justify-between rounded-lg border px-4 py-2.5">
+            <div className="flex items-center gap-2.5">
+              <span className="text-foreground text-sm font-medium">{room}</span>
+              {hasAgent === null ? (
+                <span className="text-muted-foreground text-xs">확인 중...</span>
+              ) : hasAgent ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+                  <span className="size-1.5 rounded-full bg-green-500" />
+                  에이전트 활성
+                </span>
+              ) : (
+                <span className="text-muted-foreground inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium">
+                  <span className="size-1.5 rounded-full bg-gray-400" />
+                  에이전트 없음
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => handleDispatch(room)}
+              disabled={hasAgent !== false || dispatching === room}
+              className="rounded-md border px-3 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 enabled:border-blue-500 enabled:text-blue-600 enabled:hover:bg-blue-50"
+            >
+              {dispatching === room ? '배치 중...' : '수동 배치'}
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {message && (
+        <p className={`text-xs ${message.ok ? 'text-green-600' : 'text-destructive'}`}>
+          [{message.room}] {message.text}
+        </p>
+      )}
+    </section>
+  );
 }
 
 export default function AdminPage() {
@@ -186,6 +300,11 @@ export default function AdminPage() {
           <span className="text-muted-foreground text-sm">그룹</span>
         </div>
       </section>
+
+      {/* 에이전트 배치 */}
+      <AgentDispatchSection activeClass={settings.activeClass} numGroupsPerClass={settings.numGroupsPerClass} />
+
+      <hr className="border-border" />
 
       {/* 설정 요약 */}
       <div className="bg-muted rounded-lg p-4 text-sm">
