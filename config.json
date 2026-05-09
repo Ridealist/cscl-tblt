@@ -2,5 +2,6 @@
   "numClasses": 4,
   "numGroupsPerClass": 12,
   "classStart": 9,
-  "activeClass": 12
+  "activeClass": 9,
+  "agentMode": "realtime"
 }

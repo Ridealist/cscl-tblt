@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { type AgentMode, getAgentModeLabel } from '@/lib/agent-mode';
 
 interface LobbyViewProps {
-  onJoin: (participantName: string, roomName: string) => void;
+  onJoin: (participantName: string, roomName: string, agentMode: AgentMode) => void;
 }
 
 export function LobbyView({ onJoin, ref }: React.ComponentProps<'div'> & LobbyViewProps) {
@@ -12,6 +13,7 @@ export function LobbyView({ onJoin, ref }: React.ComponentProps<'div'> & LobbyVi
   const [lastName, setLastName] = useState('');
   const [selectedGroup, setSelectedGroup] = useState<number | null>(null);
   const [activeClass, setActiveClass] = useState<number | null>(null);
+  const [agentMode, setAgentMode] = useState<AgentMode>('pipeline');
   const [rooms, setRooms] = useState<{ name: string; numParticipants: number }[]>([]);
   const [error, setError] = useState('');
   const firstNameRef = useRef<HTMLInputElement>(null);
@@ -27,6 +29,7 @@ export function LobbyView({ onJoin, ref }: React.ComponentProps<'div'> & LobbyVi
       const data = await res.json();
       setRooms(data.rooms ?? []);
       setActiveClass(data.activeClass ?? null);
+      setAgentMode(data.agentMode === 'realtime' ? 'realtime' : 'pipeline');
       setSelectedGroup(null);
     } catch {
       // 무시
@@ -34,9 +37,22 @@ export function LobbyView({ onJoin, ref }: React.ComponentProps<'div'> & LobbyVi
   }
 
   const selectedRoomName =
-    activeClass !== null && selectedGroup !== null
+    agentMode === 'pipeline' && activeClass !== null && selectedGroup !== null
       ? `${activeClass}반-${selectedGroup}그룹`
       : null;
+
+  function makeRealtimeRoomName(participantName: string) {
+    const slug = participantName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40);
+    const suffix =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID().slice(0, 8)
+        : String(Date.now()).slice(-8);
+    return `realtime-${activeClass ?? 'class'}-${slug || 'student'}-${suffix}`;
+  }
 
   function handleJoin() {
     if (!firstName.trim()) {
@@ -47,17 +63,28 @@ export function LobbyView({ onJoin, ref }: React.ComponentProps<'div'> & LobbyVi
       setError('성(Last Name)을 입력해주세요.');
       return;
     }
-    if (!selectedRoomName) {
+    if (agentMode === 'pipeline' && !selectedRoomName) {
       setError('그룹을 선택해주세요.');
       return;
     }
-    onJoin(`${firstName.trim()} ${lastName.trim()}`, selectedRoomName);
+    const participantName = `${firstName.trim()} ${lastName.trim()}`;
+    const roomName =
+      agentMode === 'realtime' ? makeRealtimeRoomName(participantName) : selectedRoomName;
+    if (!roomName) return;
+    onJoin(participantName, roomName, agentMode);
   }
 
   const previewName = [firstName.trim(), lastName.trim()].filter(Boolean).join(' ');
 
   return (
     <div ref={ref} className="mx-auto flex w-full max-w-sm flex-col gap-5">
+      <div className="bg-muted flex items-center justify-between rounded-lg px-3 py-2">
+        <span className="text-muted-foreground text-xs">수업 운영 모드</span>
+        <span className="text-foreground text-xs font-semibold">
+          {getAgentModeLabel(agentMode)}
+        </span>
+      </div>
+
       {/* 이름 입력 */}
       <div className="flex flex-col gap-1.5">
         <label className="text-foreground text-sm font-semibold">이름</label>
@@ -68,7 +95,10 @@ export function LobbyView({ onJoin, ref }: React.ComponentProps<'div'> & LobbyVi
               ref={firstNameRef}
               type="text"
               value={firstName}
-              onChange={(e) => { setFirstName(e.target.value); setError(''); }}
+              onChange={(e) => {
+                setFirstName(e.target.value);
+                setError('');
+              }}
               onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
               placeholder="예: Jungkook"
               maxLength={20}
@@ -80,7 +110,10 @@ export function LobbyView({ onJoin, ref }: React.ComponentProps<'div'> & LobbyVi
             <input
               type="text"
               value={lastName}
-              onChange={(e) => { setLastName(e.target.value); setError(''); }}
+              onChange={(e) => {
+                setLastName(e.target.value);
+                setError('');
+              }}
               onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
               placeholder="예: Jeon"
               maxLength={20}
@@ -96,50 +129,63 @@ export function LobbyView({ onJoin, ref }: React.ComponentProps<'div'> & LobbyVi
       </div>
 
       {/* 그룹 선택 */}
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center justify-between">
-          <label className="text-foreground text-sm font-semibold">
-            그룹 선택
-            {activeClass !== null && (
-              <span className="text-muted-foreground ml-2 font-normal">({activeClass}반)</span>
-            )}
-          </label>
-          <button
-            onClick={fetchRooms}
-            className="text-muted-foreground hover:text-foreground text-xs underline underline-offset-2 transition-colors"
-          >
-            새로고침
-          </button>
-        </div>
+      {agentMode === 'pipeline' && (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-foreground text-sm font-semibold">
+              그룹 선택
+              {activeClass !== null && (
+                <span className="text-muted-foreground ml-2 font-normal">({activeClass}반)</span>
+              )}
+            </label>
+            <button
+              onClick={fetchRooms}
+              className="text-muted-foreground hover:text-foreground text-xs underline underline-offset-2 transition-colors"
+            >
+              새로고침
+            </button>
+          </div>
 
-        <div className="flex flex-wrap gap-2">
-          {rooms.map((room, i) => {
-            const groupNum = i + 1;
-            return (
-              <button
-                key={room.name}
-                onClick={() => { setSelectedGroup(groupNum); setError(''); }}
-                className={`flex flex-col items-center rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
-                  selectedGroup === groupNum
-                    ? 'bg-primary text-primary-foreground border-primary'
-                    : 'border-border hover:bg-muted text-foreground'
-                }`}
-              >
-                <span>{groupNum}그룹</span>
-                {room.numParticipants > 0 && (
-                  <span className={`text-xs ${selectedGroup === groupNum ? 'opacity-80' : 'text-muted-foreground'}`}>
-                    {room.numParticipants}명
-                  </span>
-                )}
-              </button>
-            );
-          })}
+          <div className="flex flex-wrap gap-2">
+            {rooms.map((room, i) => {
+              const groupNum = i + 1;
+              return (
+                <button
+                  key={room.name}
+                  onClick={() => {
+                    setSelectedGroup(groupNum);
+                    setError('');
+                  }}
+                  className={`flex flex-col items-center rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+                    selectedGroup === groupNum
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'border-border hover:bg-muted text-foreground'
+                  }`}
+                >
+                  <span>{groupNum}그룹</span>
+                  {room.numParticipants > 0 && (
+                    <span
+                      className={`text-xs ${selectedGroup === groupNum ? 'opacity-80' : 'text-muted-foreground'}`}
+                    >
+                      {room.numParticipants}명
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
-      {selectedRoomName && (
+      {agentMode === 'pipeline' && selectedRoomName && (
         <p className="text-muted-foreground text-xs">
           입장할 방: <span className="text-foreground font-semibold">{selectedRoomName}</span>
+        </p>
+      )}
+
+      {agentMode === 'realtime' && (
+        <p className="text-muted-foreground text-xs">
+          입장하면 학생별 개별 대화방이 자동으로 생성됩니다.
         </p>
       )}
 

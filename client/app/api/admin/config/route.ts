@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { type AgentMode, normalizeAgentMode } from '@/lib/agent-mode';
 
 const CONFIG_PATH = join(process.cwd(), '..', 'config.json');
 
@@ -9,13 +10,27 @@ interface AppSettings {
   numGroupsPerClass: number;
   classStart: number;
   activeClass: number;
+  agentMode: AgentMode;
 }
 
 function readConfig(): AppSettings {
   try {
-    return JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
+    const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
+    return {
+      numClasses: typeof raw.numClasses === 'number' ? raw.numClasses : 4,
+      numGroupsPerClass: typeof raw.numGroupsPerClass === 'number' ? raw.numGroupsPerClass : 4,
+      classStart: typeof raw.classStart === 'number' ? raw.classStart : 1,
+      activeClass: typeof raw.activeClass === 'number' ? raw.activeClass : 1,
+      agentMode: normalizeAgentMode(raw.agentMode),
+    };
   } catch {
-    return { numClasses: 4, numGroupsPerClass: 4, classStart: 1, activeClass: 1 };
+    return {
+      numClasses: 4,
+      numGroupsPerClass: 4,
+      classStart: 1,
+      activeClass: 1,
+      agentMode: 'pipeline',
+    };
   }
 }
 
@@ -35,13 +50,16 @@ export async function POST(req: Request) {
     const updated: AppSettings = {
       numClasses,
       numGroupsPerClass:
-        typeof body.numGroupsPerClass === 'number' ? body.numGroupsPerClass : current.numGroupsPerClass,
+        typeof body.numGroupsPerClass === 'number'
+          ? body.numGroupsPerClass
+          : current.numGroupsPerClass,
       classStart,
       // activeClass가 유효 범위를 벗어나면 classStart로 초기화
       activeClass:
         typeof body.activeClass === 'number'
           ? Math.min(Math.max(body.activeClass, classStart), classEnd)
           : Math.min(Math.max(current.activeClass, classStart), classEnd),
+      agentMode: normalizeAgentMode(body.agentMode ?? current.agentMode),
     };
 
     writeFileSync(CONFIG_PATH, JSON.stringify(updated, null, 2));

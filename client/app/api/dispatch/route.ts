@@ -5,7 +5,7 @@ import { ParticipantInfo_Kind } from '@livekit/protocol';
 const API_KEY = process.env.LIVEKIT_API_KEY!;
 const API_SECRET = process.env.LIVEKIT_API_SECRET!;
 const LIVEKIT_URL = process.env.LIVEKIT_URL!;
-const AGENT_NAME = 'my-agent';
+const AGENT_NAME = 'pipeline-agent';
 
 export const revalidate = 0;
 
@@ -42,10 +42,7 @@ export async function POST(req: NextRequest) {
   // 에이전트 중복 방지: 배치 전 재확인
   const hasAgent = await checkAgentPresence(room);
   if (hasAgent) {
-    return NextResponse.json(
-      { error: '이미 에이전트가 존재하는 방입니다.' },
-      { status: 409 },
-    );
+    return NextResponse.json({ error: '이미 에이전트가 존재하는 방입니다.' }, { status: 409 });
   }
 
   try {

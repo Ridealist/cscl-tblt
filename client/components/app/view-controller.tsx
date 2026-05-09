@@ -8,6 +8,7 @@ import type { AppConfig } from '@/app-config';
 import { AgentSessionView_01 } from '@/components/agents-ui/blocks/agent-session-view-01';
 import { LobbyView } from '@/components/app/lobby-view';
 import { WelcomeView } from '@/components/app/welcome-view';
+import type { AgentMode } from '@/lib/agent-mode';
 
 const MotionWelcomeView = motion.create(WelcomeView);
 const MotionLobbyView = motion.create(LobbyView);
@@ -29,7 +30,7 @@ const VIEW_MOTION_PROPS = {
 
 interface ViewControllerProps {
   appConfig: AppConfig;
-  onJoin: (participantName: string, roomName: string) => void;
+  onJoin: (participantName: string, roomName: string, agentMode: AgentMode) => void;
 }
 
 export function ViewController({ appConfig, onJoin }: ViewControllerProps) {

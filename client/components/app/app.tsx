@@ -11,6 +11,7 @@ import { ViewController } from '@/components/app/view-controller';
 import { Toaster } from '@/components/ui/sonner';
 import { useAgentErrors } from '@/hooks/useAgentErrors';
 import { useDebugMode } from '@/hooks/useDebug';
+import { type AgentMode, getAgentNameForMode } from '@/lib/agent-mode';
 import { getSandboxTokenSource } from '@/lib/utils';
 
 const IN_DEVELOPMENT = process.env.NODE_ENV !== 'production';
@@ -27,7 +28,11 @@ interface AppProps {
 }
 
 export function App({ appConfig }: AppProps) {
-  const sessionInfoRef = useRef<{ participantName: string; roomName: string } | null>(null);
+  const sessionInfoRef = useRef<{
+    participantName: string;
+    roomName: string;
+    agentMode: AgentMode;
+  } | null>(null);
   const [, forceRender] = useState(0);
 
   const tokenSource = useMemo(() => {
@@ -36,9 +41,8 @@ export function App({ appConfig }: AppProps) {
     }
     return TokenSource.custom(async () => {
       const info = sessionInfoRef.current;
-      const roomConfig = appConfig.agentName
-        ? { agents: [{ agent_name: appConfig.agentName }] }
-        : undefined;
+      const agentName = info ? getAgentNameForMode(info.agentMode) : appConfig.agentName;
+      const roomConfig = agentName ? { agents: [{ agent_name: agentName }] } : undefined;
 
       const res = await fetch('/api/token', {
         method: 'POST',
@@ -59,8 +63,8 @@ export function App({ appConfig }: AppProps) {
   );
 
   const handleJoin = useCallback(
-    (participantName: string, roomName: string) => {
-      sessionInfoRef.current = { participantName, roomName };
+    (participantName: string, roomName: string, agentMode: AgentMode) => {
+      sessionInfoRef.current = { participantName, roomName, agentMode };
       forceRender((n) => n + 1);
       session.start({ tracks: { microphone: { enabled: false } } });
     },

@@ -50,7 +50,7 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
   accent: '#002cf2',
   logoDark: '/lk-logo-dark.svg',
   accentDark: '#1fd5f9',
-  startButtonText: 'Start call',
+  startButtonText: 'Start chat',
 
   // optional: audio visualization configuration
   // audioVisualizerType: 'bar',
@@ -69,7 +69,7 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
   // audioVisualizerType: 'aura',
 
   // agent dispatch configuration
-  agentName: process.env.AGENT_NAME ?? undefined,
+  agentName: undefined,
 
   // LiveKit Cloud Sandbox configuration
   sandboxId: undefined,

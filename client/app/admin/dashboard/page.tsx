@@ -48,12 +48,20 @@ interface LogData {
 // ─── 유틸 ────────────────────────────────────────────────────────────────────
 
 function getInitials(name: string) {
-  return name.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2);
+  return name
+    .split(' ')
+    .map((w) => w[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
 }
 
 function formatDate(ms: number) {
   return new Date(ms).toLocaleString('ko-KR', {
-    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   });
 }
 
@@ -62,7 +70,10 @@ function useParticipantColors() {
   const indexRef = useRef(0);
   return (name: string) => {
     if (!mapRef.current.has(name)) {
-      mapRef.current.set(name, PARTICIPANT_PALETTES[indexRef.current % PARTICIPANT_PALETTES.length]);
+      mapRef.current.set(
+        name,
+        PARTICIPANT_PALETTES[indexRef.current % PARTICIPANT_PALETTES.length]
+      );
       indexRef.current += 1;
     }
     return mapRef.current.get(name)!;
@@ -109,20 +120,17 @@ function SessionList({ onSelect }: { onSelect: (s: SessionMeta) => void }) {
   }
 
   // 반 번호 기준 정렬 (숫자 추출)
-  const sortedClasses = Object.keys(byClass).sort(
-    (a, b) => parseInt(a) - parseInt(b)
-  );
+  const sortedClasses = Object.keys(byClass).sort((a, b) => parseInt(a) - parseInt(b));
 
   if (loading) return <p className="text-muted-foreground text-sm">불러오는 중...</p>;
-  if (sessions.length === 0) return <p className="text-muted-foreground text-sm">저장된 세션이 없습니다.</p>;
+  if (sessions.length === 0)
+    return <p className="text-muted-foreground text-sm">저장된 세션이 없습니다.</p>;
 
   return (
     <div className="flex flex-1 flex-col gap-8 overflow-y-auto">
       {sortedClasses.map((cls) => {
         const groups = byClass[cls];
-        const sortedGroups = Object.keys(groups).sort(
-          (a, b) => parseInt(a) - parseInt(b)
-        );
+        const sortedGroups = Object.keys(groups).sort((a, b) => parseInt(a) - parseInt(b));
         const totalSessions = sortedGroups.reduce((n, g) => n + groups[g].length, 0);
 
         return (
@@ -138,7 +146,9 @@ function SessionList({ onSelect }: { onSelect: (s: SessionMeta) => void }) {
               {sortedGroups.map((grp) => (
                 <div key={grp}>
                   <div className="mb-1.5 flex items-center gap-1.5">
-                    <span className="bg-muted rounded px-2 py-0.5 font-mono text-xs font-semibold">{grp}</span>
+                    <span className="bg-muted rounded px-2 py-0.5 font-mono text-xs font-semibold">
+                      {grp}
+                    </span>
                     <span className="text-muted-foreground text-xs">{groups[grp].length}개</span>
                   </div>
                   <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
@@ -148,9 +158,15 @@ function SessionList({ onSelect }: { onSelect: (s: SessionMeta) => void }) {
                           onClick={() => onSelect(s)}
                           className="border-border hover:bg-muted flex h-full w-full flex-col rounded-lg border bg-white p-3 text-left transition-colors dark:bg-neutral-900"
                         >
-                          <span className="text-muted-foreground mb-2 block truncate font-mono text-xs">{s.session_id}</span>
-                          <span className="text-foreground mt-auto text-sm font-semibold">대화 {s.entry_count}개</span>
-                          <span className="text-muted-foreground mt-1 block text-xs">{formatDate(s.last_modified)}</span>
+                          <span className="text-muted-foreground mb-2 block truncate font-mono text-xs">
+                            {s.session_id}
+                          </span>
+                          <span className="text-foreground mt-auto text-sm font-semibold">
+                            대화 {s.entry_count}개
+                          </span>
+                          <span className="text-muted-foreground mt-1 block text-xs">
+                            {formatDate(s.last_modified)}
+                          </span>
                         </button>
                       </li>
                     ))}
@@ -176,21 +192,34 @@ function ConversationView({ session, onBack }: { session: SessionMeta; onBack: (
     const es = new EventSource(`/api/logs/stream?filename=${encodeURIComponent(session.filename)}`);
     es.onopen = () => setConnected(true);
     es.onerror = () => setConnected(false);
-    es.onmessage = (e) => { try { setLog(JSON.parse(e.data)); } catch { /* ignore */ } };
+    es.onmessage = (e) => {
+      try {
+        setLog(JSON.parse(e.data));
+      } catch {
+        /* ignore */
+      }
+    };
     return () => es.close();
   }, [session.filename]);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <div className="mb-3 flex items-center gap-3">
-        <button onClick={onBack} className="text-muted-foreground hover:text-foreground text-sm transition-colors">
+        <button
+          onClick={onBack}
+          className="text-muted-foreground hover:text-foreground text-sm transition-colors"
+        >
           ← 목록
         </button>
         <div className="bg-border h-4 w-px" />
-        <span className="bg-muted rounded px-2 py-0.5 font-mono text-xs font-semibold">{session.room}</span>
+        <span className="bg-muted rounded px-2 py-0.5 font-mono text-xs font-semibold">
+          {session.room}
+        </span>
         <span className="text-muted-foreground font-mono text-xs">{session.session_id}</span>
         <span className="ml-auto flex items-center gap-1.5 text-xs">
-          <span className={`inline-block size-2 rounded-full ${connected ? 'bg-green-500' : 'bg-gray-400'}`} />
+          <span
+            className={`inline-block size-2 rounded-full ${connected ? 'bg-green-500' : 'bg-gray-400'}`}
+          />
           {connected ? '연결됨' : '연결 끊김'}
         </span>
       </div>
@@ -198,7 +227,10 @@ function ConversationView({ session, onBack }: { session: SessionMeta; onBack: (
         <Conversation className="flex-1">
           <ConversationContent className="gap-3">
             {!log || log.entries.length === 0 ? (
-              <ConversationEmptyState title="대화 없음" description="이 세션의 대화 내역이 없습니다." />
+              <ConversationEmptyState
+                title="대화 없음"
+                description="이 세션의 대화 내역이 없습니다."
+              />
             ) : (
               log.entries.map((entry, i) => {
                 const isAgent = entry.role === 'agent';
@@ -207,7 +239,10 @@ function ConversationView({ session, onBack }: { session: SessionMeta; onBack: (
                   : (entry.participant_name ?? entry.participant_identity ?? '참가자');
                 const palette = isAgent ? AGENT_PALETTE : getColor(speakerName);
                 return (
-                  <div key={i} className={`flex items-start gap-3 px-2 py-1 ${isAgent ? 'flex-row' : 'flex-row-reverse'}`}>
+                  <div
+                    key={i}
+                    className={`flex items-start gap-3 px-2 py-1 ${isAgent ? 'flex-row' : 'flex-row-reverse'}`}
+                  >
                     <div
                       className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-bold"
                       style={{ backgroundColor: palette.border, color: '#fff' }}
@@ -216,11 +251,21 @@ function ConversationView({ session, onBack }: { session: SessionMeta; onBack: (
                     </div>
                     <div
                       className={`max-w-[75%] rounded-md px-3 py-2 text-sm ${isAgent ? 'border-l-4' : 'border-r-4'}`}
-                      style={{ borderColor: palette.border, backgroundColor: palette.bg, color: palette.text }}
+                      style={{
+                        borderColor: palette.border,
+                        backgroundColor: palette.bg,
+                        color: palette.text,
+                      }}
                     >
-                      <span className={`mb-1 block text-xs font-semibold ${isAgent ? 'text-left' : 'text-right'}`}>{speakerName}</span>
+                      <span
+                        className={`mb-1 block text-xs font-semibold ${isAgent ? 'text-left' : 'text-right'}`}
+                      >
+                        {speakerName}
+                      </span>
                       <span>{entry.text}</span>
-                      <span className={`mt-1 block text-xs opacity-60 ${isAgent ? 'text-left' : 'text-right'}`}>
+                      <span
+                        className={`mt-1 block text-xs opacity-60 ${isAgent ? 'text-left' : 'text-right'}`}
+                      >
                         {new Date(entry.timestamp).toLocaleTimeString('ko-KR')}
                       </span>
                     </div>
@@ -242,7 +287,7 @@ export default function DashboardPage() {
   const [selected, setSelected] = useState<SessionMeta | null>(null);
 
   return (
-    <div className="flex h-screen flex-col px-6 pb-6 pt-20">
+    <div className="flex h-screen flex-col px-6 pt-20 pb-6">
       <div className="mb-4 grid grid-cols-3 items-center">
         <a
           href="/admin"
@@ -250,7 +295,9 @@ export default function DashboardPage() {
         >
           ← 관리자 설정
         </a>
-        <h1 className="text-center text-lg font-semibold">{selected ? '대화 기록' : '세션 목록'}</h1>
+        <h1 className="text-center text-lg font-semibold">
+          {selected ? '대화 기록' : '세션 목록'}
+        </h1>
       </div>
       {selected ? (
         <ConversationView session={selected} onBack={() => setSelected(null)} />
