@@ -5,7 +5,7 @@ LiveKit 기반 AI 영어 대화 실습 시스템. TBLT(Task-Based Language Teach
 관리자는 `/admin`에서 수업 운영 모드를 선택할 수 있다.
 
 - **그룹 대화 모드** (`pipeline`): 학생 n명 + 에이전트 1명의 STT → LLM → TTS 파이프라인. 에이전트 이름: `pipeline-agent`
-- **개별 대화 모드** (`realtime`): 학생 1명 + 에이전트 1명의 OpenAI Realtime speech-to-speech 파이프라인. 에이전트 이름: `realtime-agent`
+- **개별 대화 모드** (`realtime`): 학생 1명 + 에이전트 1명의 OpenAI Realtime speech-to-speech 파이프라인. 내부 에이전트 이름: `realtime-dominant-agent` 또는 `realtime-passive-agent`
 
 ## 프로젝트 구조
 
@@ -61,11 +61,12 @@ CSCL_TBLT/
     └─[WebRTC 연결]────────────────► LiveKit Cloud
                                       │
                                       ├─ pipeline-agent: STT → LLM → TTS
-                                      └─ realtime-agent: OpenAI Realtime
+                                      ├─ realtime-dominant-agent: OpenAI Realtime
+                                      └─ realtime-passive-agent: OpenAI Realtime
 ```
 
 - **Next.js 클라이언트** (`client/`): 학생 로비, 관리자 설정, 관리자 대시보드, 토큰 발급 API를 포함한다.
-- **AI 에이전트** (`agent/`): 같은 코드에서 `pipeline-agent` 또는 `realtime-agent` worker를 실행한다. LiveKit Agents SDK 제한으로 한 프로세스에는 하나의 `rtc_session`만 등록할 수 있으므로 두 모드를 동시에 운영하려면 worker 프로세스를 2개 실행한다.
+- **AI 에이전트** (`agent/`): 같은 코드에서 `pipeline-agent`, `realtime-dominant-agent`, `realtime-passive-agent` worker를 실행한다. LiveKit Agents SDK 제한으로 한 프로세스에는 하나의 `rtc_session`만 등록할 수 있으므로 여러 조건을 동시에 운영하려면 worker 프로세스를 조건별로 실행한다.
 - **legacy 토큰 서버** (`server/`): `client/static` HTML 클라이언트용이다. 현재 Next.js 앱 실행에는 필요하지 않다.
 
 ### 수업 운영 모드
@@ -73,7 +74,7 @@ CSCL_TBLT/
 | 모드 | UX 표시명 | Room 정책 | Agent | 음성 처리 |
 |---|---|---|---|---|
 | `pipeline` | 그룹 대화 모드 | `12반-1그룹` 같은 그룹 room | `pipeline-agent` | STT `deepgram/nova-3` → LLM `openai/gpt-4.1-mini` → TTS `cartesia/sonic-3` |
-| `realtime` | 개별 대화 모드 | `realtime-{반}-{학생명}-{suffix}` 자동 생성 | `realtime-agent` | OpenAI Realtime speech-to-speech |
+| `realtime` | 개별 대화 모드 | `realtime-{반}-{학생명}-{suffix}` 자동 생성 | `realtime-dominant-agent` 또는 `realtime-passive-agent` | OpenAI Realtime speech-to-speech |
 
 ## 사전 준비
 
@@ -101,6 +102,7 @@ LIVEKIT_API_SECRET=your_api_secret
 ROOM_NAME=english-practice
 AGENT_NAME=pipeline-agent
 AGENT_WORKER_MODE=pipeline
+AGENT_STANCE=dominant
 
 # Realtime 모드에는 OPENAI_API_KEY가 필요
 # Pipeline 모드는 LiveKit Inference를 사용하면 OPENAI_API_KEY / DEEPGRAM_API_KEY 없이도 동작
@@ -108,7 +110,7 @@ OPENAI_API_KEY=
 DEEPGRAM_API_KEY=
 ```
 
-> Next.js 앱의 운영 모드는 `.env`가 아니라 `config.json`의 `agentMode`로 결정되며, `/admin`에서 변경한다.
+> Next.js 앱의 운영 모드는 `.env`가 아니라 `config.json`의 `agentMode`로 결정되며, `/admin`에서 변경한다. Realtime 상호작용 방식은 관리자 전용 `agentStance` 설정으로만 노출된다.
 
 ### 3. 에이전트 모델 파일 다운로드 (최초 1회)
 
@@ -149,12 +151,20 @@ pnpm dev          # http://localhost:3000
 개별 대화 모드도 함께 테스트하려면 agent worker를 하나 더 띄운다.
 
 ```bash
-# 터미널 3 — realtime-agent
+# 터미널 3 — realtime dominant agent
 cd agent
-AGENT_WORKER_MODE=realtime uv run python main.py dev
+AGENT_WORKER_MODE=realtime AGENT_STANCE=dominant uv run python main.py dev
 ```
 
-`/admin`에서 개별 대화 모드로 바꾸면 학생은 `realtime-agent`가 배치된 개별 room으로 입장한다.
+passive 조건도 함께 테스트하려면 별도 터미널에서 다음 worker를 띄운다.
+
+```bash
+# 터미널 4 — realtime passive agent
+cd agent
+AGENT_WORKER_MODE=realtime AGENT_STANCE=passive uv run python main.py dev
+```
+
+`/admin`에서 개별 대화 모드와 상호작용 방식을 선택하면 학생은 조건명을 보지 않고 개별 room으로 입장한다.
 
 ### legacy static 클라이언트 실행 (선택)
 
@@ -324,11 +334,12 @@ logs/
 | AI 시스템 프롬프트 수정 | `agent/prompt_pipeline.py`, `agent/prompt_realtime.py` |
 | 그룹 대화 모드 모델 변경 | `agent/main.py` (STT `deepgram/nova-3`, LLM `openai/gpt-4.1-mini`, TTS `cartesia/sonic-3`) |
 | 개별 대화 모드 모델 변경 | `agent/main.py` (`openai.realtime.RealtimeModel`) |
-| 실행할 worker 모드 | `AGENT_WORKER_MODE=pipeline` 또는 `AGENT_WORKER_MODE=realtime` |
+| 실행할 worker 모드 | `AGENT_WORKER_MODE=pipeline` 또는 `AGENT_WORKER_MODE=realtime` + `AGENT_STANCE=dominant/passive` |
 | 수업 운영 모드 변경 | `/admin` 또는 `config.json`의 `agentMode` |
+| Realtime 상호작용 방식 변경 | `/admin` 또는 `config.json`의 `agentStance` |
 | 토큰 서버 포트 변경 | `server/main.py` + `client/static/app.js` 상단 `SERVER` 변수 |
 | legacy static Room 이름 변경 | `.env` → `ROOM_NAME` |
-| 에이전트 이름 변경 | `agent/main.py`, `client/lib/agent-mode.ts` (`pipeline-agent`, `realtime-agent`) |
+| 에이전트 이름 변경 | `agent/main.py`, `client/lib/agent-stance.ts` (`pipeline-agent`, `realtime-dominant-agent`, `realtime-passive-agent`) |
 | 로그 저장 위치 변경 | `agent/logger.py` → `LOGS_DIR` |
 
 ---
@@ -622,7 +633,8 @@ sudo nginx -t
 | 항목 | 내용 |
 |------|------|
 | 운영 모드 저장 | `config.json.agentMode`에 `pipeline` 또는 `realtime` 저장 |
-| Agent entrypoint | `agent/main.py`에 `pipeline-agent`, `realtime-agent` 등록 |
+| Realtime 상호작용 방식 저장 | `config.json.agentStance`에 `dominant` 또는 `passive` 저장 |
+| Agent entrypoint | `agent/main.py`에 `pipeline-agent`, `realtime-dominant-agent`, `realtime-passive-agent` 등록 |
 | 프롬프트 분리 | `agent/prompt_pipeline.py`, `agent/prompt_realtime.py` |
 | Realtime 의존성 | `livekit-agents[openai,silero,turn-detector]~=1.5` |
 | Egress 업로드 | `S3_ENDPOINT` 값이 `http`로 시작하는 경우만 endpoint로 사용 |
