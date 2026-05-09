@@ -6,14 +6,20 @@ import { type AgentMode, getAgentModeLabel } from '@/lib/agent-mode';
 
 interface LobbyViewProps {
   onJoin: (participantName: string, roomName: string, agentMode: AgentMode) => void;
+  sessionNotice?: string | null;
 }
 
-export function LobbyView({ onJoin, ref }: React.ComponentProps<'div'> & LobbyViewProps) {
+export function LobbyView({
+  onJoin,
+  sessionNotice,
+  ref,
+}: React.ComponentProps<'div'> & LobbyViewProps) {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [selectedGroup, setSelectedGroup] = useState<number | null>(null);
   const [activeClass, setActiveClass] = useState<number | null>(null);
   const [agentMode, setAgentMode] = useState<AgentMode>('pipeline');
+  const [realtimeResetting, setRealtimeResetting] = useState(false);
   const [rooms, setRooms] = useState<{ name: string; numParticipants: number }[]>([]);
   const [error, setError] = useState('');
   const firstNameRef = useRef<HTMLInputElement>(null);
@@ -21,16 +27,32 @@ export function LobbyView({ onJoin, ref }: React.ComponentProps<'div'> & LobbyVi
   useEffect(() => {
     firstNameRef.current?.focus();
     fetchRooms();
+    const interval = window.setInterval(fetchRooms, 5_000);
+    const refreshOnVisible = () => {
+      if (document.visibilityState === 'visible') fetchRooms();
+    };
+    document.addEventListener('visibilitychange', refreshOnVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', refreshOnVisible);
+    };
   }, []);
 
   async function fetchRooms() {
     try {
-      const res = await fetch('/api/rooms');
+      const res = await fetch('/api/rooms', { cache: 'no-store' });
       const data = await res.json();
-      setRooms(data.rooms ?? []);
+      const nextRooms = data.rooms ?? [];
+      const nextAgentMode = data.agentMode === 'realtime' ? 'realtime' : 'pipeline';
+      setRooms(nextRooms);
       setActiveClass(data.activeClass ?? null);
-      setAgentMode(data.agentMode === 'realtime' ? 'realtime' : 'pipeline');
-      setSelectedGroup(null);
+      setAgentMode(nextAgentMode);
+      setRealtimeResetting(data.realtimeResetting === true);
+      setSelectedGroup((current) =>
+        nextAgentMode === 'pipeline' && current !== null && current <= nextRooms.length
+          ? current
+          : null
+      );
     } catch {
       // 무시
     }
@@ -67,6 +89,10 @@ export function LobbyView({ onJoin, ref }: React.ComponentProps<'div'> & LobbyVi
       setError('그룹을 선택해주세요.');
       return;
     }
+    if (agentMode === 'realtime' && realtimeResetting) {
+      setError('개별 세션 초기화 중입니다. 잠시 후 다시 입장해주세요.');
+      return;
+    }
     const participantName = `${firstName.trim()} ${lastName.trim()}`;
     const roomName =
       agentMode === 'realtime' ? makeRealtimeRoomName(participantName) : selectedRoomName;
@@ -75,6 +101,7 @@ export function LobbyView({ onJoin, ref }: React.ComponentProps<'div'> & LobbyVi
   }
 
   const previewName = [firstName.trim(), lastName.trim()].filter(Boolean).join(' ');
+  const joinDisabled = agentMode === 'realtime' && realtimeResetting;
 
   return (
     <div ref={ref} className="mx-auto flex w-full max-w-sm flex-col gap-5">
@@ -84,6 +111,12 @@ export function LobbyView({ onJoin, ref }: React.ComponentProps<'div'> & LobbyVi
           {getAgentModeLabel(agentMode)}
         </span>
       </div>
+
+      {sessionNotice && (
+        <p className="border-border bg-muted/60 text-muted-foreground rounded-md border px-3 py-2 text-xs">
+          {sessionNotice}
+        </p>
+      )}
 
       {/* 이름 입력 */}
       <div className="flex flex-col gap-1.5">
@@ -183,7 +216,21 @@ export function LobbyView({ onJoin, ref }: React.ComponentProps<'div'> & LobbyVi
         </p>
       )}
 
-      {agentMode === 'realtime' && (
+      {agentMode === 'realtime' && realtimeResetting && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="border-border bg-muted/60 text-muted-foreground flex items-center gap-2 rounded-md border px-3 py-2 text-xs"
+        >
+          <span
+            aria-hidden="true"
+            className="border-muted-foreground/30 border-t-foreground size-4 shrink-0 animate-spin rounded-full border-2"
+          />
+          <span>선생님이 개별 세션을 초기화 중입니다. 완료되면 자동으로 입장할 수 있습니다.</span>
+        </div>
+      )}
+
+      {agentMode === 'realtime' && !realtimeResetting && (
         <p className="text-muted-foreground text-xs">
           입장하면 학생별 개별 대화방이 자동으로 생성됩니다.
         </p>
@@ -194,9 +241,10 @@ export function LobbyView({ onJoin, ref }: React.ComponentProps<'div'> & LobbyVi
       <Button
         size="lg"
         onClick={handleJoin}
+        disabled={joinDisabled}
         className="w-full rounded-full font-mono text-xs font-bold tracking-wider uppercase"
       >
-        입장하기
+        {joinDisabled ? '준비 중...' : '입장하기'}
       </Button>
     </div>
   );

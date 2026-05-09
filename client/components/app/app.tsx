@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { TokenSource } from 'livekit-client';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Room, TokenSource } from 'livekit-client';
 import { useSession } from '@livekit/components-react';
 import { WarningIcon } from '@phosphor-icons/react/dist/ssr';
 import type { AppConfig } from '@/app-config';
@@ -33,7 +33,10 @@ export function App({ appConfig }: AppProps) {
     roomName: string;
     agentMode: AgentMode;
   } | null>(null);
+  const hadConnectedSessionRef = useRef(false);
   const [, forceRender] = useState(0);
+  const [room, setRoom] = useState(() => new Room());
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
 
   const tokenSource = useMemo(() => {
     if (typeof process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT === 'string') {
@@ -50,20 +53,52 @@ export function App({ appConfig }: AppProps) {
           agent_mode: info?.agentMode,
         }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const message =
+          typeof data.error === 'string' ? data.error : '세션 입장 준비에 실패했습니다.';
+        throw new Error(message);
+      }
       return res.json();
     });
   }, [appConfig]);
 
-  const session = useSession(
-    tokenSource,
-    appConfig.agentName ? { agentName: appConfig.agentName } : undefined
+  const sessionOptions = useMemo(
+    () => ({
+      room,
+      ...(appConfig.agentName ? { agentName: appConfig.agentName } : {}),
+    }),
+    [appConfig.agentName, room]
   );
+  const session = useSession(tokenSource, sessionOptions);
+
+  useEffect(() => {
+    if (session.isConnected) {
+      hadConnectedSessionRef.current = true;
+      setSessionNotice(null);
+      return;
+    }
+
+    if (!hadConnectedSessionRef.current) return;
+    hadConnectedSessionRef.current = false;
+    sessionInfoRef.current = null;
+    setSessionNotice('이전 세션이 종료되었습니다. 최신 설정으로 다시 입장해주세요.');
+    setRoom(new Room());
+    forceRender((n) => n + 1);
+  }, [session.isConnected]);
 
   const handleJoin = useCallback(
     (participantName: string, roomName: string, agentMode: AgentMode) => {
       sessionInfoRef.current = { participantName, roomName, agentMode };
+      setSessionNotice(null);
       forceRender((n) => n + 1);
-      session.start({ tracks: { microphone: { enabled: false } } });
+      void session.start({ tracks: { microphone: { enabled: false } } }).catch((error) => {
+        const message = error instanceof Error ? error.message : '세션 입장에 실패했습니다.';
+        sessionInfoRef.current = null;
+        setSessionNotice(message);
+        setRoom(new Room());
+        forceRender((n) => n + 1);
+      });
     },
     [session]
   );
@@ -72,7 +107,7 @@ export function App({ appConfig }: AppProps) {
     <AgentSessionProvider session={session}>
       <AppSetup />
       <main className="grid h-svh grid-cols-1 place-content-center">
-        <ViewController appConfig={appConfig} onJoin={handleJoin} />
+        <ViewController appConfig={appConfig} onJoin={handleJoin} sessionNotice={sessionNotice} />
       </main>
       <StartAudioButton label="Start Audio" />
       <Toaster

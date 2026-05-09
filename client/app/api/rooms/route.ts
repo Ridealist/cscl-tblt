@@ -22,6 +22,7 @@ function readConfig() {
       classStart: typeof raw.classStart === 'number' ? raw.classStart : 1,
       activeClass: typeof raw.activeClass === 'number' ? raw.activeClass : 1,
       agentMode: normalizeAgentMode(raw.agentMode),
+      realtimeResetting: raw.realtimeResetting === true,
     };
   } catch {
     return {
@@ -30,10 +31,12 @@ function readConfig() {
       classStart: 1,
       activeClass: 1,
       agentMode: 'pipeline' as AgentMode,
+      realtimeResetting: false,
     };
   }
 }
 
+export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 type RoomCounts = {
@@ -100,7 +103,7 @@ export async function GET() {
     return NextResponse.json({ error: 'LiveKit credentials not configured' }, { status: 500 });
   }
 
-  const { activeClass, numGroupsPerClass, agentMode } = readConfig();
+  const { activeClass, numGroupsPerClass, agentMode, realtimeResetting } = readConfig();
 
   const predefinedNames: string[] = Array.from(
     { length: numGroupsPerClass },
@@ -140,5 +143,8 @@ export async function GET() {
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  return NextResponse.json({ rooms, activeClass, agentMode, realtimeRooms });
+  return NextResponse.json(
+    { rooms, activeClass, agentMode, realtimeResetting, realtimeRooms },
+    { headers: { 'Cache-Control': 'no-store' } }
+  );
 }

@@ -19,6 +19,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
+    const code = typeof e === 'object' && e !== null && 'code' in e ? String(e.code) : '';
+    if (code.toLowerCase() === 'not_found' || message.toLowerCase().includes('not found')) {
+      return NextResponse.json({ ok: true, alreadyGone: true });
+    }
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

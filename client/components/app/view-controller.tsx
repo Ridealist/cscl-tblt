@@ -31,9 +31,10 @@ const VIEW_MOTION_PROPS = {
 interface ViewControllerProps {
   appConfig: AppConfig;
   onJoin: (participantName: string, roomName: string, agentMode: AgentMode) => void;
+  sessionNotice?: string | null;
 }
 
-export function ViewController({ appConfig, onJoin }: ViewControllerProps) {
+export function ViewController({ appConfig, onJoin, sessionNotice }: ViewControllerProps) {
   const { isConnected } = useSessionContext();
   const { resolvedTheme } = useTheme();
   const [showLobby, setShowLobby] = useState(false);
@@ -51,7 +52,12 @@ export function ViewController({ appConfig, onJoin }: ViewControllerProps) {
       )}
       {/* Lobby view */}
       {!isConnected && showLobby && (
-        <MotionLobbyView key="lobby" {...VIEW_MOTION_PROPS} onJoin={onJoin} />
+        <MotionLobbyView
+          key="lobby"
+          {...VIEW_MOTION_PROPS}
+          onJoin={onJoin}
+          sessionNotice={sessionNotice}
+        />
       )}
       {/* Session view */}
       {isConnected && (

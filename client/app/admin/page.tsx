@@ -13,6 +13,9 @@ const ADMIN_TABS: { value: AdminTab; label: string }[] = [
   { value: 'prompts', label: '프롬프트 편집' },
 ];
 
+const REALTIME_TERMINATION_TIMEOUT_MS = 20_000;
+const REALTIME_TERMINATION_POLL_MS = 750;
+
 interface Settings {
   numClasses: number;
   numGroupsPerClass: number;
@@ -20,6 +23,7 @@ interface Settings {
   activeClass: number;
   agentMode: AgentMode;
   agentStance: AgentStance;
+  realtimeResetting: boolean;
 }
 
 // ─── 룸 관리 섹션 ─────────────────────────────────────────────────────────────
@@ -224,6 +228,14 @@ interface RealtimeRoomStatus {
   numEgress?: number;
 }
 
+type RealtimeRoomsResponse = {
+  realtimeRooms?: Array<{ name: string }>;
+};
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function RealtimeSessionSection() {
   const [rooms, setRooms] = useState<RealtimeRoomStatus[]>([]);
   const [loading, setLoading] = useState(false);
@@ -233,7 +245,7 @@ function RealtimeSessionSection() {
   const fetchRooms = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/rooms');
+      const res = await fetch('/api/rooms', { cache: 'no-store' });
       const data = await res.json();
       setRooms(data.realtimeRooms ?? []);
     } catch {
@@ -356,6 +368,9 @@ export default function AdminPage() {
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [classStartInput, setClassStartInput] = useState('');
   const [groupsInput, setGroupsInput] = useState('');
+  const [realtimeSessionKey, setRealtimeSessionKey] = useState(0);
+  const [pendingStance, setPendingStance] = useState<AgentStance | null>(null);
+  const [stanceChangeStatus, setStanceChangeStatus] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/admin/config')
@@ -367,23 +382,119 @@ export default function AdminPage() {
       });
   }, []);
 
+  async function saveSettings(next: Settings) {
+    const res = await fetch('/api/admin/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(next),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const message = typeof data.error === 'string' ? data.error : '설정 저장에 실패했습니다.';
+      throw new Error(message);
+    }
+    const saved = data as Settings;
+    setSettings(saved);
+    setClassStartInput(String(saved.classStart));
+    setGroupsInput(String(saved.numGroupsPerClass));
+    setSavedAt(new Date().toLocaleTimeString('ko-KR'));
+  }
+
   async function update(patch: Partial<Settings>) {
     if (!settings) return;
     setSaving(true);
-    const next = { ...settings, ...patch };
     try {
-      const res = await fetch('/api/admin/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(next),
-      });
-      const saved: Settings = await res.json();
-      setSettings(saved);
-      setClassStartInput(String(saved.classStart));
-      setGroupsInput(String(saved.numGroupsPerClass));
-      setSavedAt(new Date().toLocaleTimeString('ko-KR'));
+      await saveSettings({ ...settings, ...patch });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '설정 저장에 실패했습니다.';
+      window.alert(message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function fetchRealtimeRoomNames() {
+    const roomsRes = await fetch('/api/rooms', { cache: 'no-store' });
+    if (!roomsRes.ok) {
+      throw new Error('개별 세션 목록을 불러오지 못했습니다.');
+    }
+
+    const data = (await roomsRes.json()) as RealtimeRoomsResponse;
+    return (data.realtimeRooms ?? [])
+      .map((room) => room.name)
+      .filter((name): name is string => Boolean(name));
+  }
+
+  async function terminateRealtimeRoom(room: string) {
+    const res = await fetch('/api/rooms/terminate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      const message = typeof data.error === 'string' ? data.error : '세션 종료 실패';
+      throw new Error(`[${room}] ${message}`);
+    }
+  }
+
+  async function terminateRealtimeSessionsAndWait() {
+    const startedAt = Date.now();
+    setStanceChangeStatus('개별 세션 목록을 확인하는 중입니다...');
+    const targetRooms = new Set(await fetchRealtimeRoomNames());
+    let remainingRooms = Array.from(targetRooms);
+
+    while (remainingRooms.length > 0) {
+      setStanceChangeStatus(`개별 세션 ${remainingRooms.length}개를 종료하는 중입니다...`);
+      await Promise.all(remainingRooms.map((room) => terminateRealtimeRoom(room)));
+      setStanceChangeStatus('전체 세션 종료 완료를 확인하는 중입니다...');
+      await sleep(REALTIME_TERMINATION_POLL_MS);
+      remainingRooms = (await fetchRealtimeRoomNames()).filter((room) => targetRooms.has(room));
+
+      if (remainingRooms.length > 0 && Date.now() - startedAt >= REALTIME_TERMINATION_TIMEOUT_MS) {
+        throw new Error(`아직 종료되지 않은 개별 세션이 있습니다: ${remainingRooms.join(', ')}`);
+      }
+    }
+  }
+
+  async function handleAgentStanceChange(stance: AgentStance) {
+    if (!settings || settings.agentStance === stance) return;
+
+    const nextLabel = getAgentStanceLabel(stance);
+    const confirmed = window.confirm(
+      [
+        `에이전트 상호작용 방식을 [${nextLabel} 에이전트]로 변경하면 현재 진행 중인 모든 개별 세션이 종료됩니다.`,
+        '',
+        `변경 후에는 [${nextLabel} 에이전트] 방식으로만 새 개별 세션을 생성할 수 있습니다.`,
+        '',
+        '계속하시겠습니까?',
+      ].join('\n')
+    );
+    if (!confirmed) return;
+
+    setSaving(true);
+    setPendingStance(stance);
+    setStanceChangeStatus(null);
+    let resetLocked = false;
+    try {
+      setStanceChangeStatus('학생 재입장을 잠시 중지하는 중입니다...');
+      await saveSettings({ ...settings, realtimeResetting: true });
+      resetLocked = true;
+      await terminateRealtimeSessionsAndWait();
+      setStanceChangeStatus('모든 개별 세션 종료를 확인했습니다. 설정을 저장하는 중입니다...');
+      await saveSettings({ ...settings, agentStance: stance, realtimeResetting: false });
+      resetLocked = false;
+      setRealtimeSessionKey((key) => key + 1);
+    } catch (error) {
+      if (resetLocked) {
+        await saveSettings({ ...settings, realtimeResetting: false }).catch(() => undefined);
+      }
+      const message = error instanceof Error ? error.message : '상호작용 방식 변경에 실패했습니다.';
+      window.alert(message);
+    } finally {
+      setSaving(false);
+      setPendingStance(null);
+      setStanceChangeStatus(null);
     }
   }
 
@@ -578,8 +689,9 @@ export default function AdminPage() {
                   {(['dominant', 'passive'] as AgentStance[]).map((stance) => (
                     <button
                       key={stance}
-                      onClick={() => update({ agentStance: stance })}
+                      onClick={() => handleAgentStanceChange(stance)}
                       disabled={saving}
+                      aria-busy={pendingStance === stance}
                       className={`rounded-lg border px-4 py-3 text-left transition-colors disabled:opacity-50 ${
                         settings.agentStance === stance
                           ? 'bg-primary text-primary-foreground border-primary'
@@ -587,7 +699,9 @@ export default function AdminPage() {
                       }`}
                     >
                       <span className="block text-sm font-semibold">
-                        {getAgentStanceLabel(stance)} 에이전트
+                        {pendingStance === stance
+                          ? '변경 중...'
+                          : `${getAgentStanceLabel(stance)} 에이전트`}
                       </span>
                       <span
                         className={`mt-1 block text-xs ${settings.agentStance === stance ? 'opacity-80' : 'text-muted-foreground'}`}
@@ -599,6 +713,19 @@ export default function AdminPage() {
                     </button>
                   ))}
                 </div>
+                {pendingStance && stanceChangeStatus && (
+                  <div
+                    role="status"
+                    aria-live="polite"
+                    className="border-border bg-muted/60 text-muted-foreground flex items-center gap-2 rounded-md border px-3 py-2 text-xs"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="border-muted-foreground/30 border-t-foreground size-4 shrink-0 animate-spin rounded-full border-2"
+                    />
+                    <span>{stanceChangeStatus}</span>
+                  </div>
+                )}
               </section>
 
               <hr className="border-border" />
@@ -653,7 +780,7 @@ export default function AdminPage() {
               numGroupsPerClass={settings.numGroupsPerClass}
             />
           ) : (
-            <RealtimeSessionSection />
+            <RealtimeSessionSection key={realtimeSessionKey} />
           )}
 
           <hr className="border-border" />

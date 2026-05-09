@@ -13,6 +13,7 @@ interface AppSettings {
   activeClass: number;
   agentMode: AgentMode;
   agentStance: AgentStance;
+  realtimeResetting: boolean;
 }
 
 function readConfig(): AppSettings {
@@ -25,6 +26,7 @@ function readConfig(): AppSettings {
       activeClass: typeof raw.activeClass === 'number' ? raw.activeClass : 1,
       agentMode: normalizeAgentMode(raw.agentMode),
       agentStance: normalizeAgentStance(raw.agentStance),
+      realtimeResetting: raw.realtimeResetting === true,
     };
   } catch {
     return {
@@ -34,6 +36,7 @@ function readConfig(): AppSettings {
       activeClass: 1,
       agentMode: 'pipeline',
       agentStance: DEFAULT_AGENT_STANCE,
+      realtimeResetting: false,
     };
   }
 }
@@ -65,6 +68,10 @@ export async function POST(req: Request) {
           : Math.min(Math.max(current.activeClass, classStart), classEnd),
       agentMode: normalizeAgentMode(body.agentMode ?? current.agentMode),
       agentStance: normalizeAgentStance(body.agentStance ?? current.agentStance),
+      realtimeResetting:
+        typeof body.realtimeResetting === 'boolean'
+          ? body.realtimeResetting
+          : current.realtimeResetting,
     };
 
     writeFileSync(CONFIG_PATH, JSON.stringify(updated, null, 2));

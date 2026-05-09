@@ -33,6 +33,7 @@ const PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.json');
 type RuntimeConfig = {
   agentMode: AgentMode;
   agentStance: AgentStance;
+  realtimeResetting: boolean;
 };
 
 type RealtimePromptSnapshot = RealtimePromptMetadata;
@@ -64,6 +65,18 @@ export async function POST(req: Request) {
     const roomName = body?.room_name?.trim() || `room_${Math.floor(Math.random() * 10_000)}`;
     const config = readRuntimeConfig();
     const agentMode = inferAgentMode(body?.agent_mode, roomName, config.agentMode);
+    if (agentMode === 'realtime' && config.realtimeResetting) {
+      logTokenEvent('rejected realtime token during reset', {
+        roomName,
+        participantName,
+        requestedAgentMode: body?.agent_mode ?? null,
+      });
+      return NextResponse.json(
+        { error: '개별 세션 초기화 중입니다. 잠시 후 다시 입장해주세요.' },
+        { status: 409, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
     const agentName = getAgentNameForConfig(agentMode, config.agentStance);
     const promptSnapshot = agentMode === 'realtime' ? readRealtimePromptSnapshot() : undefined;
     const roomConfig = buildRoomConfig(agentName, agentMode, config.agentStance, promptSnapshot);
@@ -135,11 +148,13 @@ function readRuntimeConfig(): RuntimeConfig {
     return {
       agentMode: normalizeAgentMode(raw.agentMode),
       agentStance: normalizeAgentStance(raw.agentStance),
+      realtimeResetting: raw.realtimeResetting === true,
     };
   } catch {
     return {
       agentMode: 'pipeline',
       agentStance: DEFAULT_AGENT_STANCE,
+      realtimeResetting: false,
     };
   }
 }

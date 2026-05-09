@@ -4,5 +4,6 @@
   "classStart": 9,
   "activeClass": 9,
   "agentMode": "realtime",
-  "agentStance": "dominant"
+  "agentStance": "dominant",
+  "realtimeResetting": false
 }
