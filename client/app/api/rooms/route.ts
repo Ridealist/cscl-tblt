@@ -5,6 +5,7 @@ import { join } from 'path';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { type AgentMode, normalizeAgentMode } from '@/lib/agent-mode';
 import { type AgentStance, normalizeAgentStance } from '@/lib/agent-stance';
+import type { RealtimePromptSource } from '@/lib/realtime-prompt-config';
 
 const API_KEY = process.env.LIVEKIT_API_KEY;
 const API_SECRET = process.env.LIVEKIT_API_SECRET;
@@ -42,12 +43,34 @@ type RoomCounts = {
   numEgress: number;
 };
 
-function parseRealtimeRoomMetadata(metadata?: string): { agentStance?: AgentStance } {
+function parseRealtimeRoomMetadata(metadata?: string): {
+  agentStance?: AgentStance;
+  promptId?: string;
+  promptSavedAt?: string | null;
+  promptSource?: RealtimePromptSource;
+} {
   if (!metadata) return {};
   try {
-    const parsed = JSON.parse(metadata) as { agentMode?: unknown; agentStance?: unknown };
+    const parsed = JSON.parse(metadata) as {
+      agentMode?: unknown;
+      agentStance?: unknown;
+      promptId?: unknown;
+      promptSavedAt?: unknown;
+      promptSource?: unknown;
+    };
     if (parsed.agentMode !== 'realtime' || !parsed.agentStance) return {};
-    return { agentStance: normalizeAgentStance(parsed.agentStance) };
+    return {
+      agentStance: normalizeAgentStance(parsed.agentStance),
+      promptId: typeof parsed.promptId === 'string' ? parsed.promptId : undefined,
+      promptSavedAt:
+        typeof parsed.promptSavedAt === 'string' || parsed.promptSavedAt === null
+          ? parsed.promptSavedAt
+          : undefined,
+      promptSource:
+        parsed.promptSource === 'custom' || parsed.promptSource === 'default'
+          ? parsed.promptSource
+          : undefined,
+    };
   } catch {
     return {};
   }

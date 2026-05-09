@@ -10,6 +10,11 @@ import {
   getAgentNameForConfig,
   normalizeAgentStance,
 } from '@/lib/agent-stance';
+import {
+  DEFAULT_REALTIME_PROMPT_METADATA,
+  type RealtimePromptMetadata,
+  validateRealtimePromptConfig,
+} from '@/lib/realtime-prompt-config';
 
 type ConnectionDetails = {
   serverUrl: string;
@@ -23,11 +28,14 @@ const API_KEY = process.env.LIVEKIT_API_KEY;
 const API_SECRET = process.env.LIVEKIT_API_SECRET;
 const LIVEKIT_URL = process.env.LIVEKIT_URL;
 const CONFIG_PATH = join(process.cwd(), '..', 'config.json');
+const PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.json');
 
 type RuntimeConfig = {
   agentMode: AgentMode;
   agentStance: AgentStance;
 };
+
+type RealtimePromptSnapshot = RealtimePromptMetadata;
 
 // don't cache the results
 export const revalidate = 0;
@@ -53,7 +61,8 @@ export async function POST(req: Request) {
     const config = readRuntimeConfig();
     const agentMode = inferAgentMode(body?.agent_mode, roomName, config.agentMode);
     const agentName = getAgentNameForConfig(agentMode, config.agentStance);
-    const roomConfig = buildRoomConfig(agentName, agentMode, config.agentStance);
+    const promptSnapshot = agentMode === 'realtime' ? readRealtimePromptSnapshot() : undefined;
+    const roomConfig = buildRoomConfig(agentName, agentMode, config.agentStance, promptSnapshot);
 
     const participantToken = await createParticipantToken(
       { identity: participantIdentity, name: participantName },
@@ -100,14 +109,43 @@ function inferAgentMode(value: unknown, roomName: string, fallback: AgentMode): 
   return normalizeAgentMode(value ?? fallback);
 }
 
+function readRealtimePromptSnapshot(): RealtimePromptSnapshot {
+  try {
+    const raw = JSON.parse(readFileSync(PROMPT_CONFIG_PATH, 'utf-8')) as { realtime?: unknown };
+    const result = validateRealtimePromptConfig(raw.realtime);
+    if (!result.ok || !raw.realtime || typeof raw.realtime !== 'object') {
+      return DEFAULT_REALTIME_PROMPT_METADATA;
+    }
+    const realtime = raw.realtime as Partial<RealtimePromptMetadata>;
+    return {
+      promptId:
+        typeof realtime.promptId === 'string' && realtime.promptId
+          ? realtime.promptId
+          : 'custom-unknown',
+      savedAt: typeof realtime.savedAt === 'string' && realtime.savedAt ? realtime.savedAt : null,
+      source: 'custom',
+    };
+  } catch {
+    return DEFAULT_REALTIME_PROMPT_METADATA;
+  }
+}
+
 function buildRoomConfig(
   agentName: string,
   agentMode: AgentMode,
-  agentStance: AgentStance
+  agentStance: AgentStance,
+  promptSnapshot?: RealtimePromptSnapshot
 ): RoomConfiguration {
   const metadata = JSON.stringify({
     agentMode,
-    ...(agentMode === 'realtime' ? { agentStance } : {}),
+    ...(agentMode === 'realtime'
+      ? {
+          agentStance,
+          promptId: promptSnapshot?.promptId ?? DEFAULT_REALTIME_PROMPT_METADATA.promptId,
+          promptSavedAt: promptSnapshot?.savedAt ?? DEFAULT_REALTIME_PROMPT_METADATA.savedAt,
+          promptSource: promptSnapshot?.source ?? DEFAULT_REALTIME_PROMPT_METADATA.source,
+        }
+      : {}),
   });
 
   return new RoomConfiguration({

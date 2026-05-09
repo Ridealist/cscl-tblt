@@ -253,16 +253,10 @@ class RealtimeAssistant(Agent):
         name = self._get_name()
         await self.update_instructions(build_realtime_prompt(name, stance=self._stance))
 
-        if name:
-            instruction = (
-                "Greet your friend by name and ask if they are free this weekend. "
-                "Use one short A1-A2 English sentence."
-            )
-        else:
-            instruction = (
-                "Greet your friend and ask if they are free this weekend. "
-                "Use one short A1-A2 English sentence."
-            )
+        instruction = (
+            "Start the conversation by following the [START] instruction in your system prompt. "
+            "Use one short A1-A2 English sentence."
+        )
         self.session.generate_reply(instructions=instruction)
 
 

@@ -331,7 +331,8 @@ logs/
 
 | 항목 | 위치 |
 |------|------|
-| AI 시스템 프롬프트 수정 | `agent/prompt_pipeline.py`, `agent/prompt_realtime.py` |
+| Realtime AI 시스템 프롬프트 수정 | `/admin` → `프롬프트 편집` 탭 또는 런타임 `prompt_config.json` |
+| 기본 AI 시스템 프롬프트 fallback | `agent/prompt_pipeline.py`, `agent/prompt_realtime.py` |
 | 그룹 대화 모드 모델 변경 | `agent/main.py` (STT `deepgram/nova-3`, LLM `openai/gpt-4.1-mini`, TTS `cartesia/sonic-3`) |
 | 개별 대화 모드 모델 변경 | `agent/main.py` (`openai.realtime.RealtimeModel`) |
 | 실행할 worker 모드 | `AGENT_WORKER_MODE=pipeline` 또는 `AGENT_WORKER_MODE=realtime` + `AGENT_STANCE=dominant/passive` |

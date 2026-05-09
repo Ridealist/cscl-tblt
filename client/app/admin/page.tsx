@@ -1,8 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { PromptEditorView } from '@/components/admin/prompt-editor-view';
 import { type AgentMode, getAgentModeLabel } from '@/lib/agent-mode';
 import { type AgentStance, getAgentStanceLabel } from '@/lib/agent-stance';
+import type { RealtimePromptSource } from '@/lib/realtime-prompt-config';
+
+type AdminTab = 'settings' | 'prompts';
+
+const ADMIN_TABS: { value: AdminTab; label: string }[] = [
+  { value: 'settings', label: '운영 설정' },
+  { value: 'prompts', label: '프롬프트 편집' },
+];
 
 interface Settings {
   numClasses: number;
@@ -206,6 +215,9 @@ function AgentDispatchSection({
 interface RealtimeRoomStatus {
   name: string;
   agentStance?: AgentStance;
+  promptId?: string;
+  promptSavedAt?: string | null;
+  promptSource?: RealtimePromptSource;
   numParticipants: number;
   totalParticipants?: number;
   numAgents?: number;
@@ -259,6 +271,15 @@ function RealtimeSessionSection() {
     }
   }
 
+  function formatPromptApplied(room: RealtimeRoomStatus) {
+    if (!room.promptSource) return '미기록';
+    if (room.promptSource === 'default') return '기본 프롬프트';
+    const savedAt = room.promptSavedAt
+      ? new Date(room.promptSavedAt).toLocaleString('ko-KR')
+      : '저장 시각 미기록';
+    return `수정 프롬프트 · ${room.promptId ?? 'ID 미기록'} · ${savedAt}`;
+  }
+
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
@@ -299,6 +320,10 @@ function RealtimeSessionSection() {
                 </span>
               </span>
               <span className="text-muted-foreground text-xs">
+                적용 프롬프트:{' '}
+                <span className="text-foreground font-semibold">{formatPromptApplied(room)}</span>
+              </span>
+              <span className="text-muted-foreground text-xs">
                 참가자 {room.numParticipants}명
                 {(room.numAgents ?? 0) > 0 && ` · AI ${room.numAgents}명`}
                 {(room.numEgress ?? 0) > 0 && ` · 세션 녹음 연결 ${room.numEgress}개`}
@@ -325,6 +350,7 @@ function RealtimeSessionSection() {
 }
 
 export default function AdminPage() {
+  const [activeTab, setActiveTab] = useState<AdminTab>('settings');
   const [settings, setSettings] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
@@ -385,10 +411,14 @@ export default function AdminPage() {
   const classEnd = settings.classStart + settings.numClasses - 1;
 
   return (
-    <div className="mx-auto flex max-w-lg flex-col gap-8 px-8 pt-20 pb-8">
+    <div
+      className={`mx-auto flex w-full flex-col gap-8 px-8 pt-20 pb-8 ${
+        activeTab === 'prompts' ? 'max-w-5xl' : 'max-w-lg'
+      }`}
+    >
       {/* 헤더 */}
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold">관리자 설정</h1>
+        <h1 className="text-xl font-bold">관리자</h1>
         <a
           href="/admin/dashboard"
           className="text-muted-foreground hover:text-foreground text-sm transition-colors"
@@ -397,105 +427,135 @@ export default function AdminPage() {
         </a>
       </div>
 
-      {/* 현재 활성 반 */}
-      <section className="flex flex-col gap-3">
-        <div>
-          <h2 className="text-foreground text-sm font-semibold">현재 수업 중인 반</h2>
-          <p className="text-muted-foreground text-xs">
-            {settings.agentMode === 'pipeline'
-              ? '학생 로비에는 이 반의 그룹만 표시됩니다.'
-              : '개별 대화방 이름과 학생 세션 현황에 이 반 번호가 사용됩니다.'}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {classNumbers.map((c) => (
-            <button
-              key={c}
-              onClick={() => update({ activeClass: c })}
-              disabled={saving}
-              className={`rounded-lg border px-5 py-2.5 text-sm font-semibold transition-colors disabled:opacity-50 ${
-                settings.activeClass === c
-                  ? 'bg-primary text-primary-foreground border-primary'
-                  : 'border-border hover:bg-muted text-foreground'
-              }`}
-            >
-              {c}반
-              {settings.activeClass === c && (
-                <span className="ml-1.5 text-xs font-normal opacity-80">● 활성</span>
-              )}
-            </button>
-          ))}
-        </div>
-      </section>
+      <div className="bg-muted grid grid-cols-2 rounded-lg p-1">
+        {ADMIN_TABS.map((tab) => (
+          <button
+            key={tab.value}
+            onClick={() => setActiveTab(tab.value)}
+            className={`rounded-md px-3 py-2 text-sm font-semibold transition-colors ${
+              activeTab === tab.value
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-      <hr className="border-border" />
-
-      {/* 수업 운영 모드 */}
-      <section className="flex flex-col gap-3">
-        <div>
-          <h2 className="text-foreground text-sm font-semibold">수업 운영 모드</h2>
-          <p className="text-muted-foreground text-xs">
-            학생 로비와 배치할 에이전트 종류가 함께 바뀝니다.
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          {(['pipeline', 'realtime'] as AgentMode[]).map((mode) => (
-            <button
-              key={mode}
-              onClick={() => update({ agentMode: mode })}
-              disabled={saving}
-              className={`rounded-lg border px-4 py-3 text-left transition-colors disabled:opacity-50 ${
-                settings.agentMode === mode
-                  ? 'bg-primary text-primary-foreground border-primary'
-                  : 'border-border hover:bg-muted text-foreground'
-              }`}
-            >
-              <span className="block text-sm font-semibold">{getAgentModeLabel(mode)}</span>
-              <span
-                className={`mt-1 block text-xs ${settings.agentMode === mode ? 'opacity-80' : 'text-muted-foreground'}`}
-              >
-                {mode === 'pipeline'
-                  ? 'n:1 pipeline (STT -> LLM -> TTS)'
-                  : '1:1 realtime (Speech-to-Speech)'}
-              </span>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <hr className="border-border" />
-
-      {settings.agentMode === 'realtime' && (
+      {activeTab === 'prompts' ? (
+        <PromptEditorView />
+      ) : (
         <>
-          {/* 에이전트 상호작용 방식 */}
+          {/* 반 번호 시작 */}
           <section className="flex flex-col gap-3">
             <div>
-              <h2 className="text-foreground text-sm font-semibold">에이전트 상호작용 방식</h2>
+              <h2 className="text-foreground text-sm font-semibold">반 번호 시작</h2>
               <p className="text-muted-foreground text-xs">
-                실험 조건입니다. 학생 화면에는 표시되지 않습니다.
+                첫 번째 반의 번호를 설정합니다. (현재: {settings.classStart}반 ~ {classEnd}반)
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              {(['dominant', 'passive'] as AgentStance[]).map((stance) => (
+            <input
+              type="number"
+              min={1}
+              value={classStartInput}
+              onChange={(e) => setClassStartInput(e.target.value)}
+              onBlur={handleClassStartBlur}
+              onKeyDown={(e) => e.key === 'Enter' && handleClassStartBlur()}
+              disabled={saving}
+              className="border-input bg-background text-foreground w-28 rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 disabled:opacity-50"
+            />
+          </section>
+
+          {/* 전체 학급 수 */}
+          <section className="flex flex-col gap-3">
+            <div>
+              <h2 className="text-foreground text-sm font-semibold">전체 학급 수</h2>
+              <p className="text-muted-foreground text-xs">담당 학급의 총 수를 설정합니다.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {[2, 3, 4, 5, 6].map((n) => (
                 <button
-                  key={stance}
-                  onClick={() => update({ agentStance: stance })}
+                  key={n}
+                  onClick={() =>
+                    update({
+                      numClasses: n,
+                      activeClass: Math.min(settings.activeClass, settings.classStart + n - 1),
+                    })
+                  }
                   disabled={saving}
-                  className={`rounded-lg border px-4 py-3 text-left transition-colors disabled:opacity-50 ${
-                    settings.agentStance === stance
+                  className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
+                    settings.numClasses === n
                       ? 'bg-primary text-primary-foreground border-primary'
                       : 'border-border hover:bg-muted text-foreground'
                   }`}
                 >
-                  <span className="block text-sm font-semibold">
-                    {getAgentStanceLabel(stance)} 에이전트
-                  </span>
+                  {n}개 반
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {/* 현재 활성 반 */}
+          <section className="flex flex-col gap-3">
+            <div>
+              <h2 className="text-foreground text-sm font-semibold">현재 수업 중인 반</h2>
+              <p className="text-muted-foreground text-xs">
+                {settings.agentMode === 'pipeline'
+                  ? '학생 로비에는 이 반의 그룹만 표시됩니다.'
+                  : '개별 대화방 이름과 학생 세션 현황에 이 반 번호가 사용됩니다.'}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {classNumbers.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => update({ activeClass: c })}
+                  disabled={saving}
+                  className={`rounded-lg border px-5 py-2.5 text-sm font-semibold transition-colors disabled:opacity-50 ${
+                    settings.activeClass === c
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'border-border hover:bg-muted text-foreground'
+                  }`}
+                >
+                  {c}반
+                  {settings.activeClass === c && (
+                    <span className="ml-1.5 text-xs font-normal opacity-80">● 활성</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <hr className="border-border" />
+
+          {/* 수업 운영 모드 */}
+          <section className="flex flex-col gap-3">
+            <div>
+              <h2 className="text-foreground text-sm font-semibold">수업 운영 모드</h2>
+              <p className="text-muted-foreground text-xs">
+                학생 로비와 배치할 에이전트 종류가 함께 바뀝니다.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {(['pipeline', 'realtime'] as AgentMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => update({ agentMode: mode })}
+                  disabled={saving}
+                  className={`rounded-lg border px-4 py-3 text-left transition-colors disabled:opacity-50 ${
+                    settings.agentMode === mode
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'border-border hover:bg-muted text-foreground'
+                  }`}
+                >
+                  <span className="block text-sm font-semibold">{getAgentModeLabel(mode)}</span>
                   <span
-                    className={`mt-1 block text-xs ${settings.agentStance === stance ? 'opacity-80' : 'text-muted-foreground'}`}
+                    className={`mt-1 block text-xs ${settings.agentMode === mode ? 'opacity-80' : 'text-muted-foreground'}`}
                   >
-                    {stance === 'dominant'
-                      ? '에이전트가 대화와 과제 진행을 주도'
-                      : '학생의 제안과 선택을 우선 수용'}
+                    {mode === 'pipeline'
+                      ? 'n:1 pipeline (STT -> LLM -> TTS)'
+                      : '1:1 realtime (Speech-to-Speech)'}
                   </span>
                 </button>
               ))}
@@ -503,155 +563,152 @@ export default function AdminPage() {
           </section>
 
           <hr className="border-border" />
-        </>
-      )}
 
-      {/* 반 번호 시작 */}
-      <section className="flex flex-col gap-3">
-        <div>
-          <h2 className="text-foreground text-sm font-semibold">반 번호 시작</h2>
-          <p className="text-muted-foreground text-xs">
-            첫 번째 반의 번호를 설정합니다. (현재: {settings.classStart}반 ~ {classEnd}반)
-          </p>
-        </div>
-        <input
-          type="number"
-          min={1}
-          value={classStartInput}
-          onChange={(e) => setClassStartInput(e.target.value)}
-          onBlur={handleClassStartBlur}
-          onKeyDown={(e) => e.key === 'Enter' && handleClassStartBlur()}
-          disabled={saving}
-          className="border-input bg-background text-foreground w-28 rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 disabled:opacity-50"
-        />
-      </section>
-
-      {/* 전체 학급 수 */}
-      <section className="flex flex-col gap-3">
-        <div>
-          <h2 className="text-foreground text-sm font-semibold">전체 학급 수</h2>
-          <p className="text-muted-foreground text-xs">담당 학급의 총 수를 설정합니다.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {[2, 3, 4, 5, 6].map((n) => (
-            <button
-              key={n}
-              onClick={() =>
-                update({
-                  numClasses: n,
-                  activeClass: Math.min(settings.activeClass, settings.classStart + n - 1),
-                })
-              }
-              disabled={saving}
-              className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
-                settings.numClasses === n
-                  ? 'bg-primary text-primary-foreground border-primary'
-                  : 'border-border hover:bg-muted text-foreground'
-              }`}
-            >
-              {n}개 반
-            </button>
-          ))}
-        </div>
-      </section>
-
-      {settings.agentMode === 'pipeline' && (
-        <>
-          {/* 반당 그룹 수 */}
-          <section className="flex flex-col gap-3">
-            <div>
-              <h2 className="text-foreground text-sm font-semibold">반당 그룹 수</h2>
-              <p className="text-muted-foreground text-xs">
-                모든 반에 동일하게 적용됩니다. (현재: {settings.numGroupsPerClass}그룹)
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <input
-                type="number"
-                min={1}
-                max={99}
-                value={groupsInput}
-                onChange={(e) => setGroupsInput(e.target.value)}
-                onBlur={() => {
-                  const n = parseInt(groupsInput);
-                  if (!isNaN(n) && n >= 1) {
-                    update({ numGroupsPerClass: n });
-                  } else {
-                    setGroupsInput(String(settings.numGroupsPerClass));
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    const n = parseInt(groupsInput);
-                    if (!isNaN(n) && n >= 1) update({ numGroupsPerClass: n });
-                    else setGroupsInput(String(settings.numGroupsPerClass));
-                  }
-                }}
-                disabled={saving}
-                className="border-input bg-background text-foreground w-24 rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 disabled:opacity-50"
-              />
-              <span className="text-muted-foreground text-sm">그룹</span>
-            </div>
-          </section>
-        </>
-      )}
-
-      {/* 에이전트 배치 */}
-      {settings.agentMode === 'pipeline' ? (
-        <AgentDispatchSection
-          activeClass={settings.activeClass}
-          numGroupsPerClass={settings.numGroupsPerClass}
-        />
-      ) : (
-        <RealtimeSessionSection />
-      )}
-
-      <hr className="border-border" />
-
-      {/* 설정 요약 */}
-      <div className="bg-muted rounded-lg p-4 text-sm">
-        <p className="font-medium">현재 설정 요약</p>
-        <ul className="text-muted-foreground mt-2 space-y-1 text-xs">
-          <li>
-            활성 반: <span className="text-foreground font-semibold">{settings.activeClass}반</span>
-          </li>
-          <li>
-            운영 모드:{' '}
-            <span className="text-foreground font-semibold">
-              {getAgentModeLabel(settings.agentMode)}
-            </span>
-          </li>
           {settings.agentMode === 'realtime' && (
-            <li>
-              상호작용 방식:{' '}
-              <span className="text-foreground font-semibold">
-                {getAgentStanceLabel(settings.agentStance)} 에이전트
-              </span>
-            </li>
+            <>
+              {/* 에이전트 상호작용 방식 */}
+              <section className="flex flex-col gap-3">
+                <div>
+                  <h2 className="text-foreground text-sm font-semibold">에이전트 상호작용 방식</h2>
+                  <p className="text-muted-foreground text-xs">
+                    실험 조건입니다. 학생 화면에는 표시되지 않습니다.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['dominant', 'passive'] as AgentStance[]).map((stance) => (
+                    <button
+                      key={stance}
+                      onClick={() => update({ agentStance: stance })}
+                      disabled={saving}
+                      className={`rounded-lg border px-4 py-3 text-left transition-colors disabled:opacity-50 ${
+                        settings.agentStance === stance
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'border-border hover:bg-muted text-foreground'
+                      }`}
+                    >
+                      <span className="block text-sm font-semibold">
+                        {getAgentStanceLabel(stance)} 에이전트
+                      </span>
+                      <span
+                        className={`mt-1 block text-xs ${settings.agentStance === stance ? 'opacity-80' : 'text-muted-foreground'}`}
+                      >
+                        {stance === 'dominant'
+                          ? '에이전트가 대화와 과제 진행을 주도'
+                          : '학생의 제안과 선택을 우선 수용'}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <hr className="border-border" />
+            </>
           )}
-          <li>
-            학급 범위:{' '}
-            <span className="text-foreground font-semibold">
-              {settings.classStart}반 ~ {classEnd}반
-            </span>
-          </li>
+
           {settings.agentMode === 'pipeline' && (
-            <li>
-              반당 그룹:{' '}
-              <span className="text-foreground font-semibold">{settings.numGroupsPerClass}개</span>
-            </li>
+            <>
+              {/* 반당 그룹 수 */}
+              <section className="flex flex-col gap-3">
+                <div>
+                  <h2 className="text-foreground text-sm font-semibold">반당 그룹 수</h2>
+                  <p className="text-muted-foreground text-xs">
+                    모든 반에 동일하게 적용됩니다. (현재: {settings.numGroupsPerClass}그룹)
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number"
+                    min={1}
+                    max={99}
+                    value={groupsInput}
+                    onChange={(e) => setGroupsInput(e.target.value)}
+                    onBlur={() => {
+                      const n = parseInt(groupsInput);
+                      if (!isNaN(n) && n >= 1) {
+                        update({ numGroupsPerClass: n });
+                      } else {
+                        setGroupsInput(String(settings.numGroupsPerClass));
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const n = parseInt(groupsInput);
+                        if (!isNaN(n) && n >= 1) update({ numGroupsPerClass: n });
+                        else setGroupsInput(String(settings.numGroupsPerClass));
+                      }
+                    }}
+                    disabled={saving}
+                    className="border-input bg-background text-foreground w-24 rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 disabled:opacity-50"
+                  />
+                  <span className="text-muted-foreground text-sm">그룹</span>
+                </div>
+              </section>
+            </>
           )}
-          <li>
-            학생 입장 방식:{' '}
-            <span className="text-foreground font-semibold">
-              {settings.agentMode === 'pipeline'
-                ? `${settings.activeClass}반-1그룹 ~ ${settings.activeClass}반-${settings.numGroupsPerClass}그룹`
-                : '학생별 개별 방 자동 생성'}
-            </span>
-          </li>
-        </ul>
-        {savedAt && <p className="text-muted-foreground mt-2 text-xs">마지막 저장: {savedAt}</p>}
-      </div>
+
+          {/* 에이전트 배치 */}
+          {settings.agentMode === 'pipeline' ? (
+            <AgentDispatchSection
+              activeClass={settings.activeClass}
+              numGroupsPerClass={settings.numGroupsPerClass}
+            />
+          ) : (
+            <RealtimeSessionSection />
+          )}
+
+          <hr className="border-border" />
+
+          {/* 설정 요약 */}
+          <div className="bg-muted rounded-lg p-4 text-sm">
+            <p className="font-medium">현재 설정 요약</p>
+            <ul className="text-muted-foreground mt-2 space-y-1 text-xs">
+              <li>
+                활성 반:{' '}
+                <span className="text-foreground font-semibold">{settings.activeClass}반</span>
+              </li>
+              <li>
+                운영 모드:{' '}
+                <span className="text-foreground font-semibold">
+                  {getAgentModeLabel(settings.agentMode)}
+                </span>
+              </li>
+              {settings.agentMode === 'realtime' && (
+                <li>
+                  상호작용 방식:{' '}
+                  <span className="text-foreground font-semibold">
+                    {getAgentStanceLabel(settings.agentStance)} 에이전트
+                  </span>
+                </li>
+              )}
+              <li>
+                학급 범위:{' '}
+                <span className="text-foreground font-semibold">
+                  {settings.classStart}반 ~ {classEnd}반
+                </span>
+              </li>
+              {settings.agentMode === 'pipeline' && (
+                <li>
+                  반당 그룹:{' '}
+                  <span className="text-foreground font-semibold">
+                    {settings.numGroupsPerClass}개
+                  </span>
+                </li>
+              )}
+              <li>
+                학생 입장 방식:{' '}
+                <span className="text-foreground font-semibold">
+                  {settings.agentMode === 'pipeline'
+                    ? `${settings.activeClass}반-1그룹 ~ ${settings.activeClass}반-${settings.numGroupsPerClass}그룹`
+                    : '학생별 개별 방 자동 생성'}
+                </span>
+              </li>
+            </ul>
+            {savedAt && (
+              <p className="text-muted-foreground mt-2 text-xs">마지막 저장: {savedAt}</p>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
