@@ -61,3 +61,7 @@ Thumbs.db
 # ===== Build =====
 /build
 .vercel
+
+# ===== AWS_File Managements =====
+/aws_cli
+aws_cli/
