@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import json
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -15,12 +16,14 @@ from livekit.agents import (
     room_io,
 )
 from livekit.agents import llm
-from livekit.plugins import silero
+from livekit.plugins import openai, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from egress_recorder import EgressRecorder
 from logger import ConversationLogger
-from prompt import build_prompt, _clean_names
+from prompt_pipeline import build_prompt as build_pipeline_prompt
+from prompt_pipeline import _clean_names
+from prompt_realtime import build_prompt as build_realtime_prompt
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -28,6 +31,7 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("agent")
 
 server = AgentServer()
+AGENT_WORKER_MODE = os.environ.get("AGENT_WORKER_MODE", "pipeline").strip().lower()
 
 
 class Assistant(Agent):
@@ -37,7 +41,7 @@ class Assistant(Agent):
         get_names_fn,
         get_speaker_fn,
     ) -> None:
-        super().__init__(instructions=build_prompt(participant_names))
+        super().__init__(instructions=build_pipeline_prompt(participant_names))
         self._get_names = get_names_fn      # () -> list[str]
         self._get_speaker = get_speaker_fn  # () -> str | None
 
@@ -49,7 +53,7 @@ class Assistant(Agent):
         log.info("on_enter — participants: %s", names)
 
         # 참가자 목록이 반영된 시스템 프롬프트로 갱신
-        await self.update_instructions(build_prompt(names))
+        await self.update_instructions(build_pipeline_prompt(names))
 
         if not names:
             first_sentence = "Hi, are you free this weekend?"
@@ -198,7 +202,7 @@ async def _run(ctx: JobContext) -> None:
         """신규 참가자 입장 시 등록 + 프롬프트 업데이트 + 음성 환영."""
         _register_participant(p)
         names = _human_names()
-        await assistant.update_instructions(build_prompt(names))
+        await assistant.update_instructions(build_pipeline_prompt(names))
         log.info("New participant: %s | participants now: %s", p.name or p.identity, names)
 
         name = p.name or p.identity
@@ -217,9 +221,111 @@ async def _run(ctx: JobContext) -> None:
     )
 
 
-@server.rtc_session(agent_name="my-agent")
-async def named_agent(ctx: JobContext):
-    await _run(ctx)
+class RealtimeAssistant(Agent):
+    def __init__(self, get_name_fn) -> None:
+        super().__init__(instructions=build_realtime_prompt())
+        self._get_name = get_name_fn
+
+    async def on_enter(self) -> None:
+        """1:1 realtime 세션 입장 직후 참가자 이름을 반영하고 첫 턴을 생성."""
+        await asyncio.sleep(1.0)
+        name = self._get_name()
+        await self.update_instructions(build_realtime_prompt(name))
+
+        if name:
+            instruction = (
+                "Greet your friend by name and ask if they are free this weekend. "
+                "Use one short A1-A2 English sentence."
+            )
+        else:
+            instruction = (
+                "Greet your friend and ask if they are free this weekend. "
+                "Use one short A1-A2 English sentence."
+            )
+        self.session.generate_reply(instructions=instruction)
+
+
+async def _run_realtime(ctx: JobContext) -> None:
+    """1:1 OpenAI Realtime 세션 로직."""
+    ctx.log_context_fields = {"room": ctx.room.name, "mode": "realtime"}
+    conv_logger = ConversationLogger(ctx.job.room.sid, ctx.room.name)
+    egress = EgressRecorder(ctx.room.name, conv_logger.session_id)
+
+    participant: dict[str, str | None] = {"identity": None, "name": None}
+
+    def _register_participant(p) -> None:
+        full_name = p.name or p.identity
+        participant["identity"] = p.identity
+        participant["name"] = full_name.split()[0] if full_name else full_name
+
+    assistant = RealtimeAssistant(get_name_fn=lambda: participant["name"])
+
+    session = AgentSession(
+        llm=openai.realtime.RealtimeModel(
+            model="gpt-realtime",
+            voice="marin",
+        ),
+    )
+
+    @session.on("conversation_item_added")
+    def on_conversation_item(ev):
+        item = ev.item
+        if not hasattr(item, "role") or not hasattr(item, "text_content"):
+            return
+        text = item.text_content
+        if not text:
+            return
+        if item.role == "user":
+            conv_logger.log(
+                role="user",
+                text=text,
+                participant_identity=participant["identity"],
+                participant_name=participant["name"],
+            )
+        elif item.role == "assistant":
+            conv_logger.log(role="agent", text=text)
+
+    await session.start(
+        agent=assistant,
+        room=ctx.room,
+        room_options=room_io.RoomOptions(
+            audio_input=room_io.AudioInputOptions(),
+        ),
+    )
+
+    await egress.start()
+
+    ctx.room.on(
+        "disconnected",
+        lambda: asyncio.ensure_future(egress.stop()),
+    )
+
+    for p in ctx.room.remote_participants.values():
+        _register_participant(p)
+        break
+
+    async def on_participant_connected(p):
+        if participant["identity"] is None:
+            _register_participant(p)
+            await assistant.update_instructions(build_realtime_prompt(participant["name"]))
+
+    ctx.room.on(
+        "participant_connected",
+        lambda p: asyncio.ensure_future(on_participant_connected(p)),
+    )
+
+
+if AGENT_WORKER_MODE == "realtime":
+
+    @server.rtc_session(agent_name="realtime-agent")
+    async def selected_agent(ctx: JobContext):
+        await _run_realtime(ctx)
+
+else:
+
+    @server.rtc_session(agent_name="pipeline-agent")
+    async def selected_agent(ctx: JobContext):
+        await _run(ctx)
 
 
 if __name__ == "__main__":

@@ -500,7 +500,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "livekit-agents", extras = ["openai", "silero", "turn-detector"], specifier = "~=1.4" },
+    { name = "livekit-agents", extras = ["openai", "silero", "turn-detector"], specifier = "~=1.5" },
     { name = "python-dotenv" },
 ]
 

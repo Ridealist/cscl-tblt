@@ -16,7 +16,7 @@ LIVEKIT_URL = os.environ["LIVEKIT_URL"]
 API_KEY = os.environ["LIVEKIT_API_KEY"]
 API_SECRET = os.environ["LIVEKIT_API_SECRET"]
 ROOM_NAME = os.environ.get("ROOM_NAME", "english-practice")
-AGENT_NAME = "my-agent"
+AGENT_NAME = "pipeline-agent"
 
 LOGS_DIR = Path(__file__).parent.parent / "logs"
 
