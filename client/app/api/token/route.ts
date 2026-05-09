@@ -40,6 +40,10 @@ type RealtimePromptSnapshot = RealtimePromptMetadata;
 // don't cache the results
 export const revalidate = 0;
 
+function logTokenEvent(event: string, data: Record<string, unknown>) {
+  console.info(`[api/token] ${event}`, data);
+}
+
 export async function POST(req: Request) {
   try {
     if (LIVEKIT_URL === undefined) {
@@ -63,6 +67,26 @@ export async function POST(req: Request) {
     const agentName = getAgentNameForConfig(agentMode, config.agentStance);
     const promptSnapshot = agentMode === 'realtime' ? readRealtimePromptSnapshot() : undefined;
     const roomConfig = buildRoomConfig(agentName, agentMode, config.agentStance, promptSnapshot);
+    const roomMetadata = JSON.parse(roomConfig.metadata);
+    const requestedAgents = roomConfig.agents.map((agent) => ({
+      agentName: agent.agentName,
+      metadata: safeParseJson(agent.metadata),
+    }));
+
+    logTokenEvent('issuing participant token', {
+      roomName,
+      participantName,
+      participantIdentity,
+      requestedAgentMode: body?.agent_mode ?? null,
+      inferredAgentMode: agentMode,
+      runtimeAgentMode: config.agentMode,
+      runtimeAgentStance: config.agentStance,
+      agentName,
+      roomMetadata,
+      requestedAgents,
+      promptSnapshot: promptSnapshot ?? null,
+      livekitUrlSet: Boolean(LIVEKIT_URL),
+    });
 
     const participantToken = await createParticipantToken(
       { identity: participantIdentity, name: participantName },
@@ -77,15 +101,31 @@ export async function POST(req: Request) {
       participantName,
       participantToken,
     };
+    logTokenEvent('participant token issued', {
+      roomName,
+      participantIdentity,
+      agentName,
+    });
     const headers = new Headers({
       'Cache-Control': 'no-store',
     });
     return NextResponse.json(data, { headers });
   } catch (error) {
     if (error instanceof Error) {
-      console.error(error);
+      console.error('[api/token] token issuance failed', {
+        message: error.message,
+        stack: error.stack,
+      });
       return new NextResponse(error.message, { status: 500 });
     }
+  }
+}
+
+function safeParseJson(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
   }
 }
 

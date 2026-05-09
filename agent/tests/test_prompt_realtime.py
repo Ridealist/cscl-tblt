@@ -1,5 +1,3 @@
-import pytest
-
 import prompt_realtime
 from prompt_realtime import build_prompt, normalize_stance
 
@@ -26,9 +24,11 @@ def test_realtime_prompt_includes_passive_stance_rules(tmp_path, monkeypatch) ->
     assert "Your friend's name is Junbo." in prompt
 
 
-def test_realtime_prompt_rejects_invalid_stance() -> None:
-    with pytest.raises(ValueError, match="Invalid stance"):
-        normalize_stance("unknown")
+def test_realtime_prompt_defaults_to_dominant_stance(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
+
+    assert normalize_stance("unknown") == "dominant"
+    assert "Guide the task actively from start to finish." in build_prompt(stance="unknown")
 
 
 def test_realtime_prompt_uses_runtime_config(tmp_path, monkeypatch) -> None:

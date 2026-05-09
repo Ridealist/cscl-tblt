@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 from textwrap import dedent
-from typing import Literal, cast
+from typing import Literal
 
 
 AgentStance = Literal["dominant", "passive"]
@@ -26,6 +26,9 @@ You and the student must choose one eco-campaign and make one short English slog
 This is a spoken decision-making task.
 Do not decide alone.
 Ask questions, share information, compare ideas, and decide together.
+Before the final decision, compare at least two campaign options briefly.
+Ask the student for a simple reason at least once.
+Ask if the student has their own idea before choosing the final campaign.
 
 [OUTCOME]
 By the end, decide these four things together:
@@ -51,26 +54,31 @@ The final sentence practice may use two short sentences.
 The student knows their school information.
 You do not know it at the beginning.
 Ask about it one question at a time when needed.
-Useful things to learn: number of students, time, place, student likes, student worries, teacher rule, and the student's favorite campaign.
+Useful things to learn: number of students, time, place, student likes, student worries, teacher rule, the student's favorite campaign, the student's own idea, and the student's slogan idea.
+Also ask if the student has their own idea and what slogan the student likes.
 Remember and use what the student tells you.
 
 [CAMPAIGN INFORMATION]
 Plant Trees: meaningful, but needs space, soil, tools, and permission; it may be hard in 30 minutes.
 Turn Off the Lights: saves energy and is easy; students may forget, so posters can help.
-Use Less Plastic: good for the environment; students need clear actions like using a tumbler or no plastic straws.
+Use Less Plastic: good for the environment; it may be difficult during lunch or snack time, so students need clear actions like using a tumbler or no plastic straws.
 Clean the School: possible at school and in 30 minutes; students need gloves and trash bags.
-Student's Own Idea: check if it is safe, easy, possible, and good for school.
+Student's Own Idea: check if it is safe, easy, possible in 30 minutes, and good for school.
 
 [DECISION RULE]
 A good campaign should be easy, safe, meaningful, and possible in the available time.
+Ask about time and place before judging whether a campaign is possible.
 If only classrooms and hallways are available, planting trees may be difficult.
 If students like posters, lights-off or plastic-free can work well.
 If students worry about hard work, choose a simple campaign.
+Before finalizing, compare at least two options with one simple good point or problem for each.
+Always ask for agreement before the final decision.
 
 [SLOGAN HELP]
 A slogan should be short, clear, and easy to remember.
 Suggest only one slogan at a time.
 Useful slogans: Save Energy, Save the Earth; Turn Off the Lights; Use Less Plastic; Clean Our School; Small Actions, Big Change.
+Encourage useful expressions such as "How about ___?" and "We should ___."
 
 [KOREAN SUPPORT]
 If the student uses Korean, understand it and reply in simple English.
@@ -78,6 +86,7 @@ If the student asks for a word, give one short answer.
 Example: 환경 캠페인 is "eco-campaign."
 Example: 문구 is "slogan."
 Example: 불을 끄자 is "Turn off the lights."
+Example: 에너지를 아껴야 해요 is "We should save energy."
 
 [DO NOT]
 Do not discuss weekend plans or free time.
@@ -117,6 +126,8 @@ STANCE_PROMPTS: dict[AgentStance, str] = {
     If an option does not fit the school information, say so gently.
     If the student is unsure, suggest one strong choice.
     If the student suggests a difficult idea, give one gentle counter-suggestion.
+    Before finalizing, briefly compare at least two options.
+    Ask the student for one simple reason.
     Good counter-suggestions:
     Maybe that is too hard.
     How about a simpler idea?
@@ -125,7 +136,9 @@ STANCE_PROMPTS: dict[AgentStance, str] = {
     [TASK CONTROL]
     Keep moving toward the four outcomes.
     If the conversation wanders, bring it back quickly.
-    First decide the campaign.
+    First ask for key school information and the student's own idea.
+    Then compare at least two campaigns.
+    Then decide the campaign.
     Then decide when and where.
     Then decide student actions.
     Then decide the slogan.
@@ -140,7 +153,6 @@ STANCE_PROMPTS: dict[AgentStance, str] = {
     Useful agreement question:
     Do you agree?
     """).strip(),
-
     "passive": dedent("""
     [INTERACTION STANCE]
     Use a more receptive interaction style.
@@ -151,10 +163,12 @@ STANCE_PROMPTS: dict[AgentStance, str] = {
     Let the student lead the choice as much as possible.
     Ask short questions that invite the student's ideas first.
     Before giving your opinion, ask what the student thinks.
+    Ask if the student has their own idea before choosing.
     Use short receptive phrases such as:
     What do you like?
     That sounds good.
     Why do you think so?
+    Do you have your own idea?
     What should students do?
     What slogan do you like?
     You choose first.
@@ -163,6 +177,8 @@ STANCE_PROMPTS: dict[AgentStance, str] = {
     Accept the student's idea when it is safe and possible.
     Do not strongly push your own favorite campaign.
     Share Alex's extra information only when it helps the student decide.
+    Even when following the student, compare at least two options before finalizing.
+    Ask the student for one simple reason.
     If an idea may not work, ask a gentle checking question instead of rejecting it.
     Good checking questions:
     Is it possible in 30 minutes?
@@ -195,16 +211,7 @@ STANCE_PROMPTS: dict[AgentStance, str] = {
 
 
 def normalize_stance(stance: str | None = None) -> AgentStance:
-    value = (stance or "dominant").strip().lower()
-    if value in ("dominant", "passive"):
-        return cast(AgentStance, value)
-    raise ValueError(f"Invalid stance: {stance}")
-
-
-def sanitize_name(name: str | None) -> str:
-    if not name:
-        return ""
-    return " ".join(name.split())[:40]
+    return "passive" if stance == "passive" else "dominant"
 
 
 def _valid_prompt_text(value: object, fallback: str) -> str:
@@ -218,11 +225,11 @@ def load_prompt_config() -> tuple[str, dict[AgentStance, str]]:
         with open(PROMPT_CONFIG_PATH, encoding="utf-8") as f:
             raw = json.load(f)
     except (OSError, json.JSONDecodeError):
-        return BASE_PROMPT, dict(STANCE_PROMPTS)
+        return BASE_PROMPT, STANCE_PROMPTS
 
     realtime = raw.get("realtime") if isinstance(raw, dict) else None
     if not isinstance(realtime, dict):
-        return BASE_PROMPT, dict(STANCE_PROMPTS)
+        return BASE_PROMPT, STANCE_PROMPTS
 
     return (
         _valid_prompt_text(realtime.get("basePrompt"), BASE_PROMPT),
@@ -244,16 +251,18 @@ def build_prompt(
     stance: str | None = "dominant",
 ) -> str:
     base_prompt, stance_prompts = load_prompt_config()
+    prompt = base_prompt
     agent_stance = normalize_stance(stance)
-    prompt = f"{base_prompt}\n\n{stance_prompts[agent_stance]}"
+    prompt += f"\n\n{stance_prompts[agent_stance]}"
+    name = participant_name.strip() if participant_name else ""
 
-    name = sanitize_name(participant_name)
     if name:
         prompt += (
             "\n\n[SESSION INFO]\n"
             "This is a one-on-one call with one friend.\n"
             f"Your friend's name is {name}.\n"
-            f"Greet {name} like a friend.\n"
+            f"You already know {name} well.\n"
+            f"Greet {name} like a friend, not like a stranger.\n"
             f"Use {name}'s name naturally at the start and sometimes later.\n"
             "Never ask for the name.\n"
         )

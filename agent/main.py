@@ -28,18 +28,52 @@ from prompt_realtime import normalize_stance as normalize_realtime_stance
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-logging.basicConfig(level=logging.INFO)
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").strip().upper()
+logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
+logging.getLogger("livekit").setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+logging.getLogger("livekit.agents").setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
 log = logging.getLogger("agent")
 
 server = AgentServer()
-AGENT_WORKER_MODE = os.environ.get("AGENT_WORKER_MODE", "pipeline").strip().lower()
+CONFIG_PATH = Path(__file__).parent.parent / "config.json"
+
+
+def _read_runtime_agent_defaults() -> tuple[str, str]:
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        log.info("Runtime config unavailable; defaulting agent worker to pipeline: %s", exc)
+        return "pipeline", "dominant"
+
+    mode = raw.get("agentMode") if isinstance(raw, dict) else None
+    stance = raw.get("agentStance") if isinstance(raw, dict) else None
+    return (
+        "realtime" if mode == "realtime" else "pipeline",
+        "passive" if stance == "passive" else "dominant",
+    )
+
+
+DEFAULT_AGENT_WORKER_MODE, DEFAULT_AGENT_STANCE = _read_runtime_agent_defaults()
+AGENT_WORKER_MODE = os.environ.get("AGENT_WORKER_MODE", DEFAULT_AGENT_WORKER_MODE).strip().lower()
 AGENT_STANCE = normalize_realtime_stance(
-    os.environ.get("AGENT_STANCE", "dominant").strip().lower()
+    os.environ.get("AGENT_STANCE", DEFAULT_AGENT_STANCE).strip().lower()
 )
 REALTIME_AGENT_NAMES = {
     "dominant": "realtime-dominant-agent",
     "passive": "realtime-passive-agent",
 }
+
+log.info(
+    "Agent worker configuration: worker_mode=%s stance=%s default_mode=%s default_stance=%s "
+    "livekit_url_set=%s openai_key_set=%s",
+    AGENT_WORKER_MODE,
+    AGENT_STANCE,
+    DEFAULT_AGENT_WORKER_MODE,
+    DEFAULT_AGENT_STANCE,
+    bool(os.environ.get("LIVEKIT_URL")),
+    bool(os.environ.get("OPENAI_API_KEY")),
+)
 
 
 def _resolve_realtime_worker() -> tuple[str, str]:
@@ -97,6 +131,7 @@ class Assistant(Agent):
 
 
 def prewarm(proc: JobProcess):
+    log.info("Prewarming agent process resources")
     proc.userdata["vad"] = silero.VAD.load()
 
 
@@ -106,6 +141,12 @@ server.setup_fnc = prewarm
 async def _run(ctx: JobContext) -> None:
     """dispatch 공통 세션 로직."""
     ctx.log_context_fields = {"room": ctx.room.name}
+    log.info(
+        "Starting pipeline job: room=%s room_sid=%s job_id=%s",
+        ctx.room.name,
+        ctx.job.room.sid,
+        getattr(ctx.job, "id", None),
+    )
     conv_logger = ConversationLogger(
         ctx.job.room.sid,
         ctx.room.name,
@@ -223,7 +264,13 @@ async def _run(ctx: JobContext) -> None:
         _register_participant(p)
         names = _human_names()
         await assistant.update_instructions(build_pipeline_prompt(names))
-        log.info("New participant: %s | participants now: %s", p.name or p.identity, names)
+        log.info(
+            "Pipeline participant connected: room=%s identity=%s name=%s participants=%s",
+            ctx.room.name,
+            p.identity,
+            p.name,
+            names,
+        )
 
         name = p.name or p.identity
         all_names = ", ".join(names)
@@ -251,6 +298,11 @@ class RealtimeAssistant(Agent):
         """1:1 realtime 세션 입장 직후 참가자 이름을 반영하고 첫 턴을 생성."""
         await asyncio.sleep(1.0)
         name = self._get_name()
+        log.info(
+            "Realtime assistant entering session: stance=%s participant_name=%s",
+            self._stance,
+            name,
+        )
         await self.update_instructions(build_realtime_prompt(name, stance=self._stance))
 
         instruction = (
@@ -263,6 +315,14 @@ class RealtimeAssistant(Agent):
 async def _run_realtime(ctx: JobContext, stance: str) -> None:
     """1:1 OpenAI Realtime 세션 로직."""
     ctx.log_context_fields = {"room": ctx.room.name, "mode": "realtime", "stance": stance}
+    log.info(
+        "Starting realtime job: room=%s room_sid=%s job_id=%s stance=%s metadata=%s",
+        ctx.room.name,
+        ctx.job.room.sid,
+        getattr(ctx.job, "id", None),
+        stance,
+        getattr(ctx.job, "metadata", None),
+    )
     conv_logger = ConversationLogger(
         ctx.job.room.sid,
         ctx.room.name,
@@ -276,6 +336,13 @@ async def _run_realtime(ctx: JobContext, stance: str) -> None:
         full_name = p.name or p.identity
         participant["identity"] = p.identity
         participant["name"] = full_name.split()[0] if full_name else full_name
+        log.info(
+            "Realtime participant registered: room=%s identity=%s name=%s normalized_name=%s",
+            ctx.room.name,
+            p.identity,
+            p.name,
+            participant["name"],
+        )
 
     assistant = RealtimeAssistant(get_name_fn=lambda: participant["name"], stance=stance)
 
@@ -304,6 +371,7 @@ async def _run_realtime(ctx: JobContext, stance: str) -> None:
         elif item.role == "assistant":
             conv_logger.log(role="agent", text=text)
 
+    log.info("Starting realtime AgentSession: room=%s stance=%s", ctx.room.name, stance)
     await session.start(
         agent=assistant,
         room=ctx.room,
@@ -311,8 +379,10 @@ async def _run_realtime(ctx: JobContext, stance: str) -> None:
             audio_input=room_io.AudioInputOptions(),
         ),
     )
+    log.info("Realtime AgentSession started: room=%s stance=%s", ctx.room.name, stance)
 
     await egress.start()
+    log.info("Realtime egress started: room=%s session_id=%s", ctx.room.name, conv_logger.session_id)
 
     ctx.room.on(
         "disconnected",
@@ -329,6 +399,12 @@ async def _run_realtime(ctx: JobContext, stance: str) -> None:
             await assistant.update_instructions(
                 build_realtime_prompt(participant["name"], stance=stance)
             )
+        else:
+            log.info(
+                "Realtime extra participant connected after first participant: room=%s identity=%s",
+                ctx.room.name,
+                p.identity,
+            )
 
     ctx.room.on(
         "participant_connected",
@@ -339,16 +415,39 @@ async def _run_realtime(ctx: JobContext, stance: str) -> None:
 if AGENT_WORKER_MODE.startswith("realtime"):
 
     REALTIME_STANCE, REALTIME_AGENT_NAME = _resolve_realtime_worker()
+    log.info(
+        "Registering LiveKit rtc_session: agent_name=%s worker_mode=%s stance=%s",
+        REALTIME_AGENT_NAME,
+        AGENT_WORKER_MODE,
+        REALTIME_STANCE,
+    )
 
     @server.rtc_session(agent_name=REALTIME_AGENT_NAME)
     async def selected_agent(ctx: JobContext):
-        await _run_realtime(ctx, REALTIME_STANCE)
+        try:
+            await _run_realtime(ctx, REALTIME_STANCE)
+        except Exception:
+            log.exception(
+                "Realtime job failed: agent_name=%s room=%s stance=%s",
+                REALTIME_AGENT_NAME,
+                ctx.room.name,
+                REALTIME_STANCE,
+            )
+            raise
 
 else:
+    log.info(
+        "Registering LiveKit rtc_session: agent_name=pipeline-agent worker_mode=%s",
+        AGENT_WORKER_MODE,
+    )
 
     @server.rtc_session(agent_name="pipeline-agent")
     async def selected_agent(ctx: JobContext):
-        await _run(ctx)
+        try:
+            await _run(ctx)
+        except Exception:
+            log.exception("Pipeline job failed: agent_name=pipeline-agent room=%s", ctx.room.name)
+            raise
 
 
 if __name__ == "__main__":
