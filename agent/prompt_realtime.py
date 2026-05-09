@@ -6,6 +6,7 @@ from typing import Literal
 
 AgentStance = Literal["dominant", "passive"]
 PROMPT_CONFIG_PATH = Path(__file__).parent.parent / "prompt_config.json"
+DEFAULT_PROMPT_CONFIG_PATH = Path(__file__).parent.parent / "prompt_config.default.json"
 
 
 BASE_PROMPT = dedent("""
@@ -220,30 +221,51 @@ def _valid_prompt_text(value: object, fallback: str) -> str:
     return fallback
 
 
-def load_prompt_config() -> tuple[str, dict[AgentStance, str]]:
+def _load_prompt_config_file(
+    path: Path,
+    fallback_base_prompt: str,
+    fallback_stance_prompts: dict[AgentStance, str],
+) -> tuple[str, dict[AgentStance, str]] | None:
     try:
-        with open(PROMPT_CONFIG_PATH, encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             raw = json.load(f)
     except (OSError, json.JSONDecodeError):
-        return BASE_PROMPT, STANCE_PROMPTS
+        return None
 
     realtime = raw.get("realtime") if isinstance(raw, dict) else None
     if not isinstance(realtime, dict):
-        return BASE_PROMPT, STANCE_PROMPTS
+        return None
 
     return (
-        _valid_prompt_text(realtime.get("basePrompt"), BASE_PROMPT),
+        _valid_prompt_text(realtime.get("basePrompt"), fallback_base_prompt),
         {
             "dominant": _valid_prompt_text(
                 realtime.get("dominantPrompt"),
-                STANCE_PROMPTS["dominant"],
+                fallback_stance_prompts["dominant"],
             ),
             "passive": _valid_prompt_text(
                 realtime.get("passivePrompt"),
-                STANCE_PROMPTS["passive"],
+                fallback_stance_prompts["passive"],
             ),
         },
     )
+
+
+def load_default_prompt_config() -> tuple[str, dict[AgentStance, str]]:
+    return _load_prompt_config_file(
+        DEFAULT_PROMPT_CONFIG_PATH,
+        BASE_PROMPT,
+        STANCE_PROMPTS,
+    ) or (BASE_PROMPT, STANCE_PROMPTS)
+
+
+def load_prompt_config() -> tuple[str, dict[AgentStance, str]]:
+    base_prompt, stance_prompts = load_default_prompt_config()
+    return _load_prompt_config_file(
+        PROMPT_CONFIG_PATH,
+        base_prompt,
+        stance_prompts,
+    ) or (base_prompt, stance_prompts)
 
 
 def build_prompt(

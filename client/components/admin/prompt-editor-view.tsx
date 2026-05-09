@@ -49,6 +49,12 @@ function samePrompt(a: RealtimePromptConfig | null, b: RealtimePromptConfig | nu
   );
 }
 
+function confirmPromptChange(action: string) {
+  return window.confirm(
+    `${action}\n\n변경된 프롬프트는 현재 진행 중인 세션에는 적용되지 않고, 다음에 새로 생성되는 개별 세션부터 반영됩니다.\n\n계속할까요?`
+  );
+}
+
 export function PromptEditorView() {
   const [prompt, setPrompt] = useState<RealtimePromptConfig>(EMPTY_PROMPT);
   const [savedPrompt, setSavedPrompt] = useState<RealtimePromptConfig | null>(null);
@@ -97,6 +103,8 @@ export function PromptEditorView() {
   }, []);
 
   async function savePrompt() {
+    if (!confirmPromptChange('Realtime 프롬프트 변경사항을 저장합니다.')) return;
+
     setSaving(true);
     setMessage(null);
     try {
@@ -131,22 +139,28 @@ export function PromptEditorView() {
   }
 
   async function resetPrompt() {
-    if (!window.confirm('Realtime 프롬프트를 기본값으로 복원할까요?')) return;
+    if (!confirmPromptChange('Realtime 프롬프트를 기본값으로 복원합니다.')) return;
+
     setSaving(true);
     setMessage(null);
     try {
       const res = await fetch('/api/admin/prompts/realtime', { method: 'DELETE' });
-      const data: PromptResponse = await res.json();
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ text: data.error ?? '기본값 복원 실패', ok: false });
+        return;
+      }
+      const saved: PromptResponse = data;
       const next = {
-        basePrompt: data.basePrompt,
-        dominantPrompt: data.dominantPrompt,
-        passivePrompt: data.passivePrompt,
+        basePrompt: saved.basePrompt,
+        dominantPrompt: saved.dominantPrompt,
+        passivePrompt: saved.passivePrompt,
       };
       setPrompt(next);
       setSavedPrompt(next);
-      setUsingDefault(data.usingDefault);
-      setPromptId(data.promptId);
-      setPromptSavedAt(data.savedAt);
+      setUsingDefault(saved.usingDefault);
+      setPromptId(saved.promptId);
+      setPromptSavedAt(saved.savedAt);
       setSavedAt(new Date().toLocaleTimeString('ko-KR'));
       setMessage({ text: '기본 프롬프트로 복원했습니다.', ok: true });
     } catch {

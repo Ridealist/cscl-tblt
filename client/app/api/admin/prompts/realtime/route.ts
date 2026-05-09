@@ -3,7 +3,6 @@ import { randomUUID } from 'crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
 import {
-  DEFAULT_REALTIME_PROMPT_CONFIG,
   DEFAULT_REALTIME_PROMPT_METADATA,
   type RealtimePromptConfig,
   type RealtimePromptMetadata,
@@ -12,6 +11,7 @@ import {
 } from '@/lib/realtime-prompt-config';
 
 const PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.json');
+const DEFAULT_PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.default.json');
 
 type PromptFileShape = {
   realtime?: unknown;
@@ -41,6 +41,15 @@ function readPromptMetadata(value: unknown): RealtimePromptMetadata {
   };
 }
 
+async function readDefaultPromptConfig(): Promise<RealtimePromptConfig> {
+  const raw = JSON.parse(await readFile(DEFAULT_PROMPT_CONFIG_PATH, 'utf-8')) as PromptFileShape;
+  const result = validateRealtimePromptConfig(raw.realtime);
+  if (!result.ok) {
+    throw new Error(result.error);
+  }
+  return result.config;
+}
+
 async function readPromptConfig(): Promise<RealtimePromptState> {
   try {
     const raw = JSON.parse(await readFile(PROMPT_CONFIG_PATH, 'utf-8')) as PromptFileShape;
@@ -53,11 +62,11 @@ async function readPromptConfig(): Promise<RealtimePromptState> {
       };
     }
   } catch {
-    // Fall back to the built-in prompt defaults.
+    // Fall back to the tracked prompt defaults.
   }
 
   return {
-    ...DEFAULT_REALTIME_PROMPT_CONFIG,
+    ...(await readDefaultPromptConfig()),
     ...DEFAULT_REALTIME_PROMPT_METADATA,
     usingDefault: true,
   };
@@ -77,7 +86,14 @@ async function writePromptConfig(config: RealtimePromptConfig): Promise<Realtime
 }
 
 export async function GET() {
-  return NextResponse.json(await readPromptConfig());
+  try {
+    return NextResponse.json(await readPromptConfig());
+  } catch {
+    return NextResponse.json(
+      { error: '기본 프롬프트 파일을 불러오지 못했습니다.' },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(req: Request) {
@@ -104,9 +120,16 @@ export async function DELETE() {
     }
   }
 
-  return NextResponse.json({
-    ...DEFAULT_REALTIME_PROMPT_CONFIG,
-    ...DEFAULT_REALTIME_PROMPT_METADATA,
-    usingDefault: true,
-  });
+  try {
+    return NextResponse.json({
+      ...(await readDefaultPromptConfig()),
+      ...DEFAULT_REALTIME_PROMPT_METADATA,
+      usingDefault: true,
+    });
+  } catch {
+    return NextResponse.json(
+      { error: '기본 프롬프트 파일을 불러오지 못했습니다.' },
+      { status: 500 }
+    );
+  }
 }
