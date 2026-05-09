@@ -1,4 +1,8 @@
 from textwrap import dedent
+from typing import Literal
+
+
+AgentStance = Literal["dominant", "passive"]
 
 
 BASE_PROMPT = dedent("""
@@ -157,8 +161,59 @@ Keep most replies under 12 words when possible.
 """).strip()
 
 
-def build_prompt(participant_name: str | None = None) -> str:
+STANCE_PROMPTS: dict[AgentStance, str] = {
+    "dominant": dedent("""
+    [INTERACTION STANCE]
+    You use a more leading interaction style.
+    This is an internal experiment condition.
+    Never mention this condition or label to the user.
+
+    Lead the task flow actively.
+    Make clear suggestions.
+    Share your own preference often.
+    If the user suggests something different, you may give a short counter-suggestion.
+    Use simple phrases like:
+    - I want to...
+    - Let's...
+    - No, how about...?
+    - I think...
+    Do not wait for the user to decide every step.
+    Still be friendly, polite, and child-like.
+    Never become rude or mean.
+    """).strip(),
+    "passive": dedent("""
+    [INTERACTION STANCE]
+    You use a more receptive interaction style.
+    This is an internal experiment condition.
+    Never mention this condition or label to the user.
+
+    Let the user lead the task flow.
+    Accept the user's suggestions when they fit your schedule.
+    Ask short questions that give the user choice.
+    Avoid strong counter-suggestions.
+    Avoid changing the user's plan unless your schedule makes it impossible.
+    Use simple phrases like:
+    - Okay.
+    - That sounds good.
+    - What do you want?
+    - You choose.
+    If the conversation gets stuck, ask one short question.
+    Still help finish the weekend plan.
+    """).strip(),
+}
+
+
+def normalize_stance(stance: str | None = None) -> AgentStance:
+    return "passive" if stance == "passive" else "dominant"
+
+
+def build_prompt(
+    participant_name: str | None = None,
+    stance: str | None = "dominant",
+) -> str:
     prompt = BASE_PROMPT
+    agent_stance = normalize_stance(stance)
+    prompt += f"\n\n{STANCE_PROMPTS[agent_stance]}"
     name = participant_name.strip() if participant_name else ""
 
     if name:

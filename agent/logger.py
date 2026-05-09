@@ -10,12 +10,18 @@ log = logging.getLogger(__name__)
 
 
 class ConversationLogger:
-    def __init__(self, session_id: str, room_name: str):
+    def __init__(
+        self,
+        session_id: str,
+        room_name: str,
+        metadata: dict | None = None,
+    ):
         LOGS_DIR.mkdir(exist_ok=True)
         ts = datetime.now().strftime("%y%m%d_%H:%M")
         self.path = LOGS_DIR / f"{session_id}--{ts}.json"
         self.room = room_name
         self.session_id = session_id
+        self.metadata = metadata or {}
         self.entries: list[dict] = []
         self._flush_task: asyncio.Task | None = None
         log.info("Conversation log: %s", self.path)
@@ -63,7 +69,12 @@ class ConversationLogger:
     def _flush_sync(self) -> None:
         with open(self.path, "w", encoding="utf-8") as f:
             json.dump(
-                {"session_id": self.session_id, "room": self.room, "entries": self.entries},
+                {
+                    "session_id": self.session_id,
+                    "room": self.room,
+                    "metadata": self.metadata,
+                    "entries": self.entries,
+                },
                 f,
                 ensure_ascii=False,
                 indent=2,

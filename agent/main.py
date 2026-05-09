@@ -24,6 +24,7 @@ from logger import ConversationLogger
 from prompt_pipeline import build_prompt as build_pipeline_prompt
 from prompt_pipeline import _clean_names
 from prompt_realtime import build_prompt as build_realtime_prompt
+from prompt_realtime import normalize_stance as normalize_realtime_stance
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -32,6 +33,21 @@ log = logging.getLogger("agent")
 
 server = AgentServer()
 AGENT_WORKER_MODE = os.environ.get("AGENT_WORKER_MODE", "pipeline").strip().lower()
+AGENT_STANCE = normalize_realtime_stance(
+    os.environ.get("AGENT_STANCE", "dominant").strip().lower()
+)
+REALTIME_AGENT_NAMES = {
+    "dominant": "realtime-dominant-agent",
+    "passive": "realtime-passive-agent",
+}
+
+
+def _resolve_realtime_worker() -> tuple[str, str]:
+    if AGENT_WORKER_MODE == "realtime-passive":
+        return "passive", REALTIME_AGENT_NAMES["passive"]
+    if AGENT_WORKER_MODE == "realtime-dominant":
+        return "dominant", REALTIME_AGENT_NAMES["dominant"]
+    return AGENT_STANCE, REALTIME_AGENT_NAMES[AGENT_STANCE]
 
 
 class Assistant(Agent):
@@ -90,7 +106,11 @@ server.setup_fnc = prewarm
 async def _run(ctx: JobContext) -> None:
     """dispatch 공통 세션 로직."""
     ctx.log_context_fields = {"room": ctx.room.name}
-    conv_logger = ConversationLogger(ctx.job.room.sid, ctx.room.name)
+    conv_logger = ConversationLogger(
+        ctx.job.room.sid,
+        ctx.room.name,
+        metadata={"agent_mode": "pipeline"},
+    )
     egress = EgressRecorder(ctx.room.name, conv_logger.session_id)
 
     # 참가자 registry: identity → name
@@ -222,15 +242,16 @@ async def _run(ctx: JobContext) -> None:
 
 
 class RealtimeAssistant(Agent):
-    def __init__(self, get_name_fn) -> None:
-        super().__init__(instructions=build_realtime_prompt())
+    def __init__(self, get_name_fn, stance: str) -> None:
+        super().__init__(instructions=build_realtime_prompt(stance=stance))
         self._get_name = get_name_fn
+        self._stance = stance
 
     async def on_enter(self) -> None:
         """1:1 realtime 세션 입장 직후 참가자 이름을 반영하고 첫 턴을 생성."""
         await asyncio.sleep(1.0)
         name = self._get_name()
-        await self.update_instructions(build_realtime_prompt(name))
+        await self.update_instructions(build_realtime_prompt(name, stance=self._stance))
 
         if name:
             instruction = (
@@ -245,10 +266,14 @@ class RealtimeAssistant(Agent):
         self.session.generate_reply(instructions=instruction)
 
 
-async def _run_realtime(ctx: JobContext) -> None:
+async def _run_realtime(ctx: JobContext, stance: str) -> None:
     """1:1 OpenAI Realtime 세션 로직."""
-    ctx.log_context_fields = {"room": ctx.room.name, "mode": "realtime"}
-    conv_logger = ConversationLogger(ctx.job.room.sid, ctx.room.name)
+    ctx.log_context_fields = {"room": ctx.room.name, "mode": "realtime", "stance": stance}
+    conv_logger = ConversationLogger(
+        ctx.job.room.sid,
+        ctx.room.name,
+        metadata={"agent_mode": "realtime", "agent_stance": stance},
+    )
     egress = EgressRecorder(ctx.room.name, conv_logger.session_id)
 
     participant: dict[str, str | None] = {"identity": None, "name": None}
@@ -258,7 +283,7 @@ async def _run_realtime(ctx: JobContext) -> None:
         participant["identity"] = p.identity
         participant["name"] = full_name.split()[0] if full_name else full_name
 
-    assistant = RealtimeAssistant(get_name_fn=lambda: participant["name"])
+    assistant = RealtimeAssistant(get_name_fn=lambda: participant["name"], stance=stance)
 
     session = AgentSession(
         llm=openai.realtime.RealtimeModel(
@@ -307,7 +332,9 @@ async def _run_realtime(ctx: JobContext) -> None:
     async def on_participant_connected(p):
         if participant["identity"] is None:
             _register_participant(p)
-            await assistant.update_instructions(build_realtime_prompt(participant["name"]))
+            await assistant.update_instructions(
+                build_realtime_prompt(participant["name"], stance=stance)
+            )
 
     ctx.room.on(
         "participant_connected",
@@ -315,11 +342,13 @@ async def _run_realtime(ctx: JobContext) -> None:
     )
 
 
-if AGENT_WORKER_MODE == "realtime":
+if AGENT_WORKER_MODE.startswith("realtime"):
 
-    @server.rtc_session(agent_name="realtime-agent")
+    REALTIME_STANCE, REALTIME_AGENT_NAME = _resolve_realtime_worker()
+
+    @server.rtc_session(agent_name=REALTIME_AGENT_NAME)
     async def selected_agent(ctx: JobContext):
-        await _run_realtime(ctx)
+        await _run_realtime(ctx, REALTIME_STANCE)
 
 else:
 

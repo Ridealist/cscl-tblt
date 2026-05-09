@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { type AgentMode, getAgentModeLabel } from '@/lib/agent-mode';
+import { type AgentStance, getAgentStanceLabel } from '@/lib/agent-stance';
 
 interface Settings {
   numClasses: number;
@@ -9,6 +10,7 @@ interface Settings {
   classStart: number;
   activeClass: number;
   agentMode: AgentMode;
+  agentStance: AgentStance;
 }
 
 // ─── 룸 관리 섹션 ─────────────────────────────────────────────────────────────
@@ -203,6 +205,7 @@ function AgentDispatchSection({
 
 interface RealtimeRoomStatus {
   name: string;
+  agentStance?: AgentStance;
   numParticipants: number;
   totalParticipants?: number;
   numAgents?: number;
@@ -287,6 +290,14 @@ function RealtimeSessionSection() {
           >
             <div className="flex min-w-0 flex-col">
               <span className="text-foreground truncate text-sm font-medium">{room.name}</span>
+              <span className="text-muted-foreground text-xs">
+                상호작용 방식:{' '}
+                <span className="text-foreground font-semibold">
+                  {room.agentStance
+                    ? `${getAgentStanceLabel(room.agentStance)} 에이전트`
+                    : '미기록'}
+                </span>
+              </span>
               <span className="text-muted-foreground text-xs">
                 참가자 {room.numParticipants}명
                 {(room.numAgents ?? 0) > 0 && ` · AI ${room.numAgents}명`}
@@ -454,6 +465,47 @@ export default function AdminPage() {
 
       <hr className="border-border" />
 
+      {settings.agentMode === 'realtime' && (
+        <>
+          {/* 에이전트 상호작용 방식 */}
+          <section className="flex flex-col gap-3">
+            <div>
+              <h2 className="text-foreground text-sm font-semibold">에이전트 상호작용 방식</h2>
+              <p className="text-muted-foreground text-xs">
+                실험 조건입니다. 학생 화면에는 표시되지 않습니다.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {(['dominant', 'passive'] as AgentStance[]).map((stance) => (
+                <button
+                  key={stance}
+                  onClick={() => update({ agentStance: stance })}
+                  disabled={saving}
+                  className={`rounded-lg border px-4 py-3 text-left transition-colors disabled:opacity-50 ${
+                    settings.agentStance === stance
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'border-border hover:bg-muted text-foreground'
+                  }`}
+                >
+                  <span className="block text-sm font-semibold">
+                    {getAgentStanceLabel(stance)} 에이전트
+                  </span>
+                  <span
+                    className={`mt-1 block text-xs ${settings.agentStance === stance ? 'opacity-80' : 'text-muted-foreground'}`}
+                  >
+                    {stance === 'dominant'
+                      ? '에이전트가 대화와 과제 진행을 주도'
+                      : '학생의 제안과 선택을 우선 수용'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <hr className="border-border" />
+        </>
+      )}
+
       {/* 반 번호 시작 */}
       <section className="flex flex-col gap-3">
         <div>
@@ -569,6 +621,14 @@ export default function AdminPage() {
               {getAgentModeLabel(settings.agentMode)}
             </span>
           </li>
+          {settings.agentMode === 'realtime' && (
+            <li>
+              상호작용 방식:{' '}
+              <span className="text-foreground font-semibold">
+                {getAgentStanceLabel(settings.agentStance)} 에이전트
+              </span>
+            </li>
+          )}
           <li>
             학급 범위:{' '}
             <span className="text-foreground font-semibold">

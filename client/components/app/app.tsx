@@ -11,7 +11,7 @@ import { ViewController } from '@/components/app/view-controller';
 import { Toaster } from '@/components/ui/sonner';
 import { useAgentErrors } from '@/hooks/useAgentErrors';
 import { useDebugMode } from '@/hooks/useDebug';
-import { type AgentMode, getAgentNameForMode } from '@/lib/agent-mode';
+import type { AgentMode } from '@/lib/agent-mode';
 import { getSandboxTokenSource } from '@/lib/utils';
 
 const IN_DEVELOPMENT = process.env.NODE_ENV !== 'production';
@@ -41,16 +41,13 @@ export function App({ appConfig }: AppProps) {
     }
     return TokenSource.custom(async () => {
       const info = sessionInfoRef.current;
-      const agentName = info ? getAgentNameForMode(info.agentMode) : appConfig.agentName;
-      const roomConfig = agentName ? { agents: [{ agent_name: agentName }] } : undefined;
-
       const res = await fetch('/api/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           participant_name: info?.participantName,
           room_name: info?.roomName,
-          room_config: roomConfig,
+          agent_mode: info?.agentMode,
         }),
       });
       return res.json();

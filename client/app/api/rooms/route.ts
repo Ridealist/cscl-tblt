@@ -4,6 +4,7 @@ import { RoomServiceClient } from 'livekit-server-sdk';
 import { join } from 'path';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { type AgentMode, normalizeAgentMode } from '@/lib/agent-mode';
+import { type AgentStance, normalizeAgentStance } from '@/lib/agent-stance';
 
 const API_KEY = process.env.LIVEKIT_API_KEY;
 const API_SECRET = process.env.LIVEKIT_API_SECRET;
@@ -40,6 +41,17 @@ type RoomCounts = {
   numAgents: number;
   numEgress: number;
 };
+
+function parseRealtimeRoomMetadata(metadata?: string): { agentStance?: AgentStance } {
+  if (!metadata) return {};
+  try {
+    const parsed = JSON.parse(metadata) as { agentMode?: unknown; agentStance?: unknown };
+    if (parsed.agentMode !== 'realtime' || !parsed.agentStance) return {};
+    return { agentStance: normalizeAgentStance(parsed.agentStance) };
+  } catch {
+    return {};
+  }
+}
 
 async function getRoomCounts(svc: RoomServiceClient, roomName: string): Promise<RoomCounts> {
   try {
@@ -95,6 +107,7 @@ export async function GET() {
     .filter((room) => room.name.startsWith('realtime-') && activeRoomNames.has(room.name))
     .map((room) => ({
       name: room.name,
+      ...parseRealtimeRoomMetadata(room.metadata),
       ...(countMap.get(room.name) ?? {
         numParticipants: 0,
         totalParticipants: room.numParticipants,

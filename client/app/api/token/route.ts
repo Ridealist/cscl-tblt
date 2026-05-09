@@ -1,6 +1,15 @@
 import { NextResponse } from 'next/server';
+import { readFileSync } from 'fs';
 import { AccessToken, type AccessTokenOptions, type VideoGrant } from 'livekit-server-sdk';
+import { join } from 'path';
 import { RoomConfiguration } from '@livekit/protocol';
+import { type AgentMode, normalizeAgentMode } from '@/lib/agent-mode';
+import {
+  type AgentStance,
+  DEFAULT_AGENT_STANCE,
+  getAgentNameForConfig,
+  normalizeAgentStance,
+} from '@/lib/agent-stance';
 
 type ConnectionDetails = {
   serverUrl: string;
@@ -13,6 +22,12 @@ type ConnectionDetails = {
 const API_KEY = process.env.LIVEKIT_API_KEY;
 const API_SECRET = process.env.LIVEKIT_API_SECRET;
 const LIVEKIT_URL = process.env.LIVEKIT_URL;
+const CONFIG_PATH = join(process.cwd(), '..', 'config.json');
+
+type RuntimeConfig = {
+  agentMode: AgentMode;
+  agentStance: AgentStance;
+};
 
 // don't cache the results
 export const revalidate = 0;
@@ -29,17 +44,16 @@ export async function POST(req: Request) {
       throw new Error('LIVEKIT_API_SECRET is not defined');
     }
 
-    // Parse room config from request body.
     const body = await req.json();
-    // Recreate the RoomConfiguration object from JSON object.
-    const roomConfig = body?.room_config
-      ? RoomConfiguration.fromJson(body.room_config, { ignoreUnknownFields: true })
-      : new RoomConfiguration();
 
     // Use provided name/room or fall back to random values
     const participantName = body?.participant_name?.trim() || 'user';
     const participantIdentity = `${participantName}_${Math.floor(Math.random() * 10_000)}`;
     const roomName = body?.room_name?.trim() || `room_${Math.floor(Math.random() * 10_000)}`;
+    const config = readRuntimeConfig();
+    const agentMode = inferAgentMode(body?.agent_mode, roomName, config.agentMode);
+    const agentName = getAgentNameForConfig(agentMode, config.agentStance);
+    const roomConfig = buildRoomConfig(agentName, agentMode, config.agentStance);
 
     const participantToken = await createParticipantToken(
       { identity: participantIdentity, name: participantName },
@@ -64,6 +78,47 @@ export async function POST(req: Request) {
       return new NextResponse(error.message, { status: 500 });
     }
   }
+}
+
+function readRuntimeConfig(): RuntimeConfig {
+  try {
+    const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
+    return {
+      agentMode: normalizeAgentMode(raw.agentMode),
+      agentStance: normalizeAgentStance(raw.agentStance),
+    };
+  } catch {
+    return {
+      agentMode: 'pipeline',
+      agentStance: DEFAULT_AGENT_STANCE,
+    };
+  }
+}
+
+function inferAgentMode(value: unknown, roomName: string, fallback: AgentMode): AgentMode {
+  if (roomName.startsWith('realtime-')) return 'realtime';
+  return normalizeAgentMode(value ?? fallback);
+}
+
+function buildRoomConfig(
+  agentName: string,
+  agentMode: AgentMode,
+  agentStance: AgentStance
+): RoomConfiguration {
+  const metadata = JSON.stringify({
+    agentMode,
+    ...(agentMode === 'realtime' ? { agentStance } : {}),
+  });
+
+  return new RoomConfiguration({
+    metadata,
+    agents: [
+      {
+        agentName,
+        metadata,
+      },
+    ],
+  });
 }
 
 function createParticipantToken(
