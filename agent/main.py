@@ -12,12 +12,10 @@ from livekit.agents import (
     JobContext,
     JobProcess,
     cli,
-    inference,
     room_io,
 )
 from livekit.agents import llm
-from livekit.plugins import openai, silero
-from livekit.plugins.turn_detector.multilingual import MultilingualModel
+from livekit.plugins import openai
 
 from egress_recorder import EgressRecorder
 from logger import ConversationLogger
@@ -60,9 +58,11 @@ AGENT_STANCE = normalize_realtime_stance(
     os.environ.get("AGENT_STANCE", DEFAULT_AGENT_STANCE).strip().lower()
 )
 REALTIME_AGENT_NAMES = {
-    "dominant": "realtime-dominant-agent",
-    "passive": "realtime-passive-agent",
+    "dominant": "realtime-agent",
+    "passive": "realtime-agent",
 }
+REALTIME_AGENT_NAME = "realtime-agent"
+REALTIME_FIRST_SENTENCE = "Hi, let's choose an eco-campaign together."
 
 log.info(
     "Agent worker configuration: worker_mode=%s stance=%s default_mode=%s default_stance=%s "
@@ -78,10 +78,37 @@ log.info(
 
 def _resolve_realtime_worker() -> tuple[str, str]:
     if AGENT_WORKER_MODE == "realtime-passive":
-        return "passive", REALTIME_AGENT_NAMES["passive"]
+        return "passive", REALTIME_AGENT_NAME
     if AGENT_WORKER_MODE == "realtime-dominant":
-        return "dominant", REALTIME_AGENT_NAMES["dominant"]
-    return AGENT_STANCE, REALTIME_AGENT_NAMES[AGENT_STANCE]
+        return "dominant", REALTIME_AGENT_NAME
+    return AGENT_STANCE, REALTIME_AGENT_NAME
+
+
+def _metadata_stance(metadata) -> str | None:
+    if not metadata:
+        return None
+    try:
+        parsed = json.loads(metadata) if isinstance(metadata, str) else metadata
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    stance = parsed.get("agentStance")
+    if stance in ("dominant", "passive"):
+        return normalize_realtime_stance(stance)
+    return None
+
+
+def _resolve_realtime_job_stance(ctx: JobContext, fallback: str) -> str:
+    for metadata in (
+        getattr(ctx.job, "metadata", None),
+        getattr(ctx.room, "metadata", None),
+        getattr(getattr(ctx.job, "room", None), "metadata", None),
+    ):
+        stance = _metadata_stance(metadata)
+        if stance:
+            return stance
+    return normalize_realtime_stance(fallback)
 
 
 class Assistant(Agent):
@@ -131,11 +158,10 @@ class Assistant(Agent):
 
 
 def prewarm(proc: JobProcess):
+    from livekit.plugins import silero
+
     log.info("Prewarming agent process resources")
     proc.userdata["vad"] = silero.VAD.load()
-
-
-server.setup_fnc = prewarm
 
 
 async def _run(ctx: JobContext) -> None:
@@ -182,6 +208,9 @@ async def _run(ctx: JobContext) -> None:
         get_names_fn=_human_names,
         get_speaker_fn=lambda: current_speaker["name"],
     )
+
+    from livekit.agents import inference
+    from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
     #TODO Agent 설정 조정(STT/LLM/TTS 모델 설정)
     session = AgentSession(
@@ -306,14 +335,16 @@ class RealtimeAssistant(Agent):
         await self.update_instructions(build_realtime_prompt(name, stance=self._stance))
 
         instruction = (
-            "Start the conversation by following the [START] instruction in your system prompt. "
-            "Use one short A1-A2 English sentence."
+            "Say only this exact sentence as Alex, a friendly classmate, and nothing else: "
+            f"{json.dumps(REALTIME_FIRST_SENTENCE, ensure_ascii=False)}"
         )
+        log.info("Realtime first reply requested: %s", REALTIME_FIRST_SENTENCE)
         self.session.generate_reply(instructions=instruction)
 
 
 async def _run_realtime(ctx: JobContext, stance: str) -> None:
     """1:1 OpenAI Realtime 세션 로직."""
+    stance = _resolve_realtime_job_stance(ctx, fallback=stance)
     ctx.log_context_fields = {"room": ctx.room.name, "mode": "realtime", "stance": stance}
     log.info(
         "Starting realtime job: room=%s room_sid=%s job_id=%s stance=%s metadata=%s",
@@ -349,7 +380,7 @@ async def _run_realtime(ctx: JobContext, stance: str) -> None:
     session = AgentSession(
         llm=openai.realtime.RealtimeModel(
             model="gpt-realtime",
-            voice="marin",
+            voice="cedar",
         ),
     )
 
@@ -416,7 +447,7 @@ if AGENT_WORKER_MODE.startswith("realtime"):
 
     REALTIME_STANCE, REALTIME_AGENT_NAME = _resolve_realtime_worker()
     log.info(
-        "Registering LiveKit rtc_session: agent_name=%s worker_mode=%s stance=%s",
+        "Registering LiveKit rtc_session: agent_name=%s worker_mode=%s fallback_stance=%s",
         REALTIME_AGENT_NAME,
         AGENT_WORKER_MODE,
         REALTIME_STANCE,
@@ -440,6 +471,7 @@ else:
         "Registering LiveKit rtc_session: agent_name=pipeline-agent worker_mode=%s",
         AGENT_WORKER_MODE,
     )
+    server.setup_fnc = prewarm
 
     @server.rtc_session(agent_name="pipeline-agent")
     async def selected_agent(ctx: JobContext):
