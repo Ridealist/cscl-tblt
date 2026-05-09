@@ -2,6 +2,11 @@
 
 LiveKit 기반 AI 영어 대화 실습 시스템. TBLT(Task-Based Language Teaching) 방식으로, AI 캐릭터 **Alex**(한국 거주 외국인 초등학생)와 **주말 약속 만들기** 태스크를 수행하는 실시간 음성 대화 에이전트. 대상: 한국어권 대학생.
 
+관리자는 `/admin`에서 수업 운영 모드를 선택할 수 있다.
+
+- **그룹 대화 모드** (`pipeline`): 학생 n명 + 에이전트 1명의 STT → LLM → TTS 파이프라인. 에이전트 이름: `pipeline-agent`
+- **개별 대화 모드** (`realtime`): 학생 1명 + 에이전트 1명의 OpenAI Realtime speech-to-speech 파이프라인. 에이전트 이름: `realtime-agent`
+
 ## 프로젝트 구조
 
 ```
@@ -15,47 +20,60 @@ CSCL_TBLT/
 │
 ├── agent/                # AI 음성 에이전트 (LiveKit Agents Python SDK)
 │   ├── main.py           # 에이전트 진입점 (CLI 지원)
-│   ├── prompt.py         # 시스템 프롬프트
+│   ├── prompt_pipeline.py # 그룹 대화 모드 시스템 프롬프트
+│   ├── prompt_realtime.py # 개별 대화 모드 시스템 프롬프트
 │   ├── logger.py         # 대화 JSON 로거
 │   ├── pyproject.toml
 │   ├── uv.lock
 │   └── tests/
 │       └── test_conversation.py  # LLM 단독 대화 흐름 테스트
 │
-├── server/               # 토큰 발급 서버 (FastAPI)
+├── server/               # legacy static 클라이언트용 토큰 발급 서버 (FastAPI)
 │   ├── main.py           # GET /token, POST /dispatch
 │   ├── pyproject.toml
 │   └── uv.lock
 │
-├── client/               # 브라우저 클라이언트
-│   ├── static/           # 심플 클라이언트 (HTML/JS) — python -m http.server 전용
+├── client/               # Next.js 브라우저 클라이언트
+│   ├── app/              # Next.js App Router + API routes
+│   ├── components/       # 로비, 관리자, LiveKit UI 컴포넌트
+│   ├── static/           # legacy 심플 클라이언트 (HTML/JS)
 │   │   ├── index.html
 │   │   ├── app.js
 │   │   └── style.css
-│   ├── app/              # Next.js 클라이언트 (고급)
 │   └── .env.local        # Next.js용 환경변수 (git 추적 안 됨)
 │
+├── config.json           # 반/그룹/운영 모드 설정
 └── logs/                 # 대화 로그 JSON (자동 생성, git 추적 안 됨)
 ```
 
 ## 아키텍처
 
+### 현재 기본 구조: Next.js 클라이언트
+
 ```
-브라우저 클라이언트 (client/)
+브라우저 클라이언트 (client/ Next.js)
     │
-    ├─[GET /token?name=이름]──► 토큰 서버 (server/main.py :8000)
-    │                                │
-    │                                └─[POST /dispatch]──► LiveKit Cloud
-    │                                                           │
-    └─[WebRTC 연결]──────────────────────────────────────────────┤
-                                                                │
-                                                     AI 에이전트 (agent/main.py)
-                                                     STT → LLM → TTS
+    ├─[GET /api/rooms]──────────────► config.json + LiveKit room 조회
+    ├─[POST /api/admin/config]──────► 수업 운영 모드/반/그룹 설정 저장
+    ├─[POST /api/token]─────────────► LiveKit 참가자 토큰 발급
+    │                                  room_config.agents로 agent 자동 배치
+    │
+    └─[WebRTC 연결]────────────────► LiveKit Cloud
+                                      │
+                                      ├─ pipeline-agent: STT → LLM → TTS
+                                      └─ realtime-agent: OpenAI Realtime
 ```
 
-- **토큰 서버** (`server/`): 브라우저가 LiveKit에 접속할 JWT 토큰 발급. `/dispatch` 엔드포인트로 에이전트를 room에 수동 호출.
-- **AI 에이전트** (`agent/`): LiveKit Cloud에 상시 연결 대기. room에 dispatch되면 STT → LLM → TTS 파이프라인으로 사용자와 대화.
-- **클라이언트** (`client/`): 심플 HTML/JS 또는 Next.js 중 선택.
+- **Next.js 클라이언트** (`client/`): 학생 로비, 관리자 설정, 관리자 대시보드, 토큰 발급 API를 포함한다.
+- **AI 에이전트** (`agent/`): 같은 코드에서 `pipeline-agent` 또는 `realtime-agent` worker를 실행한다. LiveKit Agents SDK 제한으로 한 프로세스에는 하나의 `rtc_session`만 등록할 수 있으므로 두 모드를 동시에 운영하려면 worker 프로세스를 2개 실행한다.
+- **legacy 토큰 서버** (`server/`): `client/static` HTML 클라이언트용이다. 현재 Next.js 앱 실행에는 필요하지 않다.
+
+### 수업 운영 모드
+
+| 모드 | UX 표시명 | Room 정책 | Agent | 음성 처리 |
+|---|---|---|---|---|
+| `pipeline` | 그룹 대화 모드 | `12반-1그룹` 같은 그룹 room | `pipeline-agent` | STT `deepgram/nova-3` → LLM `openai/gpt-4.1-mini` → TTS `cartesia/sonic-3` |
+| `realtime` | 개별 대화 모드 | `realtime-{반}-{학생명}-{suffix}` 자동 생성 | `realtime-agent` | OpenAI Realtime speech-to-speech |
 
 ## 사전 준비
 
@@ -79,16 +97,18 @@ LIVEKIT_URL=wss://your-project.livekit.cloud
 LIVEKIT_API_KEY=your_api_key
 LIVEKIT_API_SECRET=your_api_secret
 
-# 채팅방 및 에이전트 이름 (변경 시 client/app.js와 일치시킬 것)
+# 채팅방 및 에이전트 이름
 ROOM_NAME=english-practice
-AGENT_NAME=my-agent
+AGENT_NAME=pipeline-agent
+AGENT_WORKER_MODE=pipeline
 
-# LiveKit Inference를 사용하지 않을 경우에만 필요
+# Realtime 모드에는 OPENAI_API_KEY가 필요
+# Pipeline 모드는 LiveKit Inference를 사용하면 OPENAI_API_KEY / DEEPGRAM_API_KEY 없이도 동작
 OPENAI_API_KEY=
 DEEPGRAM_API_KEY=
 ```
 
-> LiveKit Cloud의 LiveKit Inference를 사용하면 OPENAI_API_KEY / DEEPGRAM_API_KEY 없이도 STT·LLM·TTS가 동작합니다.
+> Next.js 앱의 운영 모드는 `.env`가 아니라 `config.json`의 `agentMode`로 결정되며, `/admin`에서 변경한다.
 
 ### 3. 에이전트 모델 파일 다운로드 (최초 1회)
 
@@ -100,23 +120,61 @@ uv run python main.py download-files
 
 ## 실행 방법
 
-### 전체 스택 실행 (터미널 3개)
+### 현재 Next.js 앱 실행
+
+그룹 대화 모드만 테스트할 때는 터미널 2개면 충분하다.
 
 ```bash
-# 터미널 1 — 토큰 서버
+# 터미널 1 — pipeline-agent
+cd agent
+uv sync
+AGENT_WORKER_MODE=pipeline uv run python main.py dev
+```
+
+```bash
+# 터미널 2 — Next.js 클라이언트
+cd client
+pnpm install
+pnpm dev          # http://localhost:3000
+```
+
+브라우저에서:
+
+- 학생 로비: http://localhost:3000
+- 관리자 설정: http://localhost:3000/admin
+- 관리자 대시보드: http://localhost:3000/admin/dashboard
+
+> Next.js 클라이언트는 자체 `/api/token` 라우트를 가지므로 `server/` FastAPI 토큰 서버가 필요 없다.
+
+개별 대화 모드도 함께 테스트하려면 agent worker를 하나 더 띄운다.
+
+```bash
+# 터미널 3 — realtime-agent
+cd agent
+AGENT_WORKER_MODE=realtime uv run python main.py dev
+```
+
+`/admin`에서 개별 대화 모드로 바꾸면 학생은 `realtime-agent`가 배치된 개별 room으로 입장한다.
+
+### legacy static 클라이언트 실행 (선택)
+
+`client/static`을 사용할 때만 FastAPI 토큰 서버가 필요하다.
+
+```bash
+# 터미널 1 — legacy 토큰 서버
 cd server
 uv sync
-uv run uvicorn main:app --port 8000 --reload
+uv run python -m uvicorn main:app --port 8000 --reload
 ```
 
 ```bash
-# 터미널 2 — AI 에이전트
+# 터미널 2 — pipeline-agent
 cd agent
-uv run python main.py dev
+AGENT_WORKER_MODE=pipeline uv run python main.py dev
 ```
 
 ```bash
-# 터미널 3 — 심플 HTML 클라이언트
+# 터미널 3 — static HTML 클라이언트
 cd client/static
 python -m http.server 3000
 ```
@@ -146,26 +204,58 @@ uv run python main.py start
 | 명령 | 설명 | 필요한 것 |
 |------|------|----------|
 | `console` | 터미널 단독 음성 대화 | 마이크, 스피커 |
-| `dev` | 프론트엔드 연결 대기 (자동 재시작) | 토큰 서버, 클라이언트 |
-| `start` | 프로덕션 실행 | 토큰 서버, 클라이언트 |
+| `dev` | 프론트엔드 연결 대기 (자동 재시작) | Next.js 클라이언트 |
+| `start` | 프로덕션 실행 | Next.js 클라이언트 |
 | `download-files` | VAD 등 ML 모델 다운로드 | — |
 
 ---
 
-## Next.js 클라이언트 (고급)
+## Next.js 클라이언트
 
-`client/`에는 심플 HTML 클라이언트 외에 React/Next.js 기반 고급 클라이언트도 포함되어 있습니다.  
-Next.js 클라이언트는 자체 `/api/token` 라우트를 가지므로 **토큰 서버(`server/`)가 필요 없습니다.**
+`client/.env.local`에 LiveKit 자격증명이 필요하다.
 
-```bash
-cd client
-pnpm install
-pnpm dev          # http://localhost:3000
+```env
+LIVEKIT_URL=wss://your-project.livekit.cloud
+LIVEKIT_API_KEY=your_api_key
+LIVEKIT_API_SECRET=your_api_secret
 ```
 
-`client/.env.local`에 LiveKit 자격증명이 있는지 확인하세요 (루트 `.env`와 동일한 값).
+Next.js API routes:
 
-> **주의:** Next.js 클라이언트의 `/api/token` 라우트는 개발 환경 전용입니다. 프로덕션 배포 시 인증 레이어를 반드시 추가해야 합니다.
+| Route | 역할 |
+|---|---|
+| `POST /api/token` | 참가자 토큰 발급, 현재 운영 모드에 맞는 agent 자동 배치 |
+| `GET /api/rooms` | 활성 반의 그룹 room과 realtime 개별 room 현황 조회 |
+| `GET/POST /api/admin/config` | `config.json` 읽기/쓰기 |
+| `GET/POST /api/dispatch` | 그룹 대화 모드에서 `pipeline-agent` 수동 배치/존재 확인 |
+| `POST /api/rooms/terminate` | room 강제 종료 |
+| `GET /api/logs`, `GET /api/logs/stream` | 대화 로그 목록/스트리밍 |
+
+> **주의:** `/api/token`은 현재 개발/교실 운영용이다. 공개 프로덕션 배포 시 관리자 인증과 학생 입장 인증 레이어를 추가해야 한다.
+
+## 관리자 설정
+
+`/admin`에서 다음 값을 관리한다.
+
+| 설정 | 저장 위치 | 설명 |
+|---|---|---|
+| 수업 운영 모드 | `config.json.agentMode` | `pipeline` 또는 `realtime` |
+| 현재 수업 중인 반 | `config.json.activeClass` | 학생 로비에 표시되는 반 |
+| 반 번호 시작 | `config.json.classStart` | 반 번호 범위의 시작 |
+| 전체 학급 수 | `config.json.numClasses` | 관리자 화면에 표시할 반 개수 |
+| 반당 그룹 수 | `config.json.numGroupsPerClass` | 그룹 대화 모드에서 표시할 그룹 수 |
+
+예시:
+
+```json
+{
+  "numClasses": 4,
+  "numGroupsPerClass": 12,
+  "classStart": 9,
+  "activeClass": 12,
+  "agentMode": "pipeline"
+}
+```
 
 ---
 
@@ -189,15 +279,17 @@ uv run pytest tests/ -v
 
 ## 관리자 모니터링
 
-토큰 서버(`server/`)가 실행 중일 때, 브라우저에서 아래 주소에 접속하면 진행 중인 대화를 실시간으로 확인할 수 있습니다.
+Next.js 클라이언트가 실행 중일 때 브라우저에서 아래 주소에 접속하면 세션 로그를 확인할 수 있습니다.
 
 ```
-http://localhost:3000/admin.html
+http://localhost:3000/admin/dashboard
 ```
 
-- 가장 최근 세션의 대화 로그를 1초 단위로 갱신
+- 저장된 세션 목록 확인
+- 세션별 대화 로그 확인
 - 참가자 이름, 발화 시각, 역할(User/Agent) 표시
-- 서버 연결이 끊기면 자동 재연결
+
+legacy static 클라이언트를 사용할 때는 `client/static/admin.html`을 사용할 수 있다.
 
 ---
 
@@ -229,11 +321,14 @@ logs/
 
 | 항목 | 위치 |
 |------|------|
-| AI 시스템 프롬프트 수정 | `agent/prompt.py` |
-| STT / LLM / TTS 모델 변경 | `agent/main.py` (현재: STT `deepgram/nova-3`, LLM `openai/gpt-4.1-mini`, TTS `cartesia/sonic-3`) |
+| AI 시스템 프롬프트 수정 | `agent/prompt_pipeline.py`, `agent/prompt_realtime.py` |
+| 그룹 대화 모드 모델 변경 | `agent/main.py` (STT `deepgram/nova-3`, LLM `openai/gpt-4.1-mini`, TTS `cartesia/sonic-3`) |
+| 개별 대화 모드 모델 변경 | `agent/main.py` (`openai.realtime.RealtimeModel`) |
+| 실행할 worker 모드 | `AGENT_WORKER_MODE=pipeline` 또는 `AGENT_WORKER_MODE=realtime` |
+| 수업 운영 모드 변경 | `/admin` 또는 `config.json`의 `agentMode` |
 | 토큰 서버 포트 변경 | `server/main.py` + `client/static/app.js` 상단 `SERVER` 변수 |
-| Room 이름 변경 | `.env` → `ROOM_NAME` |
-| 에이전트 이름 변경 | `.env` → `AGENT_NAME` (agent/main.py의 `agent_name`과 일치시킬 것) |
+| legacy static Room 이름 변경 | `.env` → `ROOM_NAME` |
+| 에이전트 이름 변경 | `agent/main.py`, `client/lib/agent-mode.ts` (`pipeline-agent`, `realtime-agent`) |
 | 로그 저장 위치 변경 | `agent/logger.py` → `LOGS_DIR` |
 
 ---
@@ -337,12 +432,13 @@ cat > /opt/cscl-tblt/config.json << 'EOF'
   "numClasses": 4,
   "numGroupsPerClass": 4,
   "classStart": 1,
-  "activeClass": 1
+  "activeClass": 1,
+  "agentMode": "pipeline"
 }
 EOF
 ```
 
-반/그룹 수 변경은 `https://tblt-agent.net/admin` 페이지 또는 이 파일 직접 수정.
+반/그룹 수와 수업 운영 모드 변경은 `https://tblt-agent.net/admin` 페이지 또는 이 파일 직접 수정.
 
 #### 5. Turn Detector 모델 다운로드 (최초 1회 필수)
 
@@ -357,9 +453,9 @@ uv run python main.py download-files
 #### 6. Agent systemd 서비스 등록
 
 ```bash
-sudo tee /etc/systemd/system/cscl-agent.service << 'EOF'
+sudo tee /etc/systemd/system/cscl-agent-pipeline.service << 'EOF'
 [Unit]
-Description=CSCL TBLT Agent
+Description=CSCL TBLT Pipeline Agent
 After=network.target
 
 [Service]
@@ -369,18 +465,48 @@ ExecStart=/home/ubuntu/.local/bin/uv run python main.py start
 Restart=always
 RestartSec=5
 EnvironmentFile=/opt/cscl-tblt/.env
+Environment=AGENT_WORKER_MODE=pipeline
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo tee /etc/systemd/system/cscl-agent-realtime.service << 'EOF'
+[Unit]
+Description=CSCL TBLT Realtime Agent
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/opt/cscl-tblt/agent
+ExecStart=/home/ubuntu/.local/bin/uv run python main.py start
+Restart=always
+RestartSec=5
+EnvironmentFile=/opt/cscl-tblt/.env
+Environment=AGENT_WORKER_MODE=realtime
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
-sudo systemctl enable cscl-agent
-sudo systemctl start cscl-agent
+sudo systemctl enable cscl-agent-pipeline cscl-agent-realtime
+sudo systemctl start cscl-agent-pipeline cscl-agent-realtime
 ```
 
-상태 확인: `sudo systemctl status cscl-agent`
-로그 확인: `sudo journalctl -u cscl-agent -f`
+상태 확인:
+
+```bash
+sudo systemctl status cscl-agent-pipeline
+sudo systemctl status cscl-agent-realtime
+```
+
+로그 확인:
+
+```bash
+sudo journalctl -u cscl-agent-pipeline -f
+sudo journalctl -u cscl-agent-realtime -f
+```
 
 #### 7. Client 빌드 및 PM2 실행
 
@@ -443,13 +569,30 @@ cd /opt/cscl-tblt
 # 코드 pull (GitHub 사용 시)
 git pull
 
+# Agent 의존성이 바뀐 경우 반영
+cd agent
+uv sync
+
 # Agent 재시작
-sudo systemctl restart cscl-agent
+sudo systemctl restart cscl-agent-pipeline cscl-agent-realtime
+
+  ## 정상 재시작 확인 (에러 없이 "active (running)" 이어야 함)
+  sudo systemctl status cscl-agent-pipeline
+  sudo systemctl status cscl-agent-realtime
 
 # Client 재빌드 및 재시작
-cd client
-pnpm build
+cd /opt/cscl-tblt/client
+pnpm install
+pnpm build # 빌드 완료까지 1~2분 소요
 pm2 restart cscl-client
+
+  ## 빌드 중 오류가 나면:
+  # 빌드 로그 확인
+  pnpm build 2>&1 | tail -30
+
+  # 재시작 후 PM2 로그 확인
+  pm2 logs cscl-client --lines 30
+
 ```
 
 ---
@@ -458,8 +601,10 @@ pm2 restart cscl-client
 
 ```bash
 # Agent 상태
-sudo systemctl status cscl-agent
-sudo journalctl -u cscl-agent --no-pager | tail -30
+sudo systemctl status cscl-agent-pipeline
+sudo systemctl status cscl-agent-realtime
+sudo journalctl -u cscl-agent-pipeline --no-pager | tail -30
+sudo journalctl -u cscl-agent-realtime --no-pager | tail -30
 
 # Client 상태
 pm2 list
@@ -472,22 +617,23 @@ sudo nginx -t
 
 ---
 
-### 코드 수정 사항 (로컬 → 프로덕션 전환 시 적용된 내용)
+### 현재 구현 메모
 
-| 파일 | 수정 내용 | 이유 |
-|------|-----------|------|
-| `client/app/api/token/route.ts` | `NODE_ENV !== 'development'` 체크 블록 제거 | 프로덕션 모드에서 토큰 발급 차단 해제 |
-| `client/next.config.ts` | `eslint: { ignoreDuringBuilds: true }` 추가 | prettier 포맷 에러로 인한 빌드 실패 해결 |
-| `agent/egress_recorder.py` | `StartRoomCompositeEgressRequest` → `RoomCompositeEgressRequest` | 실제 설치된 livekit API 클래스명과 일치 |
-| `agent/egress_recorder.py` | `S3_ENDPOINT` 값이 `http`로 시작하는 경우만 사용 | 주석 문자열이 엔드포인트로 전달되는 오류 방지 |
+| 항목 | 내용 |
+|------|------|
+| 운영 모드 저장 | `config.json.agentMode`에 `pipeline` 또는 `realtime` 저장 |
+| Agent entrypoint | `agent/main.py`에 `pipeline-agent`, `realtime-agent` 등록 |
+| 프롬프트 분리 | `agent/prompt_pipeline.py`, `agent/prompt_realtime.py` |
+| Realtime 의존성 | `livekit-agents[openai,silero,turn-detector]~=1.5` |
+| Egress 업로드 | `S3_ENDPOINT` 값이 `http`로 시작하는 경우만 endpoint로 사용 |
 
 ---
 
 ### 음성 녹음 (Egress)
 
-세션 시작 시 자동으로 LiveKit Egress API가 호출되어 모든 참가자(학생 + AI) 음성이 혼합된 MP4 파일이 S3에 저장됩니다.
+세션 시작 시 자동으로 LiveKit Egress API가 호출되어 모든 참가자(학생 + AI) 음성이 혼합된 MP3 파일이 S3에 저장됩니다.
 
-- **저장 경로**: `s3://tblt-agent-recordings/recordings/{룸명}--{타임스탬프}.mp4`
+- **저장 경로**: `s3://tblt-agent-recordings/recordings/{룸명}--{타임스탬프}.mp3`
 - **트리거**: `session.start()` 직후 자동 시작
 - **종료**: 룸 `disconnected` 이벤트 발생 시 자동 종료
 - **관련 코드**: `agent/egress_recorder.py`
@@ -499,8 +645,10 @@ sudo nginx -t
 
 ### 부하 및 사양 참고
 
-- **동시 30명 = 15개 Agent 세션** (2인 1그룹)
-- **병목**: Silero VAD (10ms 단위 로컬 신경망 추론, 세션당 ~8~12% CPU)
-- **STT/LLM/TTS**: LiveKit Cloud inference에서 처리 — 서버 부하 없음
+- 그룹 대화 모드 기준: **동시 30명 = 약 15개 Agent 세션** (2인 1그룹)
+- 그룹 대화 모드 병목: Silero VAD (10ms 단위 로컬 신경망 추론, 세션당 ~8~12% CPU)
+- 그룹 대화 모드 STT/LLM/TTS: LiveKit Cloud inference에서 처리
+- 개별 대화 모드: 학생 1명당 realtime Agent 세션 1개
+- 개별 대화 모드에는 OpenAI Realtime 사용량과 동시 세션 한도 확인 필요
 - `m5.large` (8GB RAM)으로 15세션 안정 운영 확인
 - t3 계열은 지속 부하 시 CPU 크레딧 소진으로 스로틀링 발생 — 비권장
