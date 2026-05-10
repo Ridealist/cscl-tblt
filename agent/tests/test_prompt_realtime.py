@@ -7,9 +7,9 @@ def test_realtime_prompt_includes_dominant_stance_rules(tmp_path, monkeypatch) -
     prompt = build_prompt("Junbo", stance="dominant")
 
     assert "You and the student must choose one eco-campaign" in prompt
-    assert "You are a foreign friend from the United States who moved to Myo-gok Elementary School." in prompt
+    assert "You are a foreign friend from the United States who moved to Myoh-goke Elementary School." in prompt
     assert "You are in 6th grade, the same grade as the student." in prompt
-    assert "The student is a Myo-gok Elementary School student." in prompt
+    assert "The student is a Myoh-goke Elementary School student." in prompt
     assert "Before starting the eco-campaign, ask 2 or 3 short warm-up questions." in prompt
     assert "During warm-up, Daisy should lead the conversation by asking questions." in prompt
     assert "During warm-up, each Daisy turn should usually end with one simple question." in prompt
@@ -33,7 +33,7 @@ def test_realtime_prompt_includes_passive_stance_rules(tmp_path, monkeypatch) ->
     prompt = build_prompt("Junbo", stance="passive")
 
     assert "You and the student must choose one eco-campaign" in prompt
-    assert "Start as Daisy, a 6th-grade foreign friend who moved from the United States to Myo-gok Elementary School." in prompt
+    assert "Start as Daisy, a 6th-grade foreign friend who moved from the United States to Myoh-goke Elementary School." in prompt
     assert "Let the student lead the choice as much as possible." in prompt
     assert "Accept the student's idea when it is safe and possible." in prompt
     assert "Guide the task actively from start to finish." not in prompt

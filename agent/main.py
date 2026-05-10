@@ -65,7 +65,7 @@ REALTIME_AGENT_NAMES = {
 }
 REALTIME_AGENT_NAME = "realtime-agent"
 REALTIME_FIRST_SENTENCE = (
-    "Hi, I'm Daisy. I moved from the United States to Myo-gok Elementary School, "
+    "Hi, I'm Daisy. I moved from the United States to Myoh-goke Elementary School, "
     "and I'm in 6th grade like you. What is your name?"
 )
 
