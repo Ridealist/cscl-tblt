@@ -24,6 +24,7 @@ from prompt_pipeline import build_prompt as build_pipeline_prompt
 from prompt_pipeline import _clean_names
 from prompt_realtime import build_prompt as build_realtime_prompt
 from prompt_realtime import normalize_stance as normalize_realtime_stance
+from openai.types.beta.realtime.session import TurnDetection
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -382,7 +383,13 @@ async def _run_realtime(ctx: JobContext, stance: str) -> None:
 
     session = AgentSession(
         llm=openai.realtime.RealtimeModel(
-            modalities=["text"]
+            modalities=["text"],
+            turn_detection=TurnDetection(
+                type="semantic_vad",
+                eagerness="medium",
+                create_response=True,
+                interrupt_response=True,
+            )
         ),
         tts=inference.TTS(
             model="cartesia/sonic-3", 
@@ -395,7 +402,7 @@ async def _run_realtime(ctx: JobContext, stance: str) -> None:
             extra_kwargs={
                 "speed": 0.8,
                 "volume": 1.2,
-                "emotion": "excited"
+                # "emotion": "excited"
             }
         ),
     )
