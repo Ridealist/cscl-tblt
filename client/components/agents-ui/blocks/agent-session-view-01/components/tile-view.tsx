@@ -1,7 +1,9 @@
 import React, { useMemo } from 'react';
+import Image from 'next/image';
 import { Track } from 'livekit-client';
 import { AnimatePresence, type MotionProps, motion } from 'motion/react';
 import {
+  type AgentState,
   type TrackReference,
   VideoTrack,
   useLocalParticipant,
@@ -24,7 +26,7 @@ const tileViewClassNames = {
   grid: [
     'h-full w-full',
     'grid gap-x-2 place-content-center',
-    'grid-cols-[1fr_1fr] grid-rows-[90px_1fr_90px]',
+    'grid-cols-[1fr_1fr] grid-rows-[minmax(150px,1fr)_auto_90px]',
   ],
   // Agent
   // chatOpen: true,
@@ -78,6 +80,7 @@ interface TileLayoutProps {
   audioVisualizerRadialBarCount?: number;
   audioVisualizerRadialRadius?: number;
   audioVisualizerBarCount?: number;
+  agentState?: AgentState;
 }
 
 export function TileLayout({
@@ -91,6 +94,7 @@ export function TileLayout({
   audioVisualizerGridRowCount,
   audioVisualizerGridColumnCount,
   audioVisualizerWaveLineWidth,
+  agentState,
 }: TileLayoutProps) {
   const { videoTrack: agentVideoTrack } = useVoiceAssistant();
   const [screenShareTrack] = useTracks([Track.Source.ScreenShare]);
@@ -104,6 +108,7 @@ export function TileLayout({
   const isAvatar = agentVideoTrack !== undefined;
   const videoWidth = agentVideoTrack?.publication.dimensions?.width ?? 0;
   const videoHeight = agentVideoTrack?.publication.dimensions?.height ?? 0;
+  const isAgentSpeaking = agentState === 'speaking';
 
   return (
     <div className="absolute inset-x-0 top-8 bottom-32 z-50 md:top-12 md:bottom-40">
@@ -119,7 +124,7 @@ export function TileLayout({
             ])}
           >
             <AnimatePresence mode="popLayout">
-              {!isAvatar && (
+              {!isAvatar && !chatOpen && (
                 // Audio Agent
                 <motion.div
                   key="agent"
@@ -130,12 +135,49 @@ export function TileLayout({
                     ...ANIMATION_TRANSITION,
                     delay: animationDelay,
                   }}
-                  className={cn('relative aspect-square h-[90px]')}
+                  className={cn(
+                    'relative grid w-full justify-items-center',
+                    'h-[min(62vh,560px)] max-w-[360px] grid-rows-[minmax(0,1fr)_170px] gap-4'
+                  )}
                 >
+                  <motion.div
+                    layout="position"
+                    initial={{ opacity: 0, scale: 0.96 }}
+                    animate={{
+                      opacity: 1,
+                      scale: 1,
+                      boxShadow: isAgentSpeaking
+                        ? '0 20px 55px rgba(14, 165, 233, 0.24)'
+                        : '0 18px 45px rgba(15, 23, 42, 0.14)',
+                    }}
+                    transition={{
+                      ...ANIMATION_TRANSITION,
+                      delay: animationDelay,
+                    }}
+                    className={cn(
+                      'relative row-start-1 aspect-square h-full overflow-hidden rounded-full bg-white',
+                      isAgentSpeaking && 'ring-4 ring-sky-300/45'
+                    )}
+                  >
+                    <Image
+                      src="/agents/daisy_photo.png"
+                      alt="Daisy"
+                      fill
+                      sizes="(max-width: 768px) 90vw, 380px"
+                      className="object-cover"
+                      priority
+                    />
+                  </motion.div>
                   <AudioVisualizer
                     key="audio-visualizer"
                     initial={{ scale: 1 }}
-                    animate={{ scale: chatOpen ? 0.2 : 1 }}
+                    animate={{
+                      opacity: isAgentSpeaking ? 1 : 0.78,
+                      scale: isAgentSpeaking ? 1.16 : 1,
+                      filter: isAgentSpeaking
+                        ? 'drop-shadow(0 14px 28px rgba(37, 99, 235, 0.24))'
+                        : 'drop-shadow(0 8px 18px rgba(37, 99, 235, 0.12))',
+                    }}
                     transition={{
                       ...ANIMATION_TRANSITION,
                       delay: animationDelay,
@@ -151,16 +193,16 @@ export function TileLayout({
                     audioVisualizerWaveLineWidth={audioVisualizerWaveLineWidth}
                     isChatOpen={chatOpen}
                     className={cn(
-                      'absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
-                      'bg-background rounded-[50px] border border-transparent transition-[border,drop-shadow]',
-                      chatOpen && 'border-input shadow-2xl/10 delay-200'
+                      'relative row-start-2 place-self-center',
+                      'transition-[drop-shadow]',
+                      'size-[170px]'
                     )}
-                    style={{ color: audioVisualizerColor }}
+                    style={{ color: audioVisualizerColor ?? '#2563eb' }}
                   />
                 </motion.div>
               )}
 
-              {isAvatar && (
+              {isAvatar && !chatOpen && (
                 // Avatar Agent
                 <motion.div
                   key="avatar"

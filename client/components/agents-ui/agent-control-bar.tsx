@@ -13,6 +13,7 @@ import {
 } from '@/components/agents-ui/agent-track-toggle';
 import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   type UseInputControlsProps,
   useInputControls,
@@ -278,6 +279,7 @@ export function AgentControlBar({
   };
 
   const isEmpty = Object.values(visibleControls).every((value) => !value);
+  const microphoneGuidance = '마이크를 켜고 full sentence로 말한 뒤, 말이 끝나면 마이크를 끄세요.';
 
   if (isEmpty) {
     console.warn('AgentControlBar: `visibleControls` contains only false values.');
@@ -311,24 +313,37 @@ export function AgentControlBar({
         <div className="flex grow gap-1">
           {/* Toggle Microphone */}
           {visibleControls.microphone && (
-            <AgentTrackControl
-              variant={variant === 'outline' ? 'outline' : 'default'}
-              kind="audioinput"
-              aria-label="Toggle microphone"
-              source={Track.Source.Microphone}
-              pressed={microphoneToggle.enabled}
-              disabled={microphoneToggle.pending}
-              audioTrack={microphoneTrack}
-              onPressedChange={microphoneToggle.toggle}
-              onActiveDeviceChange={handleAudioDeviceChange}
-              onMediaDeviceError={handleMicrophoneDeviceSelectError}
-              className={cn(
-                variant === 'livekit' && [
-                  LK_TOGGLE_VARIANT_1,
-                  'rounded-full [&_button:first-child]:rounded-l-full [&_button:last-child]:rounded-r-full',
-                ]
-              )}
-            />
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild disabled={microphoneToggle.enabled}>
+                  <div>
+                    <AgentTrackControl
+                      variant={variant === 'outline' ? 'outline' : 'default'}
+                      kind="audioinput"
+                      aria-label="Toggle microphone"
+                      source={Track.Source.Microphone}
+                      pressed={microphoneToggle.enabled}
+                      disabled={microphoneToggle.pending}
+                      audioTrack={microphoneTrack}
+                      onPressedChange={microphoneToggle.toggle}
+                      onActiveDeviceChange={handleAudioDeviceChange}
+                      onMediaDeviceError={handleMicrophoneDeviceSelectError}
+                      className={cn(
+                        variant === 'livekit' && [
+                          LK_TOGGLE_VARIANT_1,
+                          'rounded-full [&_button:first-child]:rounded-l-full [&_button:last-child]:rounded-r-full',
+                        ]
+                      )}
+                    />
+                  </div>
+                </TooltipTrigger>
+                {!microphoneToggle.enabled && (
+                  <TooltipContent side="top" align="start" className="max-w-64 text-center">
+                    {microphoneGuidance}
+                  </TooltipContent>
+                )}
+              </Tooltip>
+            </TooltipProvider>
           )}
 
           {/* Toggle Camera */}

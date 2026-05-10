@@ -383,14 +383,16 @@ async def _run_realtime(ctx: JobContext, stance: str) -> None:
         ),
         tts=inference.TTS(
             model="cartesia/sonic-3", 
-            voice="df872fcd-da17-4b01-a49f-a80d7aaee95e", # Cameron
+            # voice="e3827ec5-697a-4b7c-9704-1a23041bbc51", # Dottie
+            voice="32b3f3c5-7171-46aa-abe7-b598964aa793", # Daisy
+            # voice="df872fcd-da17-4b01-a49f-a80d7aaee95e", # Cameron
             # voice="c58bda25-abd5-4c72-97a2-4dbe049b368d", # Garrett
             # voice="f4a3a8e4-694c-4c45-9ca0-27caf97901b5", # Gavin
             language="en",
             extra_kwargs={
-                "speed": 0.7,
-                "volume": 1.5,
-                "emotion": "happy"
+                "speed": 0.8,
+                "volume": 1.2,
+                "emotion": "excited"
             }
         ),
     )

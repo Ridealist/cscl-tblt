@@ -237,6 +237,7 @@ export function AgentSessionView_01({
         audioVisualizerGridRowCount={audioVisualizerGridRowCount}
         audioVisualizerGridColumnCount={audioVisualizerGridColumnCount}
         audioVisualizerWaveLineWidth={audioVisualizerWaveLineWidth}
+        agentState={agentState}
       />
       {/* Bottom */}
       <motion.div

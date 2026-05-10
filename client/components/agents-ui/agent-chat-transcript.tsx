@@ -1,6 +1,7 @@
 'use client';
 
 import { type ComponentProps } from 'react';
+import Image from 'next/image';
 import { AnimatePresence } from 'motion/react';
 import { type AgentState, type ReceivedMessage } from '@livekit/components-react';
 import { AgentChatIndicator } from '@/components/agents-ui/agent-chat-indicator';
@@ -63,14 +64,40 @@ export function AgentChatTranscript({
 
           return (
             <Message key={id} title={title} from={messageOrigin}>
-              <MessageContent>
-                <MessageResponse>{message}</MessageResponse>
-              </MessageContent>
+              {messageOrigin === 'assistant' ? (
+                <div className="flex max-w-full items-start gap-3">
+                  <Image
+                    src="/agents/daisy_photo.png"
+                    alt="Daisy"
+                    width={32}
+                    height={32}
+                    className="border-border mt-0.5 size-8 shrink-0 rounded-full border object-cover"
+                  />
+                  <MessageContent>
+                    <MessageResponse>{message}</MessageResponse>
+                  </MessageContent>
+                </div>
+              ) : (
+                <MessageContent>
+                  <MessageResponse>{message}</MessageResponse>
+                </MessageContent>
+              )}
             </Message>
           );
         })}
         <AnimatePresence>
-          {agentState === 'thinking' && <AgentChatIndicator size="sm" />}
+          {agentState === 'thinking' && (
+            <div className="flex items-start gap-3">
+              <Image
+                src="/agents/daisy_photo.png"
+                alt="Daisy"
+                width={32}
+                height={32}
+                className="border-border mt-0.5 size-8 shrink-0 rounded-full border object-cover"
+              />
+              <AgentChatIndicator size="sm" />
+            </div>
+          )}
         </AnimatePresence>
       </ConversationContent>
       <ConversationScrollButton />
