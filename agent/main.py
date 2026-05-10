@@ -13,8 +13,9 @@ from livekit.agents import (
     JobProcess,
     cli,
     room_io,
+    llm,
+    inference
 )
-from livekit.agents import llm
 from livekit.plugins import openai
 
 from egress_recorder import EgressRecorder
@@ -209,7 +210,6 @@ async def _run(ctx: JobContext) -> None:
         get_speaker_fn=lambda: current_speaker["name"],
     )
 
-    from livekit.agents import inference
     from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
     #TODO Agent 설정 조정(STT/LLM/TTS 모델 설정)
@@ -379,8 +379,19 @@ async def _run_realtime(ctx: JobContext, stance: str) -> None:
 
     session = AgentSession(
         llm=openai.realtime.RealtimeModel(
-            model="gpt-realtime",
-            voice="cedar",
+            modalities=["text"]
+        ),
+        tts=inference.TTS(
+            model="cartesia/sonic-3", 
+            voice="df872fcd-da17-4b01-a49f-a80d7aaee95e", # Cameron
+            # voice="c58bda25-abd5-4c72-97a2-4dbe049b368d", # Garrett
+            # voice="f4a3a8e4-694c-4c45-9ca0-27caf97901b5", # Gavin
+            language="en",
+            extra_kwargs={
+                "speed": 0.7,
+                "volume": 1.5,
+                "emotion": "happy"
+            }
         ),
     )
 
