@@ -63,7 +63,10 @@ REALTIME_AGENT_NAMES = {
     "passive": "realtime-agent",
 }
 REALTIME_AGENT_NAME = "realtime-agent"
-REALTIME_FIRST_SENTENCE = "Hi, let's choose an eco-campaign together."
+REALTIME_FIRST_SENTENCE = (
+    "Hi, I'm Daisy. I moved from the United States to Myo-gok Elementary School, "
+    "and I'm in 6th grade like you. What is your name?"
+)
 
 log.info(
     "Agent worker configuration: worker_mode=%s stance=%s default_mode=%s default_stance=%s "
@@ -124,7 +127,7 @@ class Assistant(Agent):
         self._get_speaker = get_speaker_fn  # () -> str | None
 
     async def on_enter(self) -> None:
-        """채팅방 입장 직후 호출 — 참가자 연결 대기 후 Alex의 첫 인사 1문장 생성."""
+        """채팅방 입장 직후 호출 — 참가자 연결 대기 후 Daisy의 첫 인사 1문장 생성."""
         await asyncio.sleep(1.0)
 
         names = _clean_names(self._get_names())
@@ -335,7 +338,7 @@ class RealtimeAssistant(Agent):
         await self.update_instructions(build_realtime_prompt(name, stance=self._stance))
 
         instruction = (
-            "Say only this exact sentence as Alex, a friendly classmate, and nothing else: "
+            "Say only this exact opening as Daisy, a friendly classmate, and nothing else: "
             f"{json.dumps(REALTIME_FIRST_SENTENCE, ensure_ascii=False)}"
         )
         log.info("Realtime first reply requested: %s", REALTIME_FIRST_SENTENCE)

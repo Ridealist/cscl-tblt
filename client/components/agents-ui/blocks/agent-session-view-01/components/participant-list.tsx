@@ -62,7 +62,7 @@ export function ParticipantList() {
                     : 'bg-muted-foreground/40'
                 )}
               />
-              <span className="text-muted-foreground truncate text-xs font-medium">AI Agent</span>
+              <span className="text-muted-foreground truncate text-xs font-medium">Daisy</span>
             </li>
           );
         })}

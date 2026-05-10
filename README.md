@@ -1,6 +1,6 @@
 # English Speaking Practice — CSCL TBLT
 
-LiveKit 기반 AI 영어 대화 실습 시스템. TBLT(Task-Based Language Teaching) 방식으로, AI 캐릭터 **Alex**(한국 거주 외국인 초등학생)와 **주말 약속 만들기** 태스크를 수행하는 실시간 음성 대화 에이전트. 대상: 한국어권 대학생.
+LiveKit 기반 AI 영어 대화 실습 시스템. TBLT(Task-Based Language Teaching) 방식으로, AI 캐릭터 **Daisy**(한국 거주 외국인 초등학생)와 **주말 약속 만들기** 태스크를 수행하는 실시간 음성 대화 에이전트. 대상: 한국어권 대학생.
 
 관리자는 `/admin`에서 수업 운영 모드를 선택할 수 있다.
 
@@ -282,7 +282,7 @@ uv run pytest tests/ -v
 
 테스트 내용 (`tests/test_conversation.py`):
 - 5턴 대화 흐름 검증 (주말 약속 만들기 태스크)
-- 문법 오류 발화에 대한 Alex의 자연스러운 반응 확인
+- 문법 오류 발화에 대한 Daisy의 자연스러운 반응 확인
 - 역질문(주말 활동)에 대한 응답 확인
 
 ---
