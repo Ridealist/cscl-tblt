@@ -5,10 +5,14 @@ permissions:
 on:
   push:
     branches: [main]
-    paths: [client/**]
+    paths:
+      - client/**
+      - .github/workflows/client-build-and-test.yaml
   pull_request:
     branches: [main]
-    paths: [client/**]
+    paths:
+      - client/**
+      - .github/workflows/client-build-and-test.yaml
 
 jobs:
   test:
@@ -19,6 +23,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
       - name: Use Node.js 22
         uses: actions/setup-node@v5
         with:
