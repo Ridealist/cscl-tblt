@@ -124,20 +124,16 @@ uv run python main.py download-files
 
 ### 현재 Next.js 앱 실행
 
-그룹 대화 모드만 테스트할 때는 터미널 2개면 충분하다.
+최초 1회 의존성을 설치한다.
 
 ```bash
-# 터미널 1 — pipeline-agent
-cd agent
-uv sync
-AGENT_WORKER_MODE=pipeline uv run python main.py dev
+pnpm setup
 ```
 
+루트에서 다음 명령 하나로 `config.json`의 `agentMode`/`agentStance`에 맞는 agent worker와 Next.js 클라이언트를 함께 실행한다.
+
 ```bash
-# 터미널 2 — Next.js 클라이언트
-cd client
-pnpm install
-pnpm dev          # http://localhost:3000
+pnpm dev
 ```
 
 브라우저에서:
@@ -148,23 +144,32 @@ pnpm dev          # http://localhost:3000
 
 > Next.js 클라이언트는 자체 `/api/token` 라우트를 가지므로 `server/` FastAPI 토큰 서버가 필요 없다.
 
-개별 대화 모드도 함께 테스트하려면 agent worker를 하나 더 띄운다.
+개별 대화 모드 worker로 실행하려면 다음 명령을 사용한다.
 
 ```bash
-# 터미널 3 — realtime dominant agent
-cd agent
-AGENT_WORKER_MODE=realtime AGENT_STANCE=dominant uv run python main.py dev
+pnpm dev:realtime
 ```
 
-passive 조건도 함께 테스트하려면 별도 터미널에서 다음 worker를 띄운다.
+passive 조건으로 실행하려면 다음 명령을 사용한다.
 
 ```bash
-# 터미널 4 — realtime passive agent
-cd agent
-AGENT_WORKER_MODE=realtime AGENT_STANCE=passive uv run python main.py dev
+pnpm dev:realtime:passive
+```
+
+pipeline, realtime dominant, realtime passive worker를 모두 함께 띄우려면 다음 명령을 사용한다.
+
+```bash
+pnpm dev:all
 ```
 
 `/admin`에서 개별 대화 모드와 상호작용 방식을 선택하면 학생은 조건명을 보지 않고 개별 room으로 입장한다.
+
+기존처럼 터미널을 나눠 실행해야 할 때는 다음 개별 명령을 사용할 수 있다.
+
+```bash
+pnpm dev:agent:pipeline
+pnpm dev:client
+```
 
 ### legacy static 클라이언트 실행 (선택)
 
