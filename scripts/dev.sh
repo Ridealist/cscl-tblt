@@ -16,8 +16,9 @@ Modes:
   pnpm dev                    Read config.json and run the matching agent with Next.js client
   pnpm dev:pipeline           Run pipeline-agent and Next.js client
   pnpm dev:realtime           Run realtime dominant agent and Next.js client
-  pnpm dev:realtime:passive   Run realtime passive agent and Next.js client
-  pnpm dev:all                Run pipeline, realtime dominant, realtime passive, and Next.js client
+  pnpm dev:realtime:collaborative
+                              Run realtime collaborative agent and Next.js client
+  pnpm dev:all                Run pipeline, realtime dominant, realtime collaborative, and Next.js client
 
 First setup:
   pnpm setup
@@ -48,10 +49,10 @@ except (OSError, json.JSONDecodeError):
     raise SystemExit(0)
 
 mode = config.get("agentMode")
-stance = config.get("agentStance")
+role = config.get("agentRole", config.get("agentStance"))
 
 if mode == "realtime":
-    print("realtime-passive" if stance == "passive" else "realtime")
+    print("realtime-collaborative" if role in ("collaborative", "passive") else "realtime")
 else:
     print("pipeline")
 PY
@@ -103,8 +104,8 @@ start_pipeline_agent() {
 }
 
 start_realtime_agent() {
-  local stance="$1"
-  start_process "realtime-${stance}-agent" bash -c 'cd "$1" && exec env AGENT_WORKER_MODE=realtime AGENT_STANCE="$2" uv run python main.py dev' _ "$ROOT_DIR/agent" "$stance"
+  local role="$1"
+  start_process "realtime-${role}-agent" bash -c 'cd "$1" && exec env AGENT_WORKER_MODE=realtime AGENT_ROLE="$2" uv run python main.py dev' _ "$ROOT_DIR/agent" "$role"
 }
 
 trap cleanup INT TERM EXIT
@@ -132,10 +133,10 @@ case "$MODE" in
     start_realtime_agent dominant
     start_client
     ;;
-  realtime-passive)
+  realtime-collaborative|realtime-passive)
     require_command pnpm
     require_command uv
-    start_realtime_agent passive
+    start_realtime_agent collaborative
     start_client
     ;;
   all)
@@ -143,7 +144,7 @@ case "$MODE" in
     require_command uv
     start_pipeline_agent
     start_realtime_agent dominant
-    start_realtime_agent passive
+    start_realtime_agent collaborative
     start_client
     ;;
   *)
