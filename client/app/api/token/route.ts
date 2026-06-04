@@ -5,11 +5,11 @@ import { join } from 'path';
 import { RoomConfiguration } from '@livekit/protocol';
 import { type AgentMode, normalizeAgentMode } from '@/lib/agent-mode';
 import {
-  type AgentStance,
-  DEFAULT_AGENT_STANCE,
+  type AgentRole,
+  DEFAULT_AGENT_ROLE,
   getAgentNameForConfig,
-  normalizeAgentStance,
-} from '@/lib/agent-stance';
+  normalizeAgentRole,
+} from '@/lib/agent-role';
 import {
   DEFAULT_REALTIME_PROMPT_METADATA,
   type RealtimePromptMetadata,
@@ -32,7 +32,7 @@ const PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.json');
 
 type RuntimeConfig = {
   agentMode: AgentMode;
-  agentStance: AgentStance;
+  agentRole: AgentRole;
   realtimeResetting: boolean;
 };
 
@@ -77,9 +77,9 @@ export async function POST(req: Request) {
       );
     }
 
-    const agentName = getAgentNameForConfig(agentMode, config.agentStance);
+    const agentName = getAgentNameForConfig(agentMode, config.agentRole);
     const promptSnapshot = agentMode === 'realtime' ? readRealtimePromptSnapshot() : undefined;
-    const roomConfig = buildRoomConfig(agentName, agentMode, config.agentStance, promptSnapshot);
+    const roomConfig = buildRoomConfig(agentName, agentMode, config.agentRole, promptSnapshot);
     const roomMetadata = JSON.parse(roomConfig.metadata);
     const requestedAgents = roomConfig.agents.map((agent) => ({
       agentName: agent.agentName,
@@ -93,7 +93,7 @@ export async function POST(req: Request) {
       requestedAgentMode: body?.agent_mode ?? null,
       inferredAgentMode: agentMode,
       runtimeAgentMode: config.agentMode,
-      runtimeAgentStance: config.agentStance,
+      runtimeAgentRole: config.agentRole,
       agentName,
       roomMetadata,
       requestedAgents,
@@ -147,13 +147,13 @@ function readRuntimeConfig(): RuntimeConfig {
     const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
     return {
       agentMode: normalizeAgentMode(raw.agentMode),
-      agentStance: normalizeAgentStance(raw.agentStance),
+      agentRole: normalizeAgentRole(raw.agentRole ?? raw.agentStance),
       realtimeResetting: raw.realtimeResetting === true,
     };
   } catch {
     return {
       agentMode: 'pipeline',
-      agentStance: DEFAULT_AGENT_STANCE,
+      agentRole: DEFAULT_AGENT_ROLE,
       realtimeResetting: false,
     };
   }
@@ -188,14 +188,14 @@ function readRealtimePromptSnapshot(): RealtimePromptSnapshot {
 function buildRoomConfig(
   agentName: string,
   agentMode: AgentMode,
-  agentStance: AgentStance,
+  agentRole: AgentRole,
   promptSnapshot?: RealtimePromptSnapshot
 ): RoomConfiguration {
   const metadata = JSON.stringify({
     agentMode,
     ...(agentMode === 'realtime'
       ? {
-          agentStance,
+          agentRole,
           promptId: promptSnapshot?.promptId ?? DEFAULT_REALTIME_PROMPT_METADATA.promptId,
           promptSavedAt: promptSnapshot?.savedAt ?? DEFAULT_REALTIME_PROMPT_METADATA.savedAt,
           promptSource: promptSnapshot?.source ?? DEFAULT_REALTIME_PROMPT_METADATA.source,

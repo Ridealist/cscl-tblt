@@ -1,7 +1,8 @@
 export interface RealtimePromptConfig {
   basePrompt: string;
   dominantPrompt: string;
-  passivePrompt: string;
+  collaborativePrompt: string;
+  taskCardPrompt: string;
 }
 
 export type RealtimePromptSource = 'default' | 'custom';
@@ -24,7 +25,12 @@ export const DEFAULT_REALTIME_PROMPT_METADATA: RealtimePromptMetadata = {
   source: 'default',
 };
 
-const PROMPT_FIELDS = ['basePrompt', 'dominantPrompt', 'passivePrompt'] as const;
+const PROMPT_FIELDS = [
+  'basePrompt',
+  'dominantPrompt',
+  'collaborativePrompt',
+  'taskCardPrompt',
+] as const;
 
 export function validateRealtimePromptConfig(
   value: unknown
@@ -33,11 +39,14 @@ export function validateRealtimePromptConfig(
     return { ok: false, error: '프롬프트 설정 형식이 올바르지 않습니다.' };
   }
 
-  const source = value as Partial<Record<(typeof PROMPT_FIELDS)[number], unknown>>;
+  const source = value as Partial<
+    Record<(typeof PROMPT_FIELDS)[number] | 'passivePrompt', unknown>
+  >;
   const config = {} as RealtimePromptConfig;
 
   for (const field of PROMPT_FIELDS) {
-    const text = source[field];
+    const text =
+      field === 'collaborativePrompt' ? (source[field] ?? source.passivePrompt) : source[field];
     if (typeof text !== 'string' || !text.trim()) {
       return { ok: false, error: `${field} 값이 비어 있습니다.` };
     }
