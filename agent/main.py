@@ -23,7 +23,7 @@ from logger import ConversationLogger
 from prompt_pipeline import build_prompt as build_pipeline_prompt
 from prompt_pipeline import _clean_names
 from prompt_realtime import build_prompt as build_realtime_prompt
-from prompt_realtime import normalize_stance as normalize_realtime_stance
+from prompt_realtime import normalize_role as normalize_realtime_role
 from openai.types.beta.realtime.session import TurnDetection
 
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -47,49 +47,51 @@ def _read_runtime_agent_defaults() -> tuple[str, str]:
         return "pipeline", "dominant"
 
     mode = raw.get("agentMode") if isinstance(raw, dict) else None
-    stance = raw.get("agentStance") if isinstance(raw, dict) else None
+    role = raw.get("agentRole", raw.get("agentStance")) if isinstance(raw, dict) else None
     return (
         "realtime" if mode == "realtime" else "pipeline",
-        "passive" if stance == "passive" else "dominant",
+        normalize_realtime_role(role if isinstance(role, str) else None),
     )
 
 
-DEFAULT_AGENT_WORKER_MODE, DEFAULT_AGENT_STANCE = _read_runtime_agent_defaults()
+DEFAULT_AGENT_WORKER_MODE, DEFAULT_AGENT_ROLE = _read_runtime_agent_defaults()
 AGENT_WORKER_MODE = os.environ.get("AGENT_WORKER_MODE", DEFAULT_AGENT_WORKER_MODE).strip().lower()
-AGENT_STANCE = normalize_realtime_stance(
-    os.environ.get("AGENT_STANCE", DEFAULT_AGENT_STANCE).strip().lower()
+AGENT_ROLE = normalize_realtime_role(
+    os.environ.get("AGENT_ROLE", os.environ.get("AGENT_STANCE", DEFAULT_AGENT_ROLE))
+    .strip()
+    .lower()
 )
 REALTIME_AGENT_NAMES = {
     "dominant": "realtime-agent",
-    "passive": "realtime-agent",
+    "collaborative": "realtime-agent",
 }
 REALTIME_AGENT_NAME = "realtime-agent"
 REALTIME_FIRST_SENTENCE = (
-    "Hi, I'm Daisy. I moved from the United States to Myoh-goke Elementary School, "
-    "and I'm in 6th grade like you. What is your name?"
+    "Hi, I'm Daisy. Today, let's choose one school event and make an invitation. "
+    "What is your name?"
 )
 
 log.info(
-    "Agent worker configuration: worker_mode=%s stance=%s default_mode=%s default_stance=%s "
+    "Agent worker configuration: worker_mode=%s role=%s default_mode=%s default_role=%s "
     "livekit_url_set=%s openai_key_set=%s",
     AGENT_WORKER_MODE,
-    AGENT_STANCE,
+    AGENT_ROLE,
     DEFAULT_AGENT_WORKER_MODE,
-    DEFAULT_AGENT_STANCE,
+    DEFAULT_AGENT_ROLE,
     bool(os.environ.get("LIVEKIT_URL")),
     bool(os.environ.get("OPENAI_API_KEY")),
 )
 
 
 def _resolve_realtime_worker() -> tuple[str, str]:
-    if AGENT_WORKER_MODE == "realtime-passive":
-        return "passive", REALTIME_AGENT_NAME
+    if AGENT_WORKER_MODE in ("realtime-collaborative", "realtime-passive"):
+        return "collaborative", REALTIME_AGENT_NAME
     if AGENT_WORKER_MODE == "realtime-dominant":
         return "dominant", REALTIME_AGENT_NAME
-    return AGENT_STANCE, REALTIME_AGENT_NAME
+    return AGENT_ROLE, REALTIME_AGENT_NAME
 
 
-def _metadata_stance(metadata) -> str | None:
+def _metadata_role(metadata) -> str | None:
     if not metadata:
         return None
     try:
@@ -98,22 +100,22 @@ def _metadata_stance(metadata) -> str | None:
         return None
     if not isinstance(parsed, dict):
         return None
-    stance = parsed.get("agentStance")
-    if stance in ("dominant", "passive"):
-        return normalize_realtime_stance(stance)
+    role = parsed.get("agentRole", parsed.get("agentStance"))
+    if role in ("dominant", "collaborative", "passive"):
+        return normalize_realtime_role(role)
     return None
 
 
-def _resolve_realtime_job_stance(ctx: JobContext, fallback: str) -> str:
+def _resolve_realtime_job_role(ctx: JobContext, fallback: str) -> str:
     for metadata in (
         getattr(ctx.job, "metadata", None),
         getattr(ctx.room, "metadata", None),
         getattr(getattr(ctx.job, "room", None), "metadata", None),
     ):
-        stance = _metadata_stance(metadata)
-        if stance:
-            return stance
-    return normalize_realtime_stance(fallback)
+        role = _metadata_role(metadata)
+        if role:
+            return role
+    return normalize_realtime_role(fallback)
 
 
 class Assistant(Agent):
@@ -322,21 +324,21 @@ async def _run(ctx: JobContext) -> None:
 
 
 class RealtimeAssistant(Agent):
-    def __init__(self, get_name_fn, stance: str) -> None:
-        super().__init__(instructions=build_realtime_prompt(stance=stance))
+    def __init__(self, get_name_fn, role: str) -> None:
+        super().__init__(instructions=build_realtime_prompt(role=role))
         self._get_name = get_name_fn
-        self._stance = stance
+        self._role = role
 
     async def on_enter(self) -> None:
         """1:1 realtime 세션 입장 직후 참가자 이름을 반영하고 첫 턴을 생성."""
         await asyncio.sleep(1.0)
         name = self._get_name()
         log.info(
-            "Realtime assistant entering session: stance=%s participant_name=%s",
-            self._stance,
+            "Realtime assistant entering session: role=%s participant_name=%s",
+            self._role,
             name,
         )
-        await self.update_instructions(build_realtime_prompt(name, stance=self._stance))
+        await self.update_instructions(build_realtime_prompt(name, role=self._role))
 
         instruction = (
             "Say only this exact opening as Daisy, a friendly classmate, and nothing else: "
@@ -346,22 +348,22 @@ class RealtimeAssistant(Agent):
         self.session.generate_reply(instructions=instruction)
 
 
-async def _run_realtime(ctx: JobContext, stance: str) -> None:
+async def _run_realtime(ctx: JobContext, role: str) -> None:
     """1:1 OpenAI Realtime 세션 로직."""
-    stance = _resolve_realtime_job_stance(ctx, fallback=stance)
-    ctx.log_context_fields = {"room": ctx.room.name, "mode": "realtime", "stance": stance}
+    role = _resolve_realtime_job_role(ctx, fallback=role)
+    ctx.log_context_fields = {"room": ctx.room.name, "mode": "realtime", "role": role}
     log.info(
-        "Starting realtime job: room=%s room_sid=%s job_id=%s stance=%s metadata=%s",
+        "Starting realtime job: room=%s room_sid=%s job_id=%s role=%s metadata=%s",
         ctx.room.name,
         ctx.job.room.sid,
         getattr(ctx.job, "id", None),
-        stance,
+        role,
         getattr(ctx.job, "metadata", None),
     )
     conv_logger = ConversationLogger(
         ctx.job.room.sid,
         ctx.room.name,
-        metadata={"agent_mode": "realtime", "agent_stance": stance},
+        metadata={"agent_mode": "realtime", "agent_role": role},
     )
     egress = EgressRecorder(ctx.room.name, conv_logger.session_id)
 
@@ -379,7 +381,7 @@ async def _run_realtime(ctx: JobContext, stance: str) -> None:
             participant["name"],
         )
 
-    assistant = RealtimeAssistant(get_name_fn=lambda: participant["name"], stance=stance)
+    assistant = RealtimeAssistant(get_name_fn=lambda: participant["name"], role=role)
 
     session = AgentSession(
         llm=openai.realtime.RealtimeModel(
@@ -425,7 +427,7 @@ async def _run_realtime(ctx: JobContext, stance: str) -> None:
         elif item.role == "assistant":
             conv_logger.log(role="agent", text=text)
 
-    log.info("Starting realtime AgentSession: room=%s stance=%s", ctx.room.name, stance)
+    log.info("Starting realtime AgentSession: room=%s role=%s", ctx.room.name, role)
     await session.start(
         agent=assistant,
         room=ctx.room,
@@ -433,7 +435,7 @@ async def _run_realtime(ctx: JobContext, stance: str) -> None:
             audio_input=room_io.AudioInputOptions(),
         ),
     )
-    log.info("Realtime AgentSession started: room=%s stance=%s", ctx.room.name, stance)
+    log.info("Realtime AgentSession started: room=%s role=%s", ctx.room.name, role)
 
     await egress.start()
     log.info("Realtime egress started: room=%s session_id=%s", ctx.room.name, conv_logger.session_id)
@@ -451,7 +453,7 @@ async def _run_realtime(ctx: JobContext, stance: str) -> None:
         if participant["identity"] is None:
             _register_participant(p)
             await assistant.update_instructions(
-                build_realtime_prompt(participant["name"], stance=stance)
+                build_realtime_prompt(participant["name"], role=role)
             )
         else:
             log.info(
@@ -468,24 +470,24 @@ async def _run_realtime(ctx: JobContext, stance: str) -> None:
 
 if AGENT_WORKER_MODE.startswith("realtime"):
 
-    REALTIME_STANCE, REALTIME_AGENT_NAME = _resolve_realtime_worker()
+    REALTIME_ROLE, REALTIME_AGENT_NAME = _resolve_realtime_worker()
     log.info(
-        "Registering LiveKit rtc_session: agent_name=%s worker_mode=%s fallback_stance=%s",
+        "Registering LiveKit rtc_session: agent_name=%s worker_mode=%s fallback_role=%s",
         REALTIME_AGENT_NAME,
         AGENT_WORKER_MODE,
-        REALTIME_STANCE,
+        REALTIME_ROLE,
     )
 
     @server.rtc_session(agent_name=REALTIME_AGENT_NAME)
     async def selected_agent(ctx: JobContext):
         try:
-            await _run_realtime(ctx, REALTIME_STANCE)
+            await _run_realtime(ctx, REALTIME_ROLE)
         except Exception:
             log.exception(
-                "Realtime job failed: agent_name=%s room=%s stance=%s",
+                "Realtime job failed: agent_name=%s room=%s role=%s",
                 REALTIME_AGENT_NAME,
                 ctx.room.name,
-                REALTIME_STANCE,
+                REALTIME_ROLE,
             )
             raise
 

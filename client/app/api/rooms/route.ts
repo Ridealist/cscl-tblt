@@ -4,7 +4,7 @@ import { RoomServiceClient } from 'livekit-server-sdk';
 import { join } from 'path';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { type AgentMode, normalizeAgentMode } from '@/lib/agent-mode';
-import { type AgentStance, normalizeAgentStance } from '@/lib/agent-stance';
+import { type AgentRole, normalizeAgentRole } from '@/lib/agent-role';
 import type { RealtimePromptSource } from '@/lib/realtime-prompt-config';
 
 const API_KEY = process.env.LIVEKIT_API_KEY;
@@ -47,7 +47,7 @@ type RoomCounts = {
 };
 
 function parseRealtimeRoomMetadata(metadata?: string): {
-  agentStance?: AgentStance;
+  agentRole?: AgentRole;
   promptId?: string;
   promptSavedAt?: string | null;
   promptSource?: RealtimePromptSource;
@@ -56,14 +56,16 @@ function parseRealtimeRoomMetadata(metadata?: string): {
   try {
     const parsed = JSON.parse(metadata) as {
       agentMode?: unknown;
+      agentRole?: unknown;
       agentStance?: unknown;
       promptId?: unknown;
       promptSavedAt?: unknown;
       promptSource?: unknown;
     };
-    if (parsed.agentMode !== 'realtime' || !parsed.agentStance) return {};
+    const rawRole = parsed.agentRole ?? parsed.agentStance;
+    if (parsed.agentMode !== 'realtime' || !rawRole) return {};
     return {
-      agentStance: normalizeAgentStance(parsed.agentStance),
+      agentRole: normalizeAgentRole(rawRole),
       promptId: typeof parsed.promptId === 'string' ? parsed.promptId : undefined,
       promptSavedAt:
         typeof parsed.promptSavedAt === 'string' || parsed.promptSavedAt === null

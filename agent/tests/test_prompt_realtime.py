@@ -1,50 +1,55 @@
 import prompt_realtime
-from prompt_realtime import build_prompt, normalize_stance
+from prompt_realtime import build_prompt, normalize_role
 
 
-def test_realtime_prompt_includes_dominant_stance_rules(tmp_path, monkeypatch) -> None:
+def test_realtime_prompt_includes_dominant_role_and_task_card(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
-    prompt = build_prompt("Junbo", stance="dominant")
+    prompt = build_prompt("Junbo", role="dominant")
 
-    assert "You and the student must choose one eco-campaign" in prompt
-    assert "You are a foreign friend from the United States who moved to Myoh-goke Elementary School." in prompt
-    assert "You are in 6th grade, the same grade as the student." in prompt
-    assert "The student is a Myoh-goke Elementary School student." in prompt
-    assert "Before starting the eco-campaign, ask 2 or 3 short warm-up questions." in prompt
-    assert "During warm-up, Daisy should lead the conversation by asking questions." in prompt
-    assert "During warm-up, each Daisy turn should usually end with one simple question." in prompt
-    assert "Do not ask the student to make a longer or more complete answer." in prompt
-    assert "Turn the student's idea into one simple complete sentence and ask if that is what they mean." in prompt
-    assert "Oh, you like soccer, right?" in prompt
-    assert "Encourage the student to answer in full sentences." not in prompt
-    assert "gently ask them to say it in a full sentence" not in prompt
-    assert "Do not evaluate the student's language." in prompt
-    assert "Do not make meta-comments about grammar, sentence length" in prompt
-    assert "Sound like a friend who wants to understand and keep talking." in prompt
-    assert "Guide the task actively from start to finish." in prompt
-    assert "I think lights-off is best." in prompt
-    assert "Let the student lead the choice as much as possible." not in prompt
-    assert "Your friend's name is Junbo." in prompt
-    assert "Still invite Junbo to say hello naturally during warm-up." in prompt
-
-
-def test_realtime_prompt_includes_passive_stance_rules(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
-    prompt = build_prompt("Junbo", stance="passive")
-
-    assert "You and the student must choose one eco-campaign" in prompt
-    assert "Start as Daisy, a 6th-grade foreign friend who moved from the United States to Myoh-goke Elementary School." in prompt
-    assert "Let the student lead the choice as much as possible." in prompt
-    assert "Accept the student's idea when it is safe and possible." in prompt
-    assert "Guide the task actively from start to finish." not in prompt
+    assert "# BASE PROMPT: Daisy, English Task Friend" in prompt
+    assert "# INTERLOCUTOR ROLE PROMPT: Dominant AI Interlocutor" in prompt
+    assert "# TASK CARD: Plan a School Event and Invite Friends" in prompt
+    assert "Task facts come only from the Task Card." in prompt
+    assert "Daisy controls the task sequence." in prompt
+    assert "Daisy and the student must choose one event." in prompt
+    assert "Can you come to our ___?" in prompt
+    assert "School Festival" in prompt
+    assert "Sports Day" in prompt
+    assert "Music Festival" in prompt
+    assert "You and the student must choose one eco-campaign" not in prompt
+    assert "Our slogan is" not in prompt
+    assert "# INTERLOCUTOR ROLE PROMPT: Collaborative AI Interlocutor" not in prompt
     assert "Your friend's name is Junbo." in prompt
 
 
-def test_realtime_prompt_defaults_to_dominant_stance(tmp_path, monkeypatch) -> None:
+def test_realtime_prompt_includes_collaborative_role_rules(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
+    prompt = build_prompt("Junbo", role="collaborative")
+
+    assert "# INTERLOCUTOR ROLE PROMPT: Collaborative AI Interlocutor" in prompt
+    assert "Daisy and the student share control." in prompt
+    assert "Student ideas shape the next steps." in prompt
+    assert 'use "we," "our," and "together"' in prompt
+    assert "# TASK CARD: Plan a School Event and Invite Friends" in prompt
+    assert "# INTERLOCUTOR ROLE PROMPT: Dominant AI Interlocutor" not in prompt
+    assert "Daisy controls the task sequence." not in prompt
+    assert "Your friend's name is Junbo." in prompt
+
+
+def test_realtime_prompt_defaults_to_dominant_role(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
 
-    assert normalize_stance("unknown") == "dominant"
-    assert "Guide the task actively from start to finish." in build_prompt(stance="unknown")
+    assert normalize_role("unknown") == "dominant"
+    assert "# INTERLOCUTOR ROLE PROMPT: Dominant AI Interlocutor" in build_prompt(role="unknown")
+
+
+def test_realtime_prompt_maps_legacy_passive_to_collaborative(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
+
+    assert normalize_role("passive") == "collaborative"
+    assert "# INTERLOCUTOR ROLE PROMPT: Collaborative AI Interlocutor" in build_prompt(
+        role="passive"
+    )
 
 
 def test_realtime_prompt_uses_tracked_default_config(tmp_path, monkeypatch) -> None:
@@ -54,8 +59,9 @@ def test_realtime_prompt_uses_tracked_default_config(tmp_path, monkeypatch) -> N
         {
           "realtime": {
             "basePrompt": "Tracked default base prompt.",
-            "dominantPrompt": "Tracked default dominant rule.",
-            "passivePrompt": "Tracked default passive rule."
+            "dominantPrompt": "Tracked default dominant role.",
+            "collaborativePrompt": "Tracked default collaborative role.",
+            "taskCardPrompt": "Tracked default task card."
           }
         }
         """,
@@ -64,11 +70,12 @@ def test_realtime_prompt_uses_tracked_default_config(tmp_path, monkeypatch) -> N
     monkeypatch.setattr(prompt_realtime, "DEFAULT_PROMPT_CONFIG_PATH", default_path)
     monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
 
-    prompt = build_prompt("Junbo", stance="passive")
+    prompt = build_prompt("Junbo", role="collaborative")
 
     assert "Tracked default base prompt." in prompt
-    assert "Tracked default passive rule." in prompt
-    assert "Tracked default dominant rule." not in prompt
+    assert "Tracked default collaborative role." in prompt
+    assert "Tracked default dominant role." not in prompt
+    assert "Tracked default task card." in prompt
     assert "Your friend's name is Junbo." in prompt
 
 
@@ -79,8 +86,9 @@ def test_realtime_prompt_uses_runtime_config(tmp_path, monkeypatch) -> None:
         {
           "realtime": {
             "basePrompt": "Runtime base prompt.",
-            "dominantPrompt": "Runtime dominant rule.",
-            "passivePrompt": "Runtime passive rule."
+            "dominantPrompt": "Runtime dominant role.",
+            "collaborativePrompt": "Runtime collaborative role.",
+            "taskCardPrompt": "Runtime task card."
           }
         }
         """,
@@ -88,11 +96,12 @@ def test_realtime_prompt_uses_runtime_config(tmp_path, monkeypatch) -> None:
     )
     monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", config_path)
 
-    dominant = build_prompt("Junbo", stance="dominant")
-    passive = build_prompt("Junbo", stance="passive")
+    dominant = build_prompt("Junbo", role="dominant")
+    collaborative = build_prompt("Junbo", role="collaborative")
 
     assert "Runtime base prompt." in dominant
-    assert "Runtime dominant rule." in dominant
-    assert "Runtime passive rule." not in dominant
-    assert "Runtime passive rule." in passive
-    assert "Your friend's name is Junbo." in passive
+    assert "Runtime dominant role." in dominant
+    assert "Runtime collaborative role." not in dominant
+    assert "Runtime collaborative role." in collaborative
+    assert "Runtime task card." in collaborative
+    assert "Your friend's name is Junbo." in collaborative

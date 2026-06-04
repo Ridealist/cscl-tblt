@@ -10,12 +10,12 @@
     "lint": "pnpm --dir client lint",
     "dev:pipeline": "bash scripts/dev.sh pipeline",
     "dev:realtime": "bash scripts/dev.sh realtime",
-    "dev:realtime:passive": "bash scripts/dev.sh realtime-passive",
+    "dev:realtime:collaborative": "bash scripts/dev.sh realtime-collaborative",
     "dev:all": "bash scripts/dev.sh all",
     "dev:client": "pnpm --dir client dev",
     "dev:agent:pipeline": "cd agent && AGENT_WORKER_MODE=pipeline uv run python main.py dev",
-    "dev:agent:realtime": "cd agent && AGENT_WORKER_MODE=realtime AGENT_STANCE=dominant uv run python main.py dev",
-    "dev:agent:realtime:passive": "cd agent && AGENT_WORKER_MODE=realtime AGENT_STANCE=passive uv run python main.py dev"
+    "dev:agent:realtime": "cd agent && AGENT_WORKER_MODE=realtime AGENT_ROLE=dominant uv run python main.py dev",
+    "dev:agent:realtime:collaborative": "cd agent && AGENT_WORKER_MODE=realtime AGENT_ROLE=collaborative uv run python main.py dev"
   },
   "packageManager": "pnpm@9.15.9"
 }

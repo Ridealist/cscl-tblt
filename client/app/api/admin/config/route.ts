@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { type AgentMode, normalizeAgentMode } from '@/lib/agent-mode';
-import { type AgentStance, DEFAULT_AGENT_STANCE, normalizeAgentStance } from '@/lib/agent-stance';
+import { type AgentRole, DEFAULT_AGENT_ROLE, normalizeAgentRole } from '@/lib/agent-role';
 
 const CONFIG_PATH = join(process.cwd(), '..', 'config.json');
 
@@ -12,7 +12,7 @@ interface AppSettings {
   classStart: number;
   activeClass: number;
   agentMode: AgentMode;
-  agentStance: AgentStance;
+  agentRole: AgentRole;
   realtimeResetting: boolean;
 }
 
@@ -25,7 +25,7 @@ function readConfig(): AppSettings {
       classStart: typeof raw.classStart === 'number' ? raw.classStart : 1,
       activeClass: typeof raw.activeClass === 'number' ? raw.activeClass : 1,
       agentMode: normalizeAgentMode(raw.agentMode),
-      agentStance: normalizeAgentStance(raw.agentStance),
+      agentRole: normalizeAgentRole(raw.agentRole ?? raw.agentStance),
       realtimeResetting: raw.realtimeResetting === true,
     };
   } catch {
@@ -35,7 +35,7 @@ function readConfig(): AppSettings {
       classStart: 1,
       activeClass: 1,
       agentMode: 'pipeline',
-      agentStance: DEFAULT_AGENT_STANCE,
+      agentRole: DEFAULT_AGENT_ROLE,
       realtimeResetting: false,
     };
   }
@@ -67,7 +67,7 @@ export async function POST(req: Request) {
           ? Math.min(Math.max(body.activeClass, classStart), classEnd)
           : Math.min(Math.max(current.activeClass, classStart), classEnd),
       agentMode: normalizeAgentMode(body.agentMode ?? current.agentMode),
-      agentStance: normalizeAgentStance(body.agentStance ?? current.agentStance),
+      agentRole: normalizeAgentRole(body.agentRole ?? body.agentStance ?? current.agentRole),
       realtimeResetting:
         typeof body.realtimeResetting === 'boolean'
           ? body.realtimeResetting

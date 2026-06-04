@@ -17,7 +17,7 @@ const PROMPT_FIELDS: {
   {
     key: 'basePrompt',
     title: '공통 프롬프트',
-    description: 'Realtime 에이전트의 역할, 태스크, 언어 수준, 대화 규칙입니다.',
+    description: 'Realtime 에이전트의 정체성, 언어 수준, 안전 규칙, 기본 대화 규칙입니다.',
     rows: 24,
   },
   {
@@ -27,17 +27,24 @@ const PROMPT_FIELDS: {
     rows: 10,
   },
   {
-    key: 'passivePrompt',
-    title: '수동적 에이전트 추가 규칙',
-    description: '수동적 조건에서 공통 프롬프트 뒤에 추가되는 규칙입니다.',
-    rows: 10,
+    key: 'collaborativePrompt',
+    title: '협력적 에이전트 역할 프롬프트',
+    description: '협력적 role 조건에서 공통 프롬프트 뒤에 추가되는 상호작용 규칙입니다.',
+    rows: 14,
+  },
+  {
+    key: 'taskCardPrompt',
+    title: 'Task Card',
+    description: '과업 목표, 정보 격차, 선택지, 완성 기준입니다.',
+    rows: 24,
   },
 ];
 
 const EMPTY_PROMPT: RealtimePromptConfig = {
   basePrompt: '',
   dominantPrompt: '',
-  passivePrompt: '',
+  collaborativePrompt: '',
+  taskCardPrompt: '',
 };
 
 function samePrompt(a: RealtimePromptConfig | null, b: RealtimePromptConfig | null) {
@@ -45,7 +52,8 @@ function samePrompt(a: RealtimePromptConfig | null, b: RealtimePromptConfig | nu
   return (
     a.basePrompt === b.basePrompt &&
     a.dominantPrompt === b.dominantPrompt &&
-    a.passivePrompt === b.passivePrompt
+    a.collaborativePrompt === b.collaborativePrompt &&
+    a.taskCardPrompt === b.taskCardPrompt
   );
 }
 
@@ -81,12 +89,14 @@ export function PromptEditorView() {
       setPrompt({
         basePrompt: data.basePrompt,
         dominantPrompt: data.dominantPrompt,
-        passivePrompt: data.passivePrompt,
+        collaborativePrompt: data.collaborativePrompt,
+        taskCardPrompt: data.taskCardPrompt,
       });
       setSavedPrompt({
         basePrompt: data.basePrompt,
         dominantPrompt: data.dominantPrompt,
-        passivePrompt: data.passivePrompt,
+        collaborativePrompt: data.collaborativePrompt,
+        taskCardPrompt: data.taskCardPrompt,
       });
       setUsingDefault(data.usingDefault);
       setPromptId(data.promptId);
@@ -122,7 +132,8 @@ export function PromptEditorView() {
       const next = {
         basePrompt: saved.basePrompt,
         dominantPrompt: saved.dominantPrompt,
-        passivePrompt: saved.passivePrompt,
+        collaborativePrompt: saved.collaborativePrompt,
+        taskCardPrompt: saved.taskCardPrompt,
       };
       setPrompt(next);
       setSavedPrompt(next);
@@ -154,7 +165,8 @@ export function PromptEditorView() {
       const next = {
         basePrompt: saved.basePrompt,
         dominantPrompt: saved.dominantPrompt,
-        passivePrompt: saved.passivePrompt,
+        collaborativePrompt: saved.collaborativePrompt,
+        taskCardPrompt: saved.taskCardPrompt,
       };
       setPrompt(next);
       setSavedPrompt(next);

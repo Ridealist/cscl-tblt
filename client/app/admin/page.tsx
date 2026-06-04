@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { PromptEditorView } from '@/components/admin/prompt-editor-view';
 import { type AgentMode, getAgentModeLabel } from '@/lib/agent-mode';
-import { type AgentStance, getAgentStanceLabel } from '@/lib/agent-stance';
+import { type AgentRole, getAgentRoleLabel } from '@/lib/agent-role';
 import type { RealtimePromptSource } from '@/lib/realtime-prompt-config';
 
 type AdminTab = 'settings' | 'prompts';
@@ -22,7 +22,7 @@ interface Settings {
   classStart: number;
   activeClass: number;
   agentMode: AgentMode;
-  agentStance: AgentStance;
+  agentRole: AgentRole;
   realtimeResetting: boolean;
 }
 
@@ -218,7 +218,7 @@ function AgentDispatchSection({
 
 interface RealtimeRoomStatus {
   name: string;
-  agentStance?: AgentStance;
+  agentRole?: AgentRole;
   promptId?: string;
   promptSavedAt?: string | null;
   promptSource?: RealtimePromptSource;
@@ -326,9 +326,7 @@ function RealtimeSessionSection() {
               <span className="text-muted-foreground text-xs">
                 상호작용 방식:{' '}
                 <span className="text-foreground font-semibold">
-                  {room.agentStance
-                    ? `${getAgentStanceLabel(room.agentStance)} 에이전트`
-                    : '미기록'}
+                  {room.agentRole ? `${getAgentRoleLabel(room.agentRole)} 에이전트` : '미기록'}
                 </span>
               </span>
               <span className="text-muted-foreground text-xs">
@@ -369,8 +367,8 @@ export default function AdminPage() {
   const [classStartInput, setClassStartInput] = useState('');
   const [groupsInput, setGroupsInput] = useState('');
   const [realtimeSessionKey, setRealtimeSessionKey] = useState(0);
-  const [pendingStance, setPendingStance] = useState<AgentStance | null>(null);
-  const [stanceChangeStatus, setStanceChangeStatus] = useState<string | null>(null);
+  const [pendingRole, setPendingRole] = useState<AgentRole | null>(null);
+  const [roleChangeStatus, setRoleChangeStatus] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/admin/config')
@@ -440,14 +438,14 @@ export default function AdminPage() {
 
   async function terminateRealtimeSessionsAndWait() {
     const startedAt = Date.now();
-    setStanceChangeStatus('개별 세션 목록을 확인하는 중입니다...');
+    setRoleChangeStatus('개별 세션 목록을 확인하는 중입니다...');
     const targetRooms = new Set(await fetchRealtimeRoomNames());
     let remainingRooms = Array.from(targetRooms);
 
     while (remainingRooms.length > 0) {
-      setStanceChangeStatus(`개별 세션 ${remainingRooms.length}개를 종료하는 중입니다...`);
+      setRoleChangeStatus(`개별 세션 ${remainingRooms.length}개를 종료하는 중입니다...`);
       await Promise.all(remainingRooms.map((room) => terminateRealtimeRoom(room)));
-      setStanceChangeStatus('전체 세션 종료 완료를 확인하는 중입니다...');
+      setRoleChangeStatus('전체 세션 종료 완료를 확인하는 중입니다...');
       await sleep(REALTIME_TERMINATION_POLL_MS);
       remainingRooms = (await fetchRealtimeRoomNames()).filter((room) => targetRooms.has(room));
 
@@ -457,10 +455,10 @@ export default function AdminPage() {
     }
   }
 
-  async function handleAgentStanceChange(stance: AgentStance) {
-    if (!settings || settings.agentStance === stance) return;
+  async function handleAgentRoleChange(role: AgentRole) {
+    if (!settings || settings.agentRole === role) return;
 
-    const nextLabel = getAgentStanceLabel(stance);
+    const nextLabel = getAgentRoleLabel(role);
     const confirmed = window.confirm(
       [
         `에이전트 상호작용 방식을 [${nextLabel} 에이전트]로 변경하면 현재 진행 중인 모든 개별 세션이 종료됩니다.`,
@@ -473,16 +471,16 @@ export default function AdminPage() {
     if (!confirmed) return;
 
     setSaving(true);
-    setPendingStance(stance);
-    setStanceChangeStatus(null);
+    setPendingRole(role);
+    setRoleChangeStatus(null);
     let resetLocked = false;
     try {
-      setStanceChangeStatus('학생 재입장을 잠시 중지하는 중입니다...');
+      setRoleChangeStatus('학생 재입장을 잠시 중지하는 중입니다...');
       await saveSettings({ ...settings, realtimeResetting: true });
       resetLocked = true;
       await terminateRealtimeSessionsAndWait();
-      setStanceChangeStatus('모든 개별 세션 종료를 확인했습니다. 설정을 저장하는 중입니다...');
-      await saveSettings({ ...settings, agentStance: stance, realtimeResetting: false });
+      setRoleChangeStatus('모든 개별 세션 종료를 확인했습니다. 설정을 저장하는 중입니다...');
+      await saveSettings({ ...settings, agentRole: role, realtimeResetting: false });
       resetLocked = false;
       setRealtimeSessionKey((key) => key + 1);
     } catch (error) {
@@ -493,8 +491,8 @@ export default function AdminPage() {
       window.alert(message);
     } finally {
       setSaving(false);
-      setPendingStance(null);
-      setStanceChangeStatus(null);
+      setPendingRole(null);
+      setRoleChangeStatus(null);
     }
   }
 
@@ -686,34 +684,34 @@ export default function AdminPage() {
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  {(['dominant', 'passive'] as AgentStance[]).map((stance) => (
+                  {(['dominant', 'collaborative'] as AgentRole[]).map((role) => (
                     <button
-                      key={stance}
-                      onClick={() => handleAgentStanceChange(stance)}
+                      key={role}
+                      onClick={() => handleAgentRoleChange(role)}
                       disabled={saving}
-                      aria-busy={pendingStance === stance}
+                      aria-busy={pendingRole === role}
                       className={`rounded-lg border px-4 py-3 text-left transition-colors disabled:opacity-50 ${
-                        settings.agentStance === stance
+                        settings.agentRole === role
                           ? 'bg-primary text-primary-foreground border-primary'
                           : 'border-border hover:bg-muted text-foreground'
                       }`}
                     >
                       <span className="block text-sm font-semibold">
-                        {pendingStance === stance
+                        {pendingRole === role
                           ? '변경 중...'
-                          : `${getAgentStanceLabel(stance)} 에이전트`}
+                          : `${getAgentRoleLabel(role)} 에이전트`}
                       </span>
                       <span
-                        className={`mt-1 block text-xs ${settings.agentStance === stance ? 'opacity-80' : 'text-muted-foreground'}`}
+                        className={`mt-1 block text-xs ${settings.agentRole === role ? 'opacity-80' : 'text-muted-foreground'}`}
                       >
-                        {stance === 'dominant'
+                        {role === 'dominant'
                           ? '에이전트가 대화와 과제 진행을 주도'
-                          : '학생의 제안과 선택을 우선 수용'}
+                          : '학생과 에이전트가 선택과 결정을 공유'}
                       </span>
                     </button>
                   ))}
                 </div>
-                {pendingStance && stanceChangeStatus && (
+                {pendingRole && roleChangeStatus && (
                   <div
                     role="status"
                     aria-live="polite"
@@ -723,7 +721,7 @@ export default function AdminPage() {
                       aria-hidden="true"
                       className="border-muted-foreground/30 border-t-foreground size-4 shrink-0 animate-spin rounded-full border-2"
                     />
-                    <span>{stanceChangeStatus}</span>
+                    <span>{roleChangeStatus}</span>
                   </div>
                 )}
               </section>
@@ -803,7 +801,7 @@ export default function AdminPage() {
                 <li>
                   상호작용 방식:{' '}
                   <span className="text-foreground font-semibold">
-                    {getAgentStanceLabel(settings.agentStance)} 에이전트
+                    {getAgentRoleLabel(settings.agentRole)} 에이전트
                   </span>
                 </li>
               )}

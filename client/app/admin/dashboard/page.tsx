@@ -7,7 +7,7 @@ import {
   ConversationEmptyState,
   ConversationScrollButton,
 } from '@/components/ai-elements/conversation';
-import { type AgentStance, getAgentStanceLabel } from '@/lib/agent-stance';
+import { type AgentRole, getAgentRoleLabel, normalizeAgentRole } from '@/lib/agent-role';
 
 // ─── 색상 팔레트 ────────────────────────────────────────────────────────────
 
@@ -44,7 +44,8 @@ interface LogData {
   room: string;
   metadata?: {
     agent_mode?: string;
-    agent_stance?: AgentStance;
+    agent_role?: AgentRole;
+    agent_stance?: AgentRole;
   };
   entries: LogEntry[];
   _filename?: string;
@@ -221,11 +222,15 @@ function ConversationView({ session, onBack }: { session: SessionMeta; onBack: (
           {session.room}
         </span>
         <span className="text-muted-foreground font-mono text-xs">{session.session_id}</span>
-        {log?.metadata?.agent_mode === 'realtime' && log.metadata.agent_stance && (
-          <span className="bg-muted rounded px-2 py-0.5 text-xs font-semibold">
-            {getAgentStanceLabel(log.metadata.agent_stance)} 에이전트
-          </span>
-        )}
+        {log?.metadata?.agent_mode === 'realtime' &&
+          (log.metadata.agent_role || log.metadata.agent_stance) && (
+            <span className="bg-muted rounded px-2 py-0.5 text-xs font-semibold">
+              {getAgentRoleLabel(
+                normalizeAgentRole(log.metadata.agent_role ?? log.metadata.agent_stance)
+              )}{' '}
+              에이전트
+            </span>
+          )}
         <span className="ml-auto flex items-center gap-1.5 text-xs">
           <span
             className={`inline-block size-2 rounded-full ${connected ? 'bg-green-500' : 'bg-gray-400'}`}
