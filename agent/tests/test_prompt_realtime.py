@@ -8,7 +8,7 @@ def test_realtime_prompt_includes_dominant_role_and_task_card(tmp_path, monkeypa
 
     assert "# BASE PROMPT: Daisy, English Task Friend" in prompt
     assert "# INTERLOCUTOR ROLE PROMPT: Dominant AI Interlocutor" in prompt
-    assert "# TASK CARD: Lesson 4 - Plan a School Event and Invite Friends" in prompt
+    assert "# TASK CARD: Plan a School Event and Invite Friends" in prompt
     assert "Task facts come only from the Task Card." in prompt
     assert "Daisy controls the task sequence." in prompt
     assert "Daisy and the student must choose one event." in prompt
@@ -30,7 +30,7 @@ def test_realtime_prompt_includes_collaborative_role_rules(tmp_path, monkeypatch
     assert "Daisy and the student share control." in prompt
     assert "Student ideas shape the next steps." in prompt
     assert 'use "we," "our," and "together"' in prompt
-    assert "# TASK CARD: Lesson 4 - Plan a School Event and Invite Friends" in prompt
+    assert "# TASK CARD: Plan a School Event and Invite Friends" in prompt
     assert "# INTERLOCUTOR ROLE PROMPT: Dominant AI Interlocutor" not in prompt
     assert "Daisy controls the task sequence." not in prompt
     assert "Your friend's name is Junbo." in prompt

@@ -34,8 +34,8 @@ const PROMPT_FIELDS: {
   },
   {
     key: 'taskCardPrompt',
-    title: 'Lesson 4 Task Card',
-    description: 'Lesson 4의 과업 목표, 정보 격차, 선택지, 완성 기준입니다.',
+    title: 'Task Card',
+    description: '과업 목표, 정보 격차, 선택지, 완성 기준입니다.',
     rows: 24,
   },
 ];

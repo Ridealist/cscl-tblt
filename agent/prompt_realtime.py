@@ -609,7 +609,7 @@ ROLE_PROMPTS: dict[AgentRole, str] = {
 
 
 TASK_CARD_PROMPT = dedent("""
-# TASK CARD: Lesson 4 - Plan a School Event and Invite Friends
+# TASK CARD: Plan a School Event and Invite Friends
 
 # Context
 Lesson topic:
