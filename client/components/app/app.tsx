@@ -32,6 +32,7 @@ export function App({ appConfig }: AppProps) {
     participantName: string;
     roomName: string;
     agentMode: AgentMode;
+    accessCode: string;
   } | null>(null);
   const hadConnectedSessionRef = useRef(false);
   const [, forceRender] = useState(0);
@@ -51,6 +52,7 @@ export function App({ appConfig }: AppProps) {
           participant_name: info?.participantName,
           room_name: info?.roomName,
           agent_mode: info?.agentMode,
+          access_code: info?.accessCode,
         }),
       });
       if (!res.ok) {
@@ -88,8 +90,8 @@ export function App({ appConfig }: AppProps) {
   }, [session.isConnected]);
 
   const handleJoin = useCallback(
-    (participantName: string, roomName: string, agentMode: AgentMode) => {
-      sessionInfoRef.current = { participantName, roomName, agentMode };
+    (participantName: string, roomName: string, agentMode: AgentMode, accessCode: string) => {
+      sessionInfoRef.current = { participantName, roomName, agentMode, accessCode };
       setSessionNotice(null);
       forceRender((n) => n + 1);
       void session.start({ tracks: { microphone: { enabled: false } } }).catch((error) => {
