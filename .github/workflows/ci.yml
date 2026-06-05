@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   client:
-    name: CI / Client
+    name: Client
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -44,7 +44,7 @@ jobs:
         run: pnpm build
 
   agent:
-    name: CI / Agent
+    name: Agent
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
