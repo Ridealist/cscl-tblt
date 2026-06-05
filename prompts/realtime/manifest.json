@@ -1,0 +1,18 @@
+{
+  "basePrompt": {
+    "file": "base.md",
+    "marker": "# BASE PROMPT:"
+  },
+  "dominantPrompt": {
+    "file": "dominant.md",
+    "marker": "# INTERLOCUTOR ROLE PROMPT: Dominant"
+  },
+  "collaborativePrompt": {
+    "file": "collaborative.md",
+    "marker": "# INTERLOCUTOR ROLE PROMPT: Collaborative"
+  },
+  "taskCardPrompt": {
+    "file": "task_card.md",
+    "marker": "# TASK CARD:"
+  }
+}
