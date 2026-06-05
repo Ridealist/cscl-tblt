@@ -30,12 +30,7 @@ const VIEW_MOTION_PROPS = {
 
 interface ViewControllerProps {
   appConfig: AppConfig;
-  onJoin: (
-    participantName: string,
-    roomName: string,
-    agentMode: AgentMode,
-    accessCode: string
-  ) => void;
+  onJoin: (participantName: string, roomName: string, agentMode: AgentMode) => void;
   sessionNotice?: string | null;
 }
 
