@@ -235,6 +235,11 @@ export function PromptEditorView() {
             <p className="text-muted-foreground text-xs">
               저장된 변경사항은 새로 시작하는 개별 대화 세션부터 적용됩니다.
             </p>
+            <p className="text-muted-foreground text-xs">
+              {usingDefault
+                ? '현재 prompts/realtime/*.md 기본값을 사용합니다.'
+                : '현재 prompt_config.json 사용자 설정이 md 기본값보다 우선합니다.'}
+            </p>
           </div>
           <span className="bg-muted text-muted-foreground shrink-0 rounded px-2 py-1 text-xs">
             {usingDefault ? '기본값 사용 중' : '사용자 설정 사용 중'}
