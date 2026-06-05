@@ -1,0 +1,29 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  - repo: local
+    hooks:
+      - id: config-json-untracked
+        name: Ensure config.json remains untracked
+        entry: bash -c 'if git ls-files --error-unmatch config.json >/dev/null 2>&1; then echo "config.json must remain an untracked runtime file. Track config.example.json instead."; exit 1; fi'
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: shell-script-syntax
+        name: Check shell script syntax
+        entry: bash -c 'shopt -s nullglob; scripts=(scripts/*.sh); if [ "${#scripts[@]}" -gt 0 ]; then bash -n "${scripts[@]}"; fi'
+        language: system
+        pass_filenames: false
+        always_run: true
