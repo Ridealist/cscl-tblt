@@ -16,6 +16,9 @@ jobs:
   client:
     name: Production / Client
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
     defaults:
       run:
         working-directory: client
@@ -42,15 +45,17 @@ jobs:
   agent:
     name: Production / Agent
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: agent
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
-        uses: astral-sh/setup-uv@v1
+        uses: astral-sh/setup-uv@v5
         with:
-          version: latest
+          enable-cache: true
+          cache-dependency-glob: agent/uv.lock
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -59,10 +64,14 @@ jobs:
         run: uv sync --dev --frozen
       - name: Run tests
         run: uv run pytest -v
+      - name: Prune uv cache
+        if: always()
+        run: uv cache prune --ci
 
   deploy:
     name: Production / Deploy
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [client, agent]
     environment: production
     env:

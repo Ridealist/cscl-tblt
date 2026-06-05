@@ -201,7 +201,7 @@ python -m http.server 3000
 
 ## CLI 단독 실험 (브라우저/프론트엔드 없이)
 
-에이전트를 터미널에서 직접 실행해 백엔드만 빠르게 실험할 수 있습니다.  
+에이전트를 터미널에서 직접 실행해 백엔드만 빠르게 실험할 수 있습니다.
 마이크와 스피커만 있으면 되고, 토큰 서버와 클라이언트는 불필요합니다.
 
 ```bash
@@ -628,12 +628,13 @@ pm2 restart cscl-client
 
 ## CI/CD 파이프라인
 
-GitHub Actions는 두 종류로 구성한다.
+GitHub Actions는 세 종류로 구성한다.
 
-| Workflow            | Trigger                    | 역할                                  |
-| ------------------- | -------------------------- | ------------------------------------- |
-| `CI`                | PR → `main`                | Client lint/format/build, Agent tests |
-| `Deploy Production` | `main` push 또는 수동 실행 | 검증 후 EC2 production 배포           |
+| Workflow            | Trigger                     | 역할                                  |
+| ------------------- | --------------------------- | ------------------------------------- |
+| `pre-commit`        | PR/push → `main`, 수동 실행 | 공통 파일 형식 및 repo guardrail 검사 |
+| `CI`                | PR → `main`                 | Client lint/format/build, Agent tests |
+| `Deploy Production` | `main` push 또는 수동 실행  | 검증 후 EC2 production 배포           |
 
 Production 배포는 GitHub Actions가 SSH로 EC2에 접속해 `scripts/deploy-production.sh`를 실행한다.
 
@@ -663,7 +664,7 @@ Production 배포는 GitHub Actions가 SSH로 EC2에 접속해 `scripts/deploy-p
 - `cscl-client` PM2 process 확인 및 재시작
 - `http://localhost:3000/api/health` 응답 확인
 
-`main`에 merge되면 배포가 바로 실행되므로, GitHub branch protection에서 `CI / Client`와 `CI / Agent`를 required check로 설정한다.
+`main`에 merge되면 배포가 바로 실행되므로, GitHub branch protection에서 `pre-commit`, `CI / Client`, `CI / Agent`를 required check로 설정한다.
 
 ---
 
