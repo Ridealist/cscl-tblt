@@ -27,7 +27,6 @@ type ConnectionDetails = {
 const API_KEY = process.env.LIVEKIT_API_KEY;
 const API_SECRET = process.env.LIVEKIT_API_SECRET;
 const LIVEKIT_URL = process.env.LIVEKIT_URL;
-const STUDENT_ACCESS_CODE = process.env.STUDENT_ACCESS_CODE;
 const CONFIG_PATH = join(process.cwd(), '..', 'config.json');
 const PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.json');
 
@@ -59,13 +58,6 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const accessResult = validateStudentAccessCode(body?.access_code);
-    if (!accessResult.ok) {
-      return NextResponse.json(
-        { error: accessResult.error },
-        { status: accessResult.status, headers: { 'Cache-Control': 'no-store' } }
-      );
-    }
 
     // Use provided name/room or fall back to random values
     const participantName = body?.participant_name?.trim() || 'user';
@@ -148,32 +140,6 @@ function safeParseJson(value: string): unknown {
   } catch {
     return value;
   }
-}
-
-function validateStudentAccessCode(
-  value: unknown
-): { ok: true } | { ok: false; error: string; status: number } {
-  if (!STUDENT_ACCESS_CODE) {
-    if (process.env.NODE_ENV !== 'production') {
-      return { ok: true };
-    }
-
-    return {
-      ok: false,
-      error: '학생 입장 코드가 설정되어 있지 않습니다.',
-      status: 503,
-    };
-  }
-
-  if (typeof value !== 'string' || value.trim() !== STUDENT_ACCESS_CODE) {
-    return {
-      ok: false,
-      error: '입장 코드가 올바르지 않습니다.',
-      status: 401,
-    };
-  }
-
-  return { ok: true };
 }
 
 function readRuntimeConfig(): RuntimeConfig {

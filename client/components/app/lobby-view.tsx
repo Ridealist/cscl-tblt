@@ -5,12 +5,7 @@ import { Button } from '@/components/ui/button';
 import { type AgentMode, getAgentModeLabel } from '@/lib/agent-mode';
 
 interface LobbyViewProps {
-  onJoin: (
-    participantName: string,
-    roomName: string,
-    agentMode: AgentMode,
-    accessCode: string
-  ) => void;
+  onJoin: (participantName: string, roomName: string, agentMode: AgentMode) => void;
   sessionNotice?: string | null;
 }
 
@@ -21,7 +16,6 @@ export function LobbyView({
 }: React.ComponentProps<'div'> & LobbyViewProps) {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [accessCode, setAccessCode] = useState('');
   const [selectedGroup, setSelectedGroup] = useState<number | null>(null);
   const [activeClass, setActiveClass] = useState<number | null>(null);
   const [agentMode, setAgentMode] = useState<AgentMode>('pipeline');
@@ -91,10 +85,6 @@ export function LobbyView({
       setError('성(Last Name)을 입력해주세요.');
       return;
     }
-    if (!accessCode.trim()) {
-      setError('입장 코드를 입력해주세요.');
-      return;
-    }
     if (agentMode === 'pipeline' && !selectedRoomName) {
       setError('그룹을 선택해주세요.');
       return;
@@ -107,7 +97,7 @@ export function LobbyView({
     const roomName =
       agentMode === 'realtime' ? makeRealtimeRoomName(participantName) : selectedRoomName;
     if (!roomName) return;
-    onJoin(participantName, roomName, agentMode, accessCode.trim());
+    onJoin(participantName, roomName, agentMode);
   }
 
   const previewName = [firstName.trim(), lastName.trim()].filter(Boolean).join(' ');
@@ -169,22 +159,6 @@ export function LobbyView({
             에이전트가 부를 이름: <span className="text-foreground font-medium">{previewName}</span>
           </p>
         )}
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <label className="text-foreground text-sm font-semibold">입장 코드</label>
-        <input
-          type="password"
-          value={accessCode}
-          onChange={(e) => {
-            setAccessCode(e.target.value);
-            setError('');
-          }}
-          onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
-          placeholder="선생님이 알려준 코드"
-          autoComplete="off"
-          className="border-input bg-background text-foreground placeholder:text-muted-foreground focus:ring-primary rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2"
-        />
       </div>
 
       {/* 그룹 선택 */}

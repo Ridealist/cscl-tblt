@@ -236,7 +236,6 @@ LIVEKIT_API_KEY=your_api_key
 LIVEKIT_API_SECRET=your_api_secret
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=strong_password_here
-STUDENT_ACCESS_CODE=shared_student_entry_code
 ```
 
 Next.js API routes:
@@ -252,7 +251,6 @@ Next.js API routes:
 
 > **주의:** Production에서 `/admin`, `/api/admin`, 관리자성 API(`/api/dispatch`, `/api/logs`, `/api/rooms/terminate`)는
 > `ADMIN_USERNAME`/`ADMIN_PASSWORD` Basic Auth로 보호된다.
-> `/api/token`은 `STUDENT_ACCESS_CODE`가 일치할 때만 학생 토큰을 발급한다.
 
 ## 관리자 설정
 
@@ -455,7 +453,6 @@ LIVEKIT_API_KEY=<값>
 LIVEKIT_API_SECRET=<값>
 ADMIN_USERNAME=<관리자_아이디>
 ADMIN_PASSWORD=<관리자_비밀번호>
-STUDENT_ACCESS_CODE=<학생_입장_코드>
 ```
 
 > `S3_ENDPOINT`는 AWS S3 사용 시 반드시 비워두어야 합니다. 값을 넣으면 Egress 업로드 실패.
@@ -655,7 +652,7 @@ Production 배포는 GitHub Actions가 SSH로 EC2에 접속해 `scripts/deploy-p
 - `pnpm`, `uv`, `pm2`, `curl`이 설치되어 있어야 한다.
 - 서버의 `.env`, `client/.env.local`, `config.json`, `prompt_config.json`은 배포 중 백업 후 복원된다.
 - `config.json`은 git 추적 대상이 아니며, 없으면 `config.example.json`에서 자동 생성된다.
-- Production에서는 `client/.env.local`에 `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `STUDENT_ACCESS_CODE`가 있어야 한다.
+- Production에서는 `client/.env.local`에 `ADMIN_USERNAME`, `ADMIN_PASSWORD`가 있어야 한다.
 
 배포 후 health check:
 
