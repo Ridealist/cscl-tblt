@@ -117,6 +117,17 @@ fi
 pm2 save
 
 log "Checking client health"
-curl -fsS http://localhost:3000/api/health >/dev/null
+for attempt in {1..30}; do
+  if curl -fsS http://localhost:3000/api/health >/dev/null; then
+    break
+  fi
+
+  if [[ "$attempt" -eq 30 ]]; then
+    printf 'Client health check failed after %s attempts\n' "$attempt" >&2
+    exit 1
+  fi
+
+  sleep 2
+done
 
 log "Deployment completed"
