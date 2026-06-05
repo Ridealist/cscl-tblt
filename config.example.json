@@ -1,0 +1,9 @@
+{
+  "numClasses": 4,
+  "numGroupsPerClass": 4,
+  "classStart": 1,
+  "activeClass": 1,
+  "agentMode": "pipeline",
+  "agentRole": "dominant",
+  "realtimeResetting": false
+}
