@@ -5,17 +5,18 @@
   "scripts": {
     "setup": "pnpm --dir client install && cd agent && uv sync",
     "dev": "bash scripts/dev.sh auto",
-    "build": "pnpm --dir client build",
-    "start": "pnpm --dir client start",
+    "build": "pnpm prompts:check && pnpm --dir client build",
+    "start": "pnpm prompts:check && pnpm --dir client start",
     "lint": "pnpm --dir client lint",
+    "prompts:check": "python3 scripts/check_realtime_prompts.py",
     "dev:pipeline": "bash scripts/dev.sh pipeline",
     "dev:realtime": "bash scripts/dev.sh realtime",
     "dev:realtime:collaborative": "bash scripts/dev.sh realtime-collaborative",
     "dev:all": "bash scripts/dev.sh all",
     "dev:client": "pnpm --dir client dev",
-    "dev:agent:pipeline": "cd agent && AGENT_WORKER_MODE=pipeline uv run python main.py dev",
-    "dev:agent:realtime": "cd agent && AGENT_WORKER_MODE=realtime AGENT_ROLE=dominant uv run python main.py dev",
-    "dev:agent:realtime:collaborative": "cd agent && AGENT_WORKER_MODE=realtime AGENT_ROLE=collaborative uv run python main.py dev"
+    "dev:agent:pipeline": "pnpm prompts:check && cd agent && AGENT_WORKER_MODE=pipeline uv run python main.py dev",
+    "dev:agent:realtime": "pnpm prompts:check && cd agent && AGENT_WORKER_MODE=realtime AGENT_ROLE=dominant uv run python main.py dev",
+    "dev:agent:realtime:collaborative": "pnpm prompts:check && cd agent && AGENT_WORKER_MODE=realtime AGENT_ROLE=collaborative uv run python main.py dev"
   },
   "packageManager": "pnpm@9.15.9"
 }

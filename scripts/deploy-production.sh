@@ -64,6 +64,7 @@ cleanup() {
 trap cleanup EXIT
 
 require_command git
+require_command python3
 require_command pnpm
 require_command uv
 require_command pm2
@@ -88,6 +89,9 @@ git reset --hard "$DEPLOY_REF"
 
 log "Restoring runtime state files"
 restore_state
+
+log "Checking realtime prompt sources"
+python3 scripts/check_realtime_prompts.py
 
 log "Installing client dependencies"
 pnpm --dir client install --frozen-lockfile
