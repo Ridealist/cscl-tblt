@@ -351,8 +351,8 @@ logs/
 
 | 항목                             | 위치                                                                                                 |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Realtime AI 시스템 프롬프트 수정 | `/admin` → `프롬프트 편집` 탭 또는 런타임 `prompt_config.json`                                       |
-| 기본 AI 시스템 프롬프트 fallback | `agent/prompt_pipeline.py`, `agent/prompt_realtime.py`                                               |
+| Realtime AI 시스템 프롬프트 수정 | 기본값은 `prompts/realtime/*.md`, 런타임 수정은 `/admin` 또는 `prompt_config.json`                   |
+| 기본 AI 시스템 프롬프트 fallback | 그룹 대화는 `agent/prompt_pipeline.py`, 개별 대화는 `prompts/realtime/*.md`                         |
 | 그룹 대화 모드 모델 변경         | `agent/main.py` (STT `deepgram/nova-3`, LLM `openai/gpt-4.1-mini`, TTS `cartesia/sonic-3`)           |
 | 개별 대화 모드 모델 변경         | `agent/main.py` (`openai.realtime.RealtimeModel`)                                                    |
 | 실행할 worker 모드               | `AGENT_WORKER_MODE=pipeline` 또는 `AGENT_WORKER_MODE=realtime` + `AGENT_ROLE=dominant/collaborative` |
@@ -362,6 +362,20 @@ logs/
 | legacy static Room 이름 변경     | `.env` → `ROOM_NAME`                                                                                 |
 | 에이전트 이름 변경               | `agent/main.py`, `client/lib/agent-role.ts` (`pipeline-agent`, `realtime-agent`)                     |
 | 로그 저장 위치 변경              | `agent/logger.py` → `LOGS_DIR`                                                                       |
+
+Realtime 기본 프롬프트를 수정할 때는 `prompts/realtime/` 아래의 문서형 프롬프트를 수정합니다. agent와 admin 기본값은 이 md 파일들을 직접 읽습니다.
+
+```bash
+pnpm prompts:check
+```
+
+원본 파일은 `base.md`, `dominant.md`, `collaborative.md`, `task_card.md`입니다. `pnpm prompts:check`는 파일 누락이나 빈 파일 같은 기본 오류를 검사합니다.
+
+`/admin`에서 프롬프트를 저장하면 런타임 `prompt_config.json`이 생성되고, 이 사용자 설정이 `prompts/realtime/*.md` 기본값보다 우선합니다. md 기본값을 다시 쓰려면 `/admin`에서 "기본값으로 복원"을 실행해 `prompt_config.json` override를 제거합니다.
+
+단일 문서에서 복사한 프롬프트를 한 파일로 검사기에 넘길 수도 있습니다. 이 경우 검사기는 `# BASE PROMPT:`, `# INTERLOCUTOR ROLE PROMPT: Dominant`, `# INTERLOCUTOR ROLE PROMPT: Collaborative`, `# TASK CARD:` 헤딩을 기준으로 네 구간을 나눕니다.
+
+`pnpm dev`, `pnpm build`, `pnpm start`, `pnpm dev:agent:*`, 프로덕션 배포 스크립트는 실행 전에 `prompts:check`와 같은 검사를 수행합니다.
 
 ---
 
@@ -692,7 +706,7 @@ sudo nginx -t
 | 운영 모드 저장              | `config.json.agentMode`에 `pipeline` 또는 `realtime` 저장      |
 | Realtime 상호작용 role 저장 | `config.json.agentRole`에 `dominant` 또는 `collaborative` 저장 |
 | Agent entrypoint            | `agent/main.py`에 `pipeline-agent`, `realtime-agent` 등록      |
-| 프롬프트 분리               | `agent/prompt_pipeline.py`, `agent/prompt_realtime.py`         |
+| 프롬프트 분리               | 그룹 대화는 `agent/prompt_pipeline.py`, 개별 대화 기본값은 `prompts/realtime/*.md` |
 | Realtime 의존성             | `livekit-agents[openai,silero,turn-detector]~=1.5`             |
 | Egress 업로드               | `S3_ENDPOINT` 값이 `http`로 시작하는 경우만 endpoint로 사용    |
 
