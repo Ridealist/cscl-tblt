@@ -8,35 +8,61 @@ type PromptField = keyof RealtimePromptConfig;
 
 type PromptResponse = RealtimePromptState;
 
-const PROMPT_FIELDS: {
+type PromptFieldConfig = {
   key: PromptField;
   title: string;
   description: string;
   rows: number;
-}[] = [
+};
+
+type PromptGroup = {
+  title: string;
+  description: string;
+  fields: PromptFieldConfig[];
+};
+
+const PROMPT_GROUPS: PromptGroup[] = [
   {
-    key: 'basePrompt',
-    title: '공통 프롬프트',
+    title: 'Base Prompt',
     description: 'Realtime 에이전트의 정체성, 언어 수준, 안전 규칙, 기본 대화 규칙입니다.',
-    rows: 24,
+    fields: [
+      {
+        key: 'basePrompt',
+        title: 'Common Prompt',
+        description: '모든 Realtime 에이전트 역할에 공통으로 적용됩니다.',
+        rows: 24,
+      },
+    ],
   },
   {
-    key: 'dominantPrompt',
-    title: '주도적 에이전트 추가 규칙',
-    description: '주도적 조건에서 공통 프롬프트 뒤에 추가되는 규칙입니다.',
-    rows: 10,
+    title: 'Interlocutor Role Prompt',
+    description: '상호작용 조건별로 Base Prompt 뒤에 추가되는 역할 규칙입니다.',
+    fields: [
+      {
+        key: 'dominantPrompt',
+        title: 'Dominant Prompt',
+        description: 'Dominant Condition에서 추가되는 주도적 상호작용 규칙입니다.',
+        rows: 14,
+      },
+      {
+        key: 'collaborativePrompt',
+        title: 'Collaborative Prompt',
+        description: 'Collaborative Condition에서 추가되는 협력적 상호작용 규칙입니다.',
+        rows: 14,
+      },
+    ],
   },
   {
-    key: 'collaborativePrompt',
-    title: '협력적 에이전트 역할 프롬프트',
-    description: '협력적 role 조건에서 공통 프롬프트 뒤에 추가되는 상호작용 규칙입니다.',
-    rows: 14,
-  },
-  {
-    key: 'taskCardPrompt',
     title: 'Task Card',
     description: '과업 목표, 정보 격차, 선택지, 완성 기준입니다.',
-    rows: 24,
+    fields: [
+      {
+        key: 'taskCardPrompt',
+        title: 'Task Card Prompt',
+        description: '개별 세션에서 제시되는 과업 카드 내용입니다.',
+        rows: 24,
+      },
+    ],
   },
 ];
 
@@ -78,6 +104,24 @@ export function PromptEditorView() {
 
   function formatPromptSavedAt(value: string | null) {
     return value ? new Date(value).toLocaleString('ko-KR') : '저장 이력 없음';
+  }
+
+  function renderPromptTextarea(field: PromptFieldConfig) {
+    return (
+      <textarea
+        value={prompt[field.key]}
+        rows={field.rows}
+        spellCheck={false}
+        onChange={(e) =>
+          setPrompt((current) => ({
+            ...current,
+            [field.key]: e.target.value,
+          }))
+        }
+        className="border-input bg-background text-foreground focus:ring-primary min-h-32 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none focus:ring-2 disabled:opacity-50"
+        disabled={saving}
+      />
+    );
   }
 
   async function loadPrompt() {
@@ -212,32 +256,49 @@ export function PromptEditorView() {
       {loading ? (
         <p className="text-muted-foreground text-sm">프롬프트를 불러오는 중...</p>
       ) : (
-        PROMPT_FIELDS.map((field) => (
-          <section key={field.key} className="flex flex-col gap-2">
-            <div className="flex items-end justify-between gap-3">
-              <div>
-                <h3 className="text-foreground text-sm font-semibold">{field.title}</h3>
-                <p className="text-muted-foreground text-xs">{field.description}</p>
+        PROMPT_GROUPS.map((group) => {
+          const singleField = group.fields.length === 1 ? group.fields[0] : null;
+
+          return (
+            <section key={group.title} className="flex flex-col gap-3">
+              <div className="flex items-end justify-between gap-3">
+                <div>
+                  <h3 className="text-foreground text-sm font-semibold">{group.title}</h3>
+                  <p className="text-muted-foreground text-xs">{group.description}</p>
+                </div>
+                <span className="text-muted-foreground shrink-0 font-mono text-xs">
+                  {group.fields
+                    .reduce((total, field) => total + prompt[field.key].length, 0)
+                    .toLocaleString('ko-KR')}
+                  자
+                </span>
               </div>
-              <span className="text-muted-foreground shrink-0 font-mono text-xs">
-                {prompt[field.key].length.toLocaleString('ko-KR')}자
-              </span>
-            </div>
-            <textarea
-              value={prompt[field.key]}
-              rows={field.rows}
-              spellCheck={false}
-              onChange={(e) =>
-                setPrompt((current) => ({
-                  ...current,
-                  [field.key]: e.target.value,
-                }))
-              }
-              className="border-input bg-background text-foreground focus:ring-primary min-h-32 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none focus:ring-2 disabled:opacity-50"
-              disabled={saving}
-            />
-          </section>
-        ))
+              {singleField ? (
+                renderPromptTextarea(singleField)
+              ) : (
+                <div className="flex flex-col gap-4">
+                  {group.fields.map((field) => (
+                    <div
+                      key={field.key}
+                      className="border-border flex flex-col gap-2 border-l pl-4"
+                    >
+                      <div className="flex items-end justify-between gap-3">
+                        <div>
+                          <h4 className="text-foreground text-xs font-semibold">{field.title}</h4>
+                          <p className="text-muted-foreground text-xs">{field.description}</p>
+                        </div>
+                        <span className="text-muted-foreground shrink-0 font-mono text-xs">
+                          {prompt[field.key].length.toLocaleString('ko-KR')}자
+                        </span>
+                      </div>
+                      {renderPromptTextarea(field)}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          );
+        })
       )}
 
       {message && (
