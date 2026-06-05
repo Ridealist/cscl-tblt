@@ -42,7 +42,8 @@ CSCL_TBLT/
 │   │   └── style.css
 │   └── .env.local        # Next.js용 환경변수 (git 추적 안 됨)
 │
-├── config.json           # 반/그룹/운영 모드 설정
+├── config.example.json   # 반/그룹/운영 모드 설정 예시
+├── config.json           # 반/그룹/운영 모드 설정 (git 추적 안 됨)
 └── logs/                 # 대화 로그 JSON (자동 생성, git 추적 안 됨)
 ```
 
@@ -70,10 +71,10 @@ CSCL_TBLT/
 
 ### 수업 운영 모드
 
-| 모드 | UX 표시명 | Room 정책 | Agent | 음성 처리 |
-|---|---|---|---|---|
-| `pipeline` | 그룹 대화 모드 | `12반-1그룹` 같은 그룹 room | `pipeline-agent` | STT `deepgram/nova-3` → LLM `openai/gpt-4.1-mini` → TTS `cartesia/sonic-3` |
-| `realtime` | 개별 대화 모드 | `realtime-{반}-{학생명}-{suffix}` 자동 생성 | `realtime-agent` | OpenAI Realtime speech-to-speech |
+| 모드       | UX 표시명      | Room 정책                                   | Agent            | 음성 처리                                                                  |
+| ---------- | -------------- | ------------------------------------------- | ---------------- | -------------------------------------------------------------------------- |
+| `pipeline` | 그룹 대화 모드 | `12반-1그룹` 같은 그룹 room                 | `pipeline-agent` | STT `deepgram/nova-3` → LLM `openai/gpt-4.1-mini` → TTS `cartesia/sonic-3` |
+| `realtime` | 개별 대화 모드 | `realtime-{반}-{학생명}-{suffix}` 자동 생성 | `realtime-agent` | OpenAI Realtime speech-to-speech                                           |
 
 ## 사전 준비
 
@@ -87,6 +88,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ```bash
 cp .env.example .env
+cp config.example.json config.json
 ```
 
 `.env` 파일에 값 입력:
@@ -215,12 +217,12 @@ uv run python main.py dev
 uv run python main.py start
 ```
 
-| 명령 | 설명 | 필요한 것 |
-|------|------|----------|
-| `console` | 터미널 단독 음성 대화 | 마이크, 스피커 |
-| `dev` | 프론트엔드 연결 대기 (자동 재시작) | Next.js 클라이언트 |
-| `start` | 프로덕션 실행 | Next.js 클라이언트 |
-| `download-files` | VAD 등 ML 모델 다운로드 | — |
+| 명령             | 설명                               | 필요한 것          |
+| ---------------- | ---------------------------------- | ------------------ |
+| `console`        | 터미널 단독 음성 대화              | 마이크, 스피커     |
+| `dev`            | 프론트엔드 연결 대기 (자동 재시작) | Next.js 클라이언트 |
+| `start`          | 프로덕션 실행                      | Next.js 클라이언트 |
+| `download-files` | VAD 등 ML 모델 다운로드            | —                  |
 
 ---
 
@@ -232,32 +234,37 @@ uv run python main.py start
 LIVEKIT_URL=wss://your-project.livekit.cloud
 LIVEKIT_API_KEY=your_api_key
 LIVEKIT_API_SECRET=your_api_secret
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=strong_password_here
+STUDENT_ACCESS_CODE=shared_student_entry_code
 ```
 
 Next.js API routes:
 
-| Route | 역할 |
-|---|---|
-| `POST /api/token` | 참가자 토큰 발급, 현재 운영 모드에 맞는 agent 자동 배치 |
-| `GET /api/rooms` | 활성 반의 그룹 room과 realtime 개별 room 현황 조회 |
-| `GET/POST /api/admin/config` | `config.json` 읽기/쓰기 |
-| `GET/POST /api/dispatch` | 그룹 대화 모드에서 `pipeline-agent` 수동 배치/존재 확인 |
-| `POST /api/rooms/terminate` | room 강제 종료 |
-| `GET /api/logs`, `GET /api/logs/stream` | 대화 로그 목록/스트리밍 |
+| Route                                   | 역할                                                    |
+| --------------------------------------- | ------------------------------------------------------- |
+| `POST /api/token`                       | 참가자 토큰 발급, 현재 운영 모드에 맞는 agent 자동 배치 |
+| `GET /api/rooms`                        | 활성 반의 그룹 room과 realtime 개별 room 현황 조회      |
+| `GET/POST /api/admin/config`            | `config.json` 읽기/쓰기                                 |
+| `GET/POST /api/dispatch`                | 그룹 대화 모드에서 `pipeline-agent` 수동 배치/존재 확인 |
+| `POST /api/rooms/terminate`             | room 강제 종료                                          |
+| `GET /api/logs`, `GET /api/logs/stream` | 대화 로그 목록/스트리밍                                 |
 
-> **주의:** `/api/token`은 현재 개발/교실 운영용이다. 공개 프로덕션 배포 시 관리자 인증과 학생 입장 인증 레이어를 추가해야 한다.
+> **주의:** Production에서 `/admin`, `/api/admin`, 관리자성 API(`/api/dispatch`, `/api/logs`, `/api/rooms/terminate`)는
+> `ADMIN_USERNAME`/`ADMIN_PASSWORD` Basic Auth로 보호된다.
+> `/api/token`은 `STUDENT_ACCESS_CODE`가 일치할 때만 학생 토큰을 발급한다.
 
 ## 관리자 설정
 
 `/admin`에서 다음 값을 관리한다.
 
-| 설정 | 저장 위치 | 설명 |
-|---|---|---|
-| 수업 운영 모드 | `config.json.agentMode` | `pipeline` 또는 `realtime` |
-| 현재 수업 중인 반 | `config.json.activeClass` | 학생 로비에 표시되는 반 |
-| 반 번호 시작 | `config.json.classStart` | 반 번호 범위의 시작 |
-| 전체 학급 수 | `config.json.numClasses` | 관리자 화면에 표시할 반 개수 |
-| 반당 그룹 수 | `config.json.numGroupsPerClass` | 그룹 대화 모드에서 표시할 그룹 수 |
+| 설정              | 저장 위치                       | 설명                              |
+| ----------------- | ------------------------------- | --------------------------------- |
+| 수업 운영 모드    | `config.json.agentMode`         | `pipeline` 또는 `realtime`        |
+| 현재 수업 중인 반 | `config.json.activeClass`       | 학생 로비에 표시되는 반           |
+| 반 번호 시작      | `config.json.classStart`        | 반 번호 범위의 시작               |
+| 전체 학급 수      | `config.json.numClasses`        | 관리자 화면에 표시할 반 개수      |
+| 반당 그룹 수      | `config.json.numGroupsPerClass` | 그룹 대화 모드에서 표시할 그룹 수 |
 
 예시:
 
@@ -285,6 +292,7 @@ uv run pytest tests/ -v
 ```
 
 테스트 내용 (`tests/test_conversation.py`):
+
 - 5턴 대화 흐름 검증 (주말 약속 만들기 태스크)
 - 문법 오류 발화에 대한 Daisy의 자연스러운 반응 확인
 - 역질문(주말 활동)에 대한 응답 확인
@@ -323,8 +331,18 @@ logs/
   "session_id": "RM_9GkS7d8BWCsf",
   "room": "english-practice",
   "entries": [
-    { "timestamp": "2026-04-09T14:23:05", "role": "user",  "text": "Hello!", "participant_identity": "user_1234", "participant_name": "고준보" },
-    { "timestamp": "2026-04-09T14:23:07", "role": "agent", "text": "Hi! How are you today?" }
+    {
+      "timestamp": "2026-04-09T14:23:05",
+      "role": "user",
+      "text": "Hello!",
+      "participant_identity": "user_1234",
+      "participant_name": "고준보"
+    },
+    {
+      "timestamp": "2026-04-09T14:23:07",
+      "role": "agent",
+      "text": "Hi! How are you today?"
+    }
   ]
 }
 ```
@@ -333,19 +351,19 @@ logs/
 
 ## 주요 설정
 
-| 항목 | 위치 |
-|------|------|
-| Realtime AI 시스템 프롬프트 수정 | `/admin` → `프롬프트 편집` 탭 또는 런타임 `prompt_config.json` |
-| 기본 AI 시스템 프롬프트 fallback | `agent/prompt_pipeline.py`, `agent/prompt_realtime.py` |
-| 그룹 대화 모드 모델 변경 | `agent/main.py` (STT `deepgram/nova-3`, LLM `openai/gpt-4.1-mini`, TTS `cartesia/sonic-3`) |
-| 개별 대화 모드 모델 변경 | `agent/main.py` (`openai.realtime.RealtimeModel`) |
-| 실행할 worker 모드 | `AGENT_WORKER_MODE=pipeline` 또는 `AGENT_WORKER_MODE=realtime` + `AGENT_ROLE=dominant/collaborative` |
-| 수업 운영 모드 변경 | `/admin` 또는 `config.json`의 `agentMode` |
-| Realtime 상호작용 role 변경 | `/admin` 또는 `config.json`의 `agentRole` |
-| 토큰 서버 포트 변경 | `server/main.py` + `client/static/app.js` 상단 `SERVER` 변수 |
-| legacy static Room 이름 변경 | `.env` → `ROOM_NAME` |
-| 에이전트 이름 변경 | `agent/main.py`, `client/lib/agent-role.ts` (`pipeline-agent`, `realtime-agent`) |
-| 로그 저장 위치 변경 | `agent/logger.py` → `LOGS_DIR` |
+| 항목                             | 위치                                                                                                 |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Realtime AI 시스템 프롬프트 수정 | `/admin` → `프롬프트 편집` 탭 또는 런타임 `prompt_config.json`                                       |
+| 기본 AI 시스템 프롬프트 fallback | `agent/prompt_pipeline.py`, `agent/prompt_realtime.py`                                               |
+| 그룹 대화 모드 모델 변경         | `agent/main.py` (STT `deepgram/nova-3`, LLM `openai/gpt-4.1-mini`, TTS `cartesia/sonic-3`)           |
+| 개별 대화 모드 모델 변경         | `agent/main.py` (`openai.realtime.RealtimeModel`)                                                    |
+| 실행할 worker 모드               | `AGENT_WORKER_MODE=pipeline` 또는 `AGENT_WORKER_MODE=realtime` + `AGENT_ROLE=dominant/collaborative` |
+| 수업 운영 모드 변경              | `/admin` 또는 `config.json`의 `agentMode`                                                            |
+| Realtime 상호작용 role 변경      | `/admin` 또는 `config.json`의 `agentRole`                                                            |
+| 토큰 서버 포트 변경              | `server/main.py` + `client/static/app.js` 상단 `SERVER` 변수                                         |
+| legacy static Room 이름 변경     | `.env` → `ROOM_NAME`                                                                                 |
+| 에이전트 이름 변경               | `agent/main.py`, `client/lib/agent-role.ts` (`pipeline-agent`, `realtime-agent`)                     |
+| 로그 저장 위치 변경              | `agent/logger.py` → `LOGS_DIR`                                                                       |
 
 ---
 
@@ -353,17 +371,17 @@ logs/
 
 ### 현재 배포 환경
 
-| 항목 | 값 |
-|------|-----|
-| 서버 | AWS EC2 `m5.large` (2 vCPU, 8GB RAM) |
-| OS | Ubuntu 22.04 LTS |
-| 도메인 | `tblt-agent.net` (AWS Route 53) |
-| 서버 IP | `3.35.234.204` |
-| 프로젝트 경로 | `/opt/cscl-tblt/` |
-| Agent 프로세스 관리 | systemd (`cscl-agent.service`) |
-| Client 프로세스 관리 | PM2 (`cscl-client`) |
-| 리버스 프록시 | nginx + Let's Encrypt SSL |
-| 음성 녹음 저장소 | AWS S3 (`tblt-agent-recordings`, `ap-northeast-2`) |
+| 항목                 | 값                                                 |
+| -------------------- | -------------------------------------------------- |
+| 서버                 | AWS EC2 `m5.large` (2 vCPU, 8GB RAM)               |
+| OS                   | Ubuntu 22.04 LTS                                   |
+| 도메인               | `tblt-agent.net` (AWS Route 53)                    |
+| 서버 IP              | `3.35.234.204`                                     |
+| 프로젝트 경로        | `/opt/cscl-tblt/`                                  |
+| Agent 프로세스 관리  | systemd (`cscl-agent.service`)                     |
+| Client 프로세스 관리 | PM2 (`cscl-client`)                                |
+| 리버스 프록시        | nginx + Let's Encrypt SSL                          |
+| 음성 녹음 저장소     | AWS S3 (`tblt-agent-recordings`, `ap-northeast-2`) |
 
 ### 서버 디렉토리 구조
 
@@ -435,6 +453,9 @@ S3_ENDPOINT=
 LIVEKIT_URL=wss://cscl-t8duxbt1.livekit.cloud
 LIVEKIT_API_KEY=<값>
 LIVEKIT_API_SECRET=<값>
+ADMIN_USERNAME=<관리자_아이디>
+ADMIN_PASSWORD=<관리자_비밀번호>
+STUDENT_ACCESS_CODE=<학생_입장_코드>
 ```
 
 > `S3_ENDPOINT`는 AWS S3 사용 시 반드시 비워두어야 합니다. 값을 넣으면 Egress 업로드 실패.
@@ -443,15 +464,7 @@ LIVEKIT_API_SECRET=<값>
 #### 4. config.json 생성
 
 ```bash
-cat > /opt/cscl-tblt/config.json << 'EOF'
-{
-  "numClasses": 4,
-  "numGroupsPerClass": 4,
-  "classStart": 1,
-  "activeClass": 1,
-  "agentMode": "pipeline"
-}
-EOF
+cp /opt/cscl-tblt/config.example.json /opt/cscl-tblt/config.json
 ```
 
 반/그룹 수와 수업 운영 모드 변경은 `https://tblt-agent.net/admin` 페이지 또는 이 파일 직접 수정.
@@ -613,6 +626,47 @@ pm2 restart cscl-client
 
 ---
 
+## CI/CD 파이프라인
+
+GitHub Actions는 두 종류로 구성한다.
+
+| Workflow            | Trigger                    | 역할                                  |
+| ------------------- | -------------------------- | ------------------------------------- |
+| `CI`                | PR → `main`                | Client lint/format/build, Agent tests |
+| `Deploy Production` | `main` push 또는 수동 실행 | 검증 후 EC2 production 배포           |
+
+Production 배포는 GitHub Actions가 SSH로 EC2에 접속해 `scripts/deploy-production.sh`를 실행한다.
+
+필요한 GitHub Environment/Secrets:
+
+| 이름            | 종류                 | 설명                                    |
+| --------------- | -------------------- | --------------------------------------- |
+| `PROD_SSH_HOST` | Secret               | EC2 host 또는 IP                        |
+| `PROD_SSH_USER` | Secret               | 배포 SSH 사용자, 예: `ubuntu`           |
+| `PROD_SSH_KEY`  | Secret               | 배포용 private key                      |
+| `PROD_SSH_PORT` | Secret               | SSH port, 기본값 `22`                   |
+| `PROD_APP_DIR`  | Environment variable | 서버 repo 경로, 기본값 `/opt/cscl-tblt` |
+
+서버 조건:
+
+- `/opt/cscl-tblt`가 Git checkout이어야 한다.
+- 배포 사용자가 `systemctl restart/is-active cscl-agent-pipeline cscl-agent-realtime`를 password 없이 실행할 수 있어야 한다.
+- `pnpm`, `uv`, `pm2`, `curl`이 설치되어 있어야 한다.
+- 서버의 `.env`, `client/.env.local`, `config.json`, `prompt_config.json`은 배포 중 백업 후 복원된다.
+- `config.json`은 git 추적 대상이 아니며, 없으면 `config.example.json`에서 자동 생성된다.
+- Production에서는 `client/.env.local`에 `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `STUDENT_ACCESS_CODE`가 있어야 한다.
+
+배포 후 health check:
+
+- `cscl-agent-pipeline` active 확인
+- `cscl-agent-realtime` active 확인
+- `cscl-client` PM2 process 확인 및 재시작
+- `http://localhost:3000/api/health` 응답 확인
+
+`main`에 merge되면 배포가 바로 실행되므로, GitHub branch protection에서 `CI / Client`와 `CI / Agent`를 required check로 설정한다.
+
+---
+
 ### 서비스 상태 확인
 
 ```bash
@@ -635,14 +689,14 @@ sudo nginx -t
 
 ### 현재 구현 메모
 
-| 항목 | 내용 |
-|------|------|
-| 운영 모드 저장 | `config.json.agentMode`에 `pipeline` 또는 `realtime` 저장 |
+| 항목                        | 내용                                                           |
+| --------------------------- | -------------------------------------------------------------- |
+| 운영 모드 저장              | `config.json.agentMode`에 `pipeline` 또는 `realtime` 저장      |
 | Realtime 상호작용 role 저장 | `config.json.agentRole`에 `dominant` 또는 `collaborative` 저장 |
-| Agent entrypoint | `agent/main.py`에 `pipeline-agent`, `realtime-agent` 등록 |
-| 프롬프트 분리 | `agent/prompt_pipeline.py`, `agent/prompt_realtime.py` |
-| Realtime 의존성 | `livekit-agents[openai,silero,turn-detector]~=1.5` |
-| Egress 업로드 | `S3_ENDPOINT` 값이 `http`로 시작하는 경우만 endpoint로 사용 |
+| Agent entrypoint            | `agent/main.py`에 `pipeline-agent`, `realtime-agent` 등록      |
+| 프롬프트 분리               | `agent/prompt_pipeline.py`, `agent/prompt_realtime.py`         |
+| Realtime 의존성             | `livekit-agents[openai,silero,turn-detector]~=1.5`             |
+| Egress 업로드               | `S3_ENDPOINT` 값이 `http`로 시작하는 경우만 endpoint로 사용    |
 
 ---
 
