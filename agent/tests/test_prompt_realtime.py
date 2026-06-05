@@ -1,82 +1,74 @@
+import json
+
 import prompt_realtime
 from prompt_realtime import build_prompt, normalize_role
 
 
-def test_realtime_prompt_includes_dominant_role_and_task_card(tmp_path, monkeypatch) -> None:
+def _read_realtime_config(path):
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)["realtime"]
+
+
+def _read_default_prompt_sources():
+    source_dir = prompt_realtime.DEFAULT_PROMPT_SOURCE_DIR
+    manifest = json.loads(prompt_realtime.PROMPT_SOURCE_MANIFEST_PATH.read_text(encoding="utf-8"))
+    return {
+        key: (source_dir / manifest[key]["file"]).read_text(encoding="utf-8").strip()
+        for key in prompt_realtime.PROMPT_FIELDS
+    }
+
+
+def _expected_prompt(config, role: str) -> str:
+    role_key = f"{role}Prompt"
+    return f"{config['basePrompt']}\n\n{config[role_key]}\n\n{config['taskCardPrompt']}"
+
+
+def test_realtime_prompt_builds_dominant_from_markdown_sources(
+    tmp_path, monkeypatch
+) -> None:
     monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
-    prompt = build_prompt("Junbo", role="dominant")
+    config = _read_default_prompt_sources()
 
-    assert "# BASE PROMPT: Daisy, English Task Friend" in prompt
-    assert "# INTERLOCUTOR ROLE PROMPT: Dominant AI Interlocutor" in prompt
-    assert "# TASK CARD: Plan a School Event and Invite Friends" in prompt
-    assert "Task facts come only from the Task Card." in prompt
-    assert "Daisy controls the task sequence." in prompt
-    assert "Daisy and the student must choose one event." in prompt
-    assert "Can you come to our ___?" in prompt
-    assert "School Festival" in prompt
-    assert "Sports Day" in prompt
-    assert "Music Festival" in prompt
-    assert "You and the student must choose one eco-campaign" not in prompt
-    assert "Our slogan is" not in prompt
-    assert "# INTERLOCUTOR ROLE PROMPT: Collaborative AI Interlocutor" not in prompt
-    assert "Your friend's name is Junbo." in prompt
+    assert build_prompt(role="dominant") == _expected_prompt(config, "dominant")
 
 
-def test_realtime_prompt_includes_collaborative_role_rules(tmp_path, monkeypatch) -> None:
+def test_realtime_prompt_builds_collaborative_from_markdown_sources(
+    tmp_path, monkeypatch
+) -> None:
     monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
-    prompt = build_prompt("Junbo", role="collaborative")
+    config = _read_default_prompt_sources()
 
-    assert "# INTERLOCUTOR ROLE PROMPT: Collaborative AI Interlocutor" in prompt
-    assert "Daisy and the student share control." in prompt
-    assert "Student ideas shape the next steps." in prompt
-    assert 'use "we," "our," and "together"' in prompt
-    assert "# TASK CARD: Plan a School Event and Invite Friends" in prompt
-    assert "# INTERLOCUTOR ROLE PROMPT: Dominant AI Interlocutor" not in prompt
-    assert "Daisy controls the task sequence." not in prompt
-    assert "Your friend's name is Junbo." in prompt
+    assert build_prompt(role="collaborative") == _expected_prompt(config, "collaborative")
 
 
 def test_realtime_prompt_defaults_to_dominant_role(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
 
     assert normalize_role("unknown") == "dominant"
-    assert "# INTERLOCUTOR ROLE PROMPT: Dominant AI Interlocutor" in build_prompt(role="unknown")
+    assert build_prompt(role="unknown") == build_prompt(role="dominant")
 
 
 def test_realtime_prompt_maps_legacy_passive_to_collaborative(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
 
     assert normalize_role("passive") == "collaborative"
-    assert "# INTERLOCUTOR ROLE PROMPT: Collaborative AI Interlocutor" in build_prompt(
-        role="passive"
-    )
+    assert build_prompt(role="passive") == build_prompt(role="collaborative")
 
 
-def test_realtime_prompt_uses_tracked_default_config(tmp_path, monkeypatch) -> None:
-    default_path = tmp_path / "prompt_config.default.json"
-    default_path.write_text(
-        """
-        {
-          "realtime": {
-            "basePrompt": "Tracked default base prompt.",
-            "dominantPrompt": "Tracked default dominant role.",
-            "collaborativePrompt": "Tracked default collaborative role.",
-            "taskCardPrompt": "Tracked default task card."
-          }
-        }
-        """,
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(prompt_realtime, "DEFAULT_PROMPT_CONFIG_PATH", default_path)
+def test_realtime_prompt_adds_session_info_after_json_prompt(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
+    config = _read_default_prompt_sources()
+    prompt_without_name = _expected_prompt(config, "collaborative")
+    prompt_with_name = build_prompt("Junbo", role="collaborative")
 
-    prompt = build_prompt("Junbo", role="collaborative")
+    assert prompt_with_name.startswith(f"{prompt_without_name}\n\n# SESSION INFO\n")
+    assert "Junbo" in prompt_with_name
 
-    assert "Tracked default base prompt." in prompt
-    assert "Tracked default collaborative role." in prompt
-    assert "Tracked default dominant role." not in prompt
-    assert "Tracked default task card." in prompt
-    assert "Your friend's name is Junbo." in prompt
+
+def test_realtime_prompt_defaults_live_only_in_markdown_sources() -> None:
+    assert not hasattr(prompt_realtime, "BASE_PROMPT")
+    assert not hasattr(prompt_realtime, "ROLE_PROMPTS")
+    assert not hasattr(prompt_realtime, "TASK_CARD_PROMPT")
 
 
 def test_realtime_prompt_uses_runtime_config(tmp_path, monkeypatch) -> None:
@@ -95,13 +87,68 @@ def test_realtime_prompt_uses_runtime_config(tmp_path, monkeypatch) -> None:
         encoding="utf-8",
     )
     monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", config_path)
+    config = _read_realtime_config(config_path)
 
-    dominant = build_prompt("Junbo", role="dominant")
-    collaborative = build_prompt("Junbo", role="collaborative")
+    assert build_prompt(role="dominant") == _expected_prompt(config, "dominant")
+    assert build_prompt(role="collaborative") == _expected_prompt(config, "collaborative")
 
-    assert "Runtime base prompt." in dominant
-    assert "Runtime dominant role." in dominant
-    assert "Runtime collaborative role." not in dominant
-    assert "Runtime collaborative role." in collaborative
-    assert "Runtime task card." in collaborative
-    assert "Your friend's name is Junbo." in collaborative
+
+def test_realtime_prompt_uses_legacy_passive_prompt_runtime_config(
+    tmp_path, monkeypatch
+) -> None:
+    config_path = tmp_path / "prompt_config.json"
+    config_path.write_text(
+        """
+        {
+          "realtime": {
+            "basePrompt": "Runtime base prompt.",
+            "dominantPrompt": "Runtime dominant role.",
+            "passivePrompt": "Runtime passive role.",
+            "taskCardPrompt": "Runtime task card."
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", config_path)
+
+    assert build_prompt(role="collaborative") == (
+        "Runtime base prompt.\n\nRuntime passive role.\n\nRuntime task card."
+    )
+
+
+def test_realtime_prompt_runtime_config_overrides_markdown_sources(
+    tmp_path, monkeypatch
+) -> None:
+    config_path = tmp_path / "prompt_config.json"
+    config_path.write_text(
+        """
+        {
+          "realtime": {
+            "basePrompt": "Runtime base prompt.",
+            "dominantPrompt": "Runtime dominant role.",
+            "collaborativePrompt": "Runtime collaborative role.",
+            "taskCardPrompt": "Runtime task card."
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", config_path)
+
+    prompt = build_prompt(role="dominant")
+
+    assert prompt == "Runtime base prompt.\n\nRuntime dominant role.\n\nRuntime task card."
+    assert prompt != _expected_prompt(_read_default_prompt_sources(), "dominant")
+
+
+def test_realtime_prompt_missing_default_source_fails(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(prompt_realtime, "DEFAULT_PROMPT_SOURCE_DIR", tmp_path / "missing")
+    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
+
+    try:
+        build_prompt(role="dominant")
+    except RuntimeError as exc:
+        assert "Default realtime prompt source is missing or invalid" in str(exc)
+    else:
+        raise AssertionError("expected missing default prompt source to fail")

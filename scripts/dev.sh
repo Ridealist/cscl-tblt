@@ -110,17 +110,21 @@ start_realtime_agent() {
 
 trap cleanup INT TERM EXIT
 
+if [[ "$MODE" == "-h" || "$MODE" == "--help" || "$MODE" == "help" ]]; then
+  usage
+  exit 0
+fi
+
 if [[ "$MODE" == "auto" ]]; then
   require_command python3
   MODE="$(resolve_auto_mode)"
   echo "Resolved dev mode from config.json: $MODE"
 fi
 
+require_command python3
+python3 "$ROOT_DIR/scripts/check_realtime_prompts.py"
+
 case "$MODE" in
-  -h|--help|help)
-    usage
-    exit 0
-    ;;
   pipeline)
     require_command pnpm
     require_command uv

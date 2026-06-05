@@ -11,13 +11,21 @@ import {
 } from '@/lib/realtime-prompt-config';
 
 const PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.json');
-const DEFAULT_PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.default.json');
+const DEFAULT_PROMPT_SOURCE_DIR = join(process.cwd(), '..', 'prompts', 'realtime');
+const PROMPT_SOURCE_MANIFEST_PATH = join(DEFAULT_PROMPT_SOURCE_DIR, 'manifest.json');
+const PROMPT_FIELDS = [
+  'basePrompt',
+  'dominantPrompt',
+  'collaborativePrompt',
+  'taskCardPrompt',
+] as const;
 
 type PromptFileShape = {
   realtime?: unknown;
 };
 
 type StoredRealtimePrompt = RealtimePromptConfig & Partial<RealtimePromptMetadata>;
+type PromptManifest = Record<(typeof PROMPT_FIELDS)[number], { file: string; marker: string }>;
 
 function createPromptMetadata(): RealtimePromptMetadata {
   const savedAt = new Date().toISOString();
@@ -42,8 +50,25 @@ function readPromptMetadata(value: unknown): RealtimePromptMetadata {
 }
 
 async function readDefaultPromptConfig(): Promise<RealtimePromptConfig> {
-  const raw = JSON.parse(await readFile(DEFAULT_PROMPT_CONFIG_PATH, 'utf-8')) as PromptFileShape;
-  const result = validateRealtimePromptConfig(raw.realtime);
+  const manifest = JSON.parse(
+    await readFile(PROMPT_SOURCE_MANIFEST_PATH, 'utf-8')
+  ) as Partial<PromptManifest>;
+  const config = Object.fromEntries(
+    await Promise.all(
+      PROMPT_FIELDS.map(async (key) => {
+        const entry = manifest[key];
+        if (!entry || typeof entry.file !== 'string' || typeof entry.marker !== 'string') {
+          throw new Error(`기본 프롬프트 manifest의 ${key} 항목이 올바르지 않습니다.`);
+        }
+        const text = (await readFile(join(DEFAULT_PROMPT_SOURCE_DIR, entry.file), 'utf-8')).trim();
+        if (!text.startsWith(entry.marker)) {
+          throw new Error(`${entry.file} 파일은 ${entry.marker} 헤딩으로 시작해야 합니다.`);
+        }
+        return [key, text];
+      })
+    )
+  );
+  const result = validateRealtimePromptConfig(config);
   if (!result.ok) {
     throw new Error(result.error);
   }
