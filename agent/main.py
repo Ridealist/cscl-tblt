@@ -394,7 +394,7 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
             )
         ),
         tts=inference.TTS(
-            model="cartesia/sonic-3", 
+            model="cartesia/sonic-3",
             # voice="e3827ec5-697a-4b7c-9704-1a23041bbc51", # Dottie
             voice="32b3f3c5-7171-46aa-abe7-b598964aa793", # Daisy
             # voice="df872fcd-da17-4b01-a49f-a80d7aaee95e", # Cameron
