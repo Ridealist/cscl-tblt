@@ -12,15 +12,96 @@ def _read_realtime_config(path):
 def _read_default_prompt_sources():
     source_dir = prompt_realtime.DEFAULT_PROMPT_SOURCE_DIR
     manifest = json.loads(prompt_realtime.PROMPT_SOURCE_MANIFEST_PATH.read_text(encoding="utf-8"))
-    return {
+    config = {
         key: (source_dir / manifest[key]["file"]).read_text(encoding="utf-8").strip()
         for key in prompt_realtime.PROMPT_FIELDS
     }
+    task_cards = json.loads((source_dir / manifest["taskCardManifest"]).read_text(encoding="utf-8"))
+    task_card_id = manifest["defaultTaskCardId"]
+    config["taskCardId"] = task_card_id
+    config["taskCardPrompt"] = (
+        source_dir / "task-cards" / task_cards[task_card_id]["file"]
+    ).read_text(encoding="utf-8").strip()
+    examples = task_cards[task_card_id].get("examples", {})
+    conversation_examples = {}
+    for role, example in examples.items():
+        conversation_examples[role] = (
+            source_dir / "task-cards" / example["file"]
+        ).read_text(encoding="utf-8").strip()
+    if conversation_examples:
+        config["conversationExamplePrompts"] = conversation_examples
+    return config
 
 
 def _expected_prompt(config, role: str) -> str:
     role_key = f"{role}Prompt"
-    return f"{config['basePrompt']}\n\n{config[role_key]}\n\n{config['taskCardPrompt']}"
+    prompt = f"{config['basePrompt']}\n\n{config[role_key]}\n\n{config['taskCardPrompt']}"
+    example = config.get("conversationExamplePrompts", {}).get(role)
+    return f"{prompt}\n\n{example}" if example else prompt
+
+
+def _write_prompt_source_with_examples(source_dir):
+    task_cards_dir = source_dir / "task-cards"
+    examples_dir = task_cards_dir / "examples"
+    examples_dir.mkdir(parents=True)
+    (source_dir / "manifest.json").write_text(
+        """
+        {
+          "basePrompt": {"file": "base.md", "marker": "# BASE PROMPT:"},
+          "dominantPrompt": {
+            "file": "roles/dominant.md",
+            "marker": "# INTERLOCUTOR ROLE PROMPT: Dominant"
+          },
+          "collaborativePrompt": {
+            "file": "roles/collaborative.md",
+            "marker": "# INTERLOCUTOR ROLE PROMPT: Collaborative"
+          },
+          "taskCardManifest": "task-cards/manifest.json",
+          "defaultTaskCardId": "example"
+        }
+        """,
+        encoding="utf-8",
+    )
+    (source_dir / "roles").mkdir()
+    (source_dir / "base.md").write_text("# BASE PROMPT: Example\nbase", encoding="utf-8")
+    (source_dir / "roles" / "dominant.md").write_text(
+        "# INTERLOCUTOR ROLE PROMPT: Dominant\ndominant",
+        encoding="utf-8",
+    )
+    (source_dir / "roles" / "collaborative.md").write_text(
+        "# INTERLOCUTOR ROLE PROMPT: Collaborative\ncollaborative",
+        encoding="utf-8",
+    )
+    (task_cards_dir / "manifest.json").write_text(
+        """
+        {
+          "example": {
+            "file": "task_card.md",
+            "marker": "# TASK CARD:",
+            "examples": {
+              "dominant": {
+                "file": "examples/example.dominant.md",
+                "marker": "# CONVERSATION EXAMPLE: Dominant"
+              },
+              "collaborative": {
+                "file": "examples/example.collaborative.md",
+                "marker": "# CONVERSATION EXAMPLE: Collaborative"
+              }
+            }
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+    (task_cards_dir / "task_card.md").write_text("# TASK CARD: Example\ntask", encoding="utf-8")
+    (examples_dir / "example.dominant.md").write_text(
+        "# CONVERSATION EXAMPLE: Dominant\ndominant example",
+        encoding="utf-8",
+    )
+    (examples_dir / "example.collaborative.md").write_text(
+        "# CONVERSATION EXAMPLE: Collaborative\ncollaborative example",
+        encoding="utf-8",
+    )
 
 
 def test_realtime_prompt_builds_dominant_from_markdown_sources(
@@ -91,6 +172,77 @@ def test_realtime_prompt_uses_runtime_config(tmp_path, monkeypatch) -> None:
 
     assert build_prompt(role="dominant") == _expected_prompt(config, "dominant")
     assert build_prompt(role="collaborative") == _expected_prompt(config, "collaborative")
+
+
+def test_realtime_prompt_uses_runtime_task_card_id(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "prompt_config.json"
+    config_path.write_text(
+        """
+        {
+          "realtime": {
+            "basePrompt": "Runtime base prompt.",
+            "dominantPrompt": "Runtime dominant role.",
+            "collaborativePrompt": "Runtime collaborative role.",
+            "taskCardId": "school_event_invitation"
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", config_path)
+    prompt = build_prompt(role="dominant")
+
+    assert prompt.startswith(
+        "Runtime base prompt.\n\nRuntime dominant role.\n\n"
+        "# TASK CARD: Plan a School Event and Invite Friends"
+    )
+    assert "Runtime task card." not in prompt
+
+
+def test_realtime_prompt_call_task_card_id_overrides_runtime_selection(
+    tmp_path, monkeypatch
+) -> None:
+    config_path = tmp_path / "prompt_config.json"
+    config_path.write_text(
+        """
+        {
+          "realtime": {
+            "basePrompt": "Runtime base prompt.",
+            "dominantPrompt": "Runtime dominant role.",
+            "collaborativePrompt": "Runtime collaborative role.",
+            "taskCardId": "school_event_invitation"
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", config_path)
+    prompt = build_prompt(role="dominant", task_card_id="morning_exercise_challenge")
+
+    assert "# TASK CARD: Our Class Morning Exercise Challenge" in prompt
+    assert "# TASK CARD: Plan a School Event and Invite Friends" not in prompt
+
+
+def test_realtime_prompt_appends_role_specific_conversation_example(tmp_path, monkeypatch) -> None:
+    source_dir = tmp_path / "realtime"
+    source_dir.mkdir()
+    _write_prompt_source_with_examples(source_dir)
+    monkeypatch.setattr(prompt_realtime, "DEFAULT_PROMPT_SOURCE_DIR", source_dir)
+    monkeypatch.setattr(prompt_realtime, "PROMPT_SOURCE_MANIFEST_PATH", source_dir / "manifest.json")
+    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
+
+    dominant_prompt = build_prompt(role="dominant")
+    collaborative_prompt = build_prompt(role="collaborative")
+
+    assert dominant_prompt.endswith(
+        "# TASK CARD: Example\ntask\n\n# CONVERSATION EXAMPLE: Dominant\ndominant example"
+    )
+    assert "# CONVERSATION EXAMPLE: Collaborative" not in dominant_prompt
+    assert collaborative_prompt.endswith(
+        "# TASK CARD: Example\ntask\n\n"
+        "# CONVERSATION EXAMPLE: Collaborative\ncollaborative example"
+    )
+    assert "# CONVERSATION EXAMPLE: Dominant" not in collaborative_prompt
 
 
 def test_realtime_prompt_uses_legacy_passive_prompt_runtime_config(

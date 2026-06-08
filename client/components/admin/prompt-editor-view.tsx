@@ -2,7 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import type { RealtimePromptConfig, RealtimePromptState } from '@/lib/realtime-prompt-config';
+import type {
+  RealtimePromptConfig,
+  RealtimePromptState,
+  RealtimeTaskCardSummary,
+} from '@/lib/realtime-prompt-config';
 
 type PromptField = keyof RealtimePromptConfig;
 
@@ -52,24 +56,13 @@ const PROMPT_GROUPS: PromptGroup[] = [
       },
     ],
   },
-  {
-    title: 'Task Card',
-    description: '과업 목표, 정보 격차, 선택지, 완성 기준입니다.',
-    fields: [
-      {
-        key: 'taskCardPrompt',
-        title: 'Task Card Prompt',
-        description: '개별 세션에서 제시되는 과업 카드 내용입니다.',
-        rows: 24,
-      },
-    ],
-  },
 ];
 
 const EMPTY_PROMPT: RealtimePromptConfig = {
   basePrompt: '',
   dominantPrompt: '',
   collaborativePrompt: '',
+  taskCardId: 'school_event_invitation',
   taskCardPrompt: '',
 };
 
@@ -79,6 +72,7 @@ function samePrompt(a: RealtimePromptConfig | null, b: RealtimePromptConfig | nu
     a.basePrompt === b.basePrompt &&
     a.dominantPrompt === b.dominantPrompt &&
     a.collaborativePrompt === b.collaborativePrompt &&
+    a.taskCardId === b.taskCardId &&
     a.taskCardPrompt === b.taskCardPrompt
   );
 }
@@ -95,6 +89,7 @@ export function PromptEditorView() {
   const [usingDefault, setUsingDefault] = useState(false);
   const [promptId, setPromptId] = useState('default');
   const [promptSavedAt, setPromptSavedAt] = useState<string | null>(null);
+  const [taskCards, setTaskCards] = useState<RealtimeTaskCardSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
@@ -134,14 +129,17 @@ export function PromptEditorView() {
         basePrompt: data.basePrompt,
         dominantPrompt: data.dominantPrompt,
         collaborativePrompt: data.collaborativePrompt,
+        taskCardId: data.taskCardId,
         taskCardPrompt: data.taskCardPrompt,
       });
       setSavedPrompt({
         basePrompt: data.basePrompt,
         dominantPrompt: data.dominantPrompt,
         collaborativePrompt: data.collaborativePrompt,
+        taskCardId: data.taskCardId,
         taskCardPrompt: data.taskCardPrompt,
       });
+      setTaskCards(data.taskCards);
       setUsingDefault(data.usingDefault);
       setPromptId(data.promptId);
       setPromptSavedAt(data.savedAt);
@@ -177,10 +175,12 @@ export function PromptEditorView() {
         basePrompt: saved.basePrompt,
         dominantPrompt: saved.dominantPrompt,
         collaborativePrompt: saved.collaborativePrompt,
+        taskCardId: saved.taskCardId,
         taskCardPrompt: saved.taskCardPrompt,
       };
       setPrompt(next);
       setSavedPrompt(next);
+      setTaskCards(saved.taskCards);
       setUsingDefault(saved.usingDefault);
       setPromptId(saved.promptId);
       setPromptSavedAt(saved.savedAt);
@@ -210,10 +210,12 @@ export function PromptEditorView() {
         basePrompt: saved.basePrompt,
         dominantPrompt: saved.dominantPrompt,
         collaborativePrompt: saved.collaborativePrompt,
+        taskCardId: saved.taskCardId,
         taskCardPrompt: saved.taskCardPrompt,
       };
       setPrompt(next);
       setSavedPrompt(next);
+      setTaskCards(saved.taskCards);
       setUsingDefault(saved.usingDefault);
       setPromptId(saved.promptId);
       setPromptSavedAt(saved.savedAt);
@@ -261,49 +263,92 @@ export function PromptEditorView() {
       {loading ? (
         <p className="text-muted-foreground text-sm">프롬프트를 불러오는 중...</p>
       ) : (
-        PROMPT_GROUPS.map((group) => {
-          const singleField = group.fields.length === 1 ? group.fields[0] : null;
+        <>
+          {PROMPT_GROUPS.map((group) => {
+            const singleField = group.fields.length === 1 ? group.fields[0] : null;
 
-          return (
-            <section key={group.title} className="flex flex-col gap-3">
-              <div className="flex items-end justify-between gap-3">
-                <div>
-                  <h3 className="text-foreground text-sm font-semibold">{group.title}</h3>
-                  <p className="text-muted-foreground text-xs">{group.description}</p>
+            return (
+              <section key={group.title} className="flex flex-col gap-3">
+                <div className="flex items-end justify-between gap-3">
+                  <div>
+                    <h3 className="text-foreground text-sm font-semibold">{group.title}</h3>
+                    <p className="text-muted-foreground text-xs">{group.description}</p>
+                  </div>
+                  <span className="text-muted-foreground shrink-0 font-mono text-xs">
+                    {group.fields
+                      .reduce((total, field) => total + prompt[field.key].length, 0)
+                      .toLocaleString('ko-KR')}
+                    자
+                  </span>
                 </div>
-                <span className="text-muted-foreground shrink-0 font-mono text-xs">
-                  {group.fields
-                    .reduce((total, field) => total + prompt[field.key].length, 0)
-                    .toLocaleString('ko-KR')}
-                  자
-                </span>
-              </div>
-              {singleField ? (
-                renderPromptTextarea(singleField)
-              ) : (
-                <div className="flex flex-col gap-4">
-                  {group.fields.map((field) => (
-                    <div
-                      key={field.key}
-                      className="border-border flex flex-col gap-2 border-l pl-4"
-                    >
-                      <div className="flex items-end justify-between gap-3">
-                        <div>
-                          <h4 className="text-foreground text-xs font-semibold">{field.title}</h4>
-                          <p className="text-muted-foreground text-xs">{field.description}</p>
+                {singleField ? (
+                  renderPromptTextarea(singleField)
+                ) : (
+                  <div className="flex flex-col gap-4">
+                    {group.fields.map((field) => (
+                      <div
+                        key={field.key}
+                        className="border-border flex flex-col gap-2 border-l pl-4"
+                      >
+                        <div className="flex items-end justify-between gap-3">
+                          <div>
+                            <h4 className="text-foreground text-xs font-semibold">{field.title}</h4>
+                            <p className="text-muted-foreground text-xs">{field.description}</p>
+                          </div>
+                          <span className="text-muted-foreground shrink-0 font-mono text-xs">
+                            {prompt[field.key].length.toLocaleString('ko-KR')}자
+                          </span>
                         </div>
-                        <span className="text-muted-foreground shrink-0 font-mono text-xs">
-                          {prompt[field.key].length.toLocaleString('ko-KR')}자
-                        </span>
+                        {renderPromptTextarea(field)}
                       </div>
-                      {renderPromptTextarea(field)}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-          );
-        })
+                    ))}
+                  </div>
+                )}
+              </section>
+            );
+          })}
+
+          <section className="flex flex-col gap-3">
+            <div className="flex items-end justify-between gap-3">
+              <div>
+                <h3 className="text-foreground text-sm font-semibold">Task Card</h3>
+                <p className="text-muted-foreground text-xs">
+                  개별 세션에 적용할 주제별 과업 카드를 선택합니다.
+                </p>
+              </div>
+              <span className="text-muted-foreground shrink-0 font-mono text-xs">
+                {prompt.taskCardPrompt.length.toLocaleString('ko-KR')}자
+              </span>
+            </div>
+            <select
+              value={prompt.taskCardId}
+              disabled={saving}
+              onChange={(e) => {
+                const selected = taskCards.find((taskCard) => taskCard.id === e.target.value);
+                setPrompt((current) => ({
+                  ...current,
+                  taskCardId: e.target.value,
+                  taskCardPrompt: selected?.prompt ?? current.taskCardPrompt,
+                }));
+              }}
+              className="border-input bg-background text-foreground focus:ring-primary w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 disabled:opacity-50"
+            >
+              {taskCards.map((taskCard) => (
+                <option key={taskCard.id} value={taskCard.id}>
+                  {taskCard.title}
+                  {taskCard.level ? ` · ${taskCard.level}` : ''}
+                </option>
+              ))}
+            </select>
+            <textarea
+              value={prompt.taskCardPrompt}
+              rows={24}
+              readOnly
+              spellCheck={false}
+              className="border-input bg-muted/40 text-foreground min-h-32 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none"
+            />
+          </section>
+        </>
       )}
 
       {message && (

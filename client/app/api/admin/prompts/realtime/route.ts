@@ -7,25 +7,47 @@ import {
   type RealtimePromptConfig,
   type RealtimePromptMetadata,
   type RealtimePromptState,
+  type RealtimeTaskCardSummary,
   validateRealtimePromptConfig,
 } from '@/lib/realtime-prompt-config';
 
 const PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.json');
 const DEFAULT_PROMPT_SOURCE_DIR = join(process.cwd(), '..', 'prompts', 'realtime');
 const PROMPT_SOURCE_MANIFEST_PATH = join(DEFAULT_PROMPT_SOURCE_DIR, 'manifest.json');
-const PROMPT_FIELDS = [
-  'basePrompt',
-  'dominantPrompt',
-  'collaborativePrompt',
-  'taskCardPrompt',
-] as const;
+const PROMPT_FIELDS = ['basePrompt', 'dominantPrompt', 'collaborativePrompt'] as const;
 
 type PromptFileShape = {
   realtime?: unknown;
 };
 
-type StoredRealtimePrompt = RealtimePromptConfig & Partial<RealtimePromptMetadata>;
-type PromptManifest = Record<(typeof PROMPT_FIELDS)[number], { file: string; marker: string }>;
+type StoredRealtimePrompt = Partial<RealtimePromptConfig> & Partial<RealtimePromptMetadata>;
+type PromptManifest = Record<(typeof PROMPT_FIELDS)[number], { file: string; marker: string }> & {
+  taskCardManifest?: string;
+  defaultTaskCardId?: string;
+  taskCardPrompt?: { file: string; marker: string };
+};
+type TaskCardManifest = Record<
+  string,
+  {
+    file: string;
+    title?: string;
+    topic?: string;
+    level?: string;
+    marker: string;
+    examples?: Partial<
+      Record<
+        'dominant' | 'collaborative',
+        {
+          file: string;
+          marker: string;
+        }
+      >
+    >;
+  }
+>;
+type PromptDefaults = RealtimePromptConfig & {
+  taskCards: RealtimeTaskCardSummary[];
+};
 
 function createPromptMetadata(): RealtimePromptMetadata {
   const savedAt = new Date().toISOString();
@@ -49,7 +71,7 @@ function readPromptMetadata(value: unknown): RealtimePromptMetadata {
   };
 }
 
-async function readDefaultPromptConfig(): Promise<RealtimePromptConfig> {
+async function readDefaultPromptConfigForTask(taskCardId?: string): Promise<PromptDefaults> {
   const manifest = JSON.parse(
     await readFile(PROMPT_SOURCE_MANIFEST_PATH, 'utf-8')
   ) as Partial<PromptManifest>;
@@ -68,20 +90,130 @@ async function readDefaultPromptConfig(): Promise<RealtimePromptConfig> {
       })
     )
   );
-  const result = validateRealtimePromptConfig(config);
+  const taskCard = await readTaskCardConfig(manifest, taskCardId);
+  const result = validateRealtimePromptConfig({
+    ...config,
+    taskCardId: taskCard.taskCardId,
+    taskCardPrompt: taskCard.taskCardPrompt,
+  });
   if (!result.ok) {
     throw new Error(result.error);
   }
-  return result.config;
+  return { ...result.config, taskCards: taskCard.taskCards };
+}
+
+async function readTaskCardConfig(
+  manifest: Partial<PromptManifest>,
+  taskCardId?: string
+): Promise<{
+  taskCardId: string;
+  taskCardPrompt: string;
+  taskCards: RealtimeTaskCardSummary[];
+}> {
+  if (manifest.taskCardPrompt?.file && manifest.taskCardPrompt.marker && !taskCardId) {
+    const taskCardPrompt = (
+      await readFile(join(DEFAULT_PROMPT_SOURCE_DIR, manifest.taskCardPrompt.file), 'utf-8')
+    ).trim();
+    if (!taskCardPrompt.startsWith(manifest.taskCardPrompt.marker)) {
+      throw new Error(
+        `${manifest.taskCardPrompt.file} 파일은 ${manifest.taskCardPrompt.marker} 헤딩으로 시작해야 합니다.`
+      );
+    }
+    return {
+      taskCardId: 'legacy_task_card',
+      taskCardPrompt,
+      taskCards: [
+        {
+          id: 'legacy_task_card',
+          title: 'Legacy Task Card',
+          topic: null,
+          level: null,
+          prompt: taskCardPrompt,
+        },
+      ],
+    };
+  }
+
+  const manifestFile =
+    typeof manifest.taskCardManifest === 'string' && manifest.taskCardManifest
+      ? manifest.taskCardManifest
+      : 'task-cards/manifest.json';
+  const defaultTaskCardId =
+    typeof manifest.defaultTaskCardId === 'string' && manifest.defaultTaskCardId
+      ? manifest.defaultTaskCardId
+      : null;
+  const taskCardsManifest = JSON.parse(
+    await readFile(join(DEFAULT_PROMPT_SOURCE_DIR, manifestFile), 'utf-8')
+  ) as TaskCardManifest;
+  const taskCards = await Promise.all(
+    Object.entries(taskCardsManifest).map(async ([id, entry]) => {
+      const prompt = (
+        await readFile(join(DEFAULT_PROMPT_SOURCE_DIR, 'task-cards', entry.file), 'utf-8')
+      ).trim();
+      if (!prompt.startsWith(entry.marker)) {
+        throw new Error(`${entry.file} 파일은 ${entry.marker} 헤딩으로 시작해야 합니다.`);
+      }
+      const examples: NonNullable<RealtimeTaskCardSummary['examples']> = {};
+      if (entry.examples) {
+        for (const role of ['dominant', 'collaborative'] as const) {
+          const example = entry.examples[role];
+          if (!example) continue;
+          const examplePrompt = (
+            await readFile(join(DEFAULT_PROMPT_SOURCE_DIR, 'task-cards', example.file), 'utf-8')
+          ).trim();
+          if (!examplePrompt.startsWith(example.marker)) {
+            throw new Error(`${example.file} 파일은 ${example.marker} 헤딩으로 시작해야 합니다.`);
+          }
+          examples[role] = {
+            file: example.file,
+            marker: example.marker,
+            prompt: examplePrompt,
+          };
+        }
+      }
+      return {
+        id,
+        title: typeof entry.title === 'string' && entry.title ? entry.title : id,
+        topic: typeof entry.topic === 'string' && entry.topic ? entry.topic : null,
+        level: typeof entry.level === 'string' && entry.level ? entry.level : null,
+        prompt,
+        ...(Object.keys(examples).length ? { examples } : {}),
+      };
+    })
+  );
+  const selectedTaskCardId = taskCardId || defaultTaskCardId || taskCards[0]?.id;
+  const selected = selectedTaskCardId ? taskCardsManifest[selectedTaskCardId] : null;
+  if (!selected || typeof selected.file !== 'string' || typeof selected.marker !== 'string') {
+    throw new Error(`Task card를 찾을 수 없습니다: ${selectedTaskCardId ?? '(empty)'}`);
+  }
+  const taskCardPrompt =
+    taskCards.find((taskCard) => taskCard.id === selectedTaskCardId)?.prompt ?? '';
+  return {
+    taskCardId: selectedTaskCardId,
+    taskCardPrompt,
+    taskCards,
+  };
 }
 
 async function readPromptConfig(): Promise<RealtimePromptState> {
   try {
     const raw = JSON.parse(await readFile(PROMPT_CONFIG_PATH, 'utf-8')) as PromptFileShape;
-    const result = validateRealtimePromptConfig(raw.realtime);
+    const source = raw.realtime as StoredRealtimePrompt | undefined;
+    const defaults = await readDefaultPromptConfigForTask(
+      typeof source?.taskCardId === 'string' ? source.taskCardId : undefined
+    );
+    const result = validateRealtimePromptConfig({
+      ...source,
+      taskCardId: defaults.taskCardId,
+      taskCardPrompt:
+        typeof source?.taskCardPrompt === 'string' && source.taskCardPrompt.trim()
+          ? source.taskCardPrompt
+          : defaults.taskCardPrompt,
+    });
     if (result.ok) {
       return {
         ...result.config,
+        taskCards: defaults.taskCards,
         ...readPromptMetadata(raw.realtime),
         usingDefault: false,
       };
@@ -91,7 +223,7 @@ async function readPromptConfig(): Promise<RealtimePromptState> {
   }
 
   return {
-    ...(await readDefaultPromptConfig()),
+    ...(await readDefaultPromptConfigForTask()),
     ...DEFAULT_REALTIME_PROMPT_METADATA,
     usingDefault: true,
   };
@@ -99,13 +231,16 @@ async function readPromptConfig(): Promise<RealtimePromptState> {
 
 async function writePromptConfig(config: RealtimePromptConfig): Promise<RealtimePromptMetadata> {
   const metadata = createPromptMetadata();
+  const stored = {
+    basePrompt: config.basePrompt,
+    dominantPrompt: config.dominantPrompt,
+    collaborativePrompt: config.collaborativePrompt,
+    taskCardId: config.taskCardId,
+    ...metadata,
+  };
   await mkdir(dirname(PROMPT_CONFIG_PATH), { recursive: true });
   const tempPath = `${PROMPT_CONFIG_PATH}.tmp`;
-  await writeFile(
-    tempPath,
-    `${JSON.stringify({ realtime: { ...config, ...metadata } }, null, 2)}\n`,
-    'utf-8'
-  );
+  await writeFile(tempPath, `${JSON.stringify({ realtime: stored }, null, 2)}\n`, 'utf-8');
   await rename(tempPath, PROMPT_CONFIG_PATH);
   return metadata;
 }
@@ -124,13 +259,25 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const result = validateRealtimePromptConfig(body);
+    const defaults = await readDefaultPromptConfigForTask(
+      typeof body?.taskCardId === 'string' ? body.taskCardId : undefined
+    );
+    const result = validateRealtimePromptConfig({
+      ...body,
+      taskCardId: defaults.taskCardId,
+      taskCardPrompt: defaults.taskCardPrompt,
+    });
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
 
     const metadata = await writePromptConfig(result.config);
-    return NextResponse.json({ ...result.config, ...metadata, usingDefault: false });
+    return NextResponse.json({
+      ...result.config,
+      taskCards: defaults.taskCards,
+      ...metadata,
+      usingDefault: false,
+    });
   } catch {
     return NextResponse.json({ error: '프롬프트 저장 실패' }, { status: 500 });
   }
@@ -147,7 +294,7 @@ export async function DELETE() {
 
   try {
     return NextResponse.json({
-      ...(await readDefaultPromptConfig()),
+      ...(await readDefaultPromptConfigForTask()),
       ...DEFAULT_REALTIME_PROMPT_METADATA,
       usingDefault: true,
     });

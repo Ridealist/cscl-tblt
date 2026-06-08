@@ -106,6 +106,19 @@ def _metadata_role(metadata) -> str | None:
     return None
 
 
+def _metadata_task_card_id(metadata) -> str | None:
+    if not metadata:
+        return None
+    try:
+        parsed = json.loads(metadata) if isinstance(metadata, str) else metadata
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    task_card_id = parsed.get("taskCardId")
+    return task_card_id.strip() if isinstance(task_card_id, str) and task_card_id.strip() else None
+
+
 def _resolve_realtime_job_role(ctx: JobContext, fallback: str) -> str:
     for metadata in (
         getattr(ctx.job, "metadata", None),
@@ -116,6 +129,18 @@ def _resolve_realtime_job_role(ctx: JobContext, fallback: str) -> str:
         if role:
             return role
     return normalize_realtime_role(fallback)
+
+
+def _resolve_realtime_task_card_id(ctx: JobContext) -> str | None:
+    for metadata in (
+        getattr(ctx.job, "metadata", None),
+        getattr(ctx.room, "metadata", None),
+        getattr(getattr(ctx.job, "room", None), "metadata", None),
+    ):
+        task_card_id = _metadata_task_card_id(metadata)
+        if task_card_id:
+            return task_card_id
+    return None
 
 
 class Assistant(Agent):
@@ -324,21 +349,25 @@ async def _run(ctx: JobContext) -> None:
 
 
 class RealtimeAssistant(Agent):
-    def __init__(self, get_name_fn, role: str) -> None:
-        super().__init__(instructions=build_realtime_prompt(role=role))
+    def __init__(self, get_name_fn, role: str, task_card_id: str | None = None) -> None:
+        super().__init__(instructions=build_realtime_prompt(role=role, task_card_id=task_card_id))
         self._get_name = get_name_fn
         self._role = role
+        self._task_card_id = task_card_id
 
     async def on_enter(self) -> None:
         """1:1 realtime 세션 입장 직후 참가자 이름을 반영하고 첫 턴을 생성."""
         await asyncio.sleep(1.0)
         name = self._get_name()
         log.info(
-            "Realtime assistant entering session: role=%s participant_name=%s",
+            "Realtime assistant entering session: role=%s task_card_id=%s participant_name=%s",
             self._role,
+            self._task_card_id,
             name,
         )
-        await self.update_instructions(build_realtime_prompt(name, role=self._role))
+        await self.update_instructions(
+            build_realtime_prompt(name, role=self._role, task_card_id=self._task_card_id)
+        )
 
         instruction = (
             "Say only this exact opening as Daisy, a friendly classmate, and nothing else: "
@@ -351,19 +380,21 @@ class RealtimeAssistant(Agent):
 async def _run_realtime(ctx: JobContext, role: str) -> None:
     """1:1 OpenAI Realtime 세션 로직."""
     role = _resolve_realtime_job_role(ctx, fallback=role)
+    task_card_id = _resolve_realtime_task_card_id(ctx)
     ctx.log_context_fields = {"room": ctx.room.name, "mode": "realtime", "role": role}
     log.info(
-        "Starting realtime job: room=%s room_sid=%s job_id=%s role=%s metadata=%s",
+        "Starting realtime job: room=%s room_sid=%s job_id=%s role=%s task_card_id=%s metadata=%s",
         ctx.room.name,
         ctx.job.room.sid,
         getattr(ctx.job, "id", None),
         role,
+        task_card_id,
         getattr(ctx.job, "metadata", None),
     )
     conv_logger = ConversationLogger(
         ctx.job.room.sid,
         ctx.room.name,
-        metadata={"agent_mode": "realtime", "agent_role": role},
+        metadata={"agent_mode": "realtime", "agent_role": role, "task_card_id": task_card_id},
     )
     egress = EgressRecorder(ctx.room.name, conv_logger.session_id)
 
@@ -381,7 +412,11 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
             participant["name"],
         )
 
-    assistant = RealtimeAssistant(get_name_fn=lambda: participant["name"], role=role)
+    assistant = RealtimeAssistant(
+        get_name_fn=lambda: participant["name"],
+        role=role,
+        task_card_id=task_card_id,
+    )
 
     session = AgentSession(
         llm=openai.realtime.RealtimeModel(
@@ -453,7 +488,7 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
         if participant["identity"] is None:
             _register_participant(p)
             await assistant.update_instructions(
-                build_realtime_prompt(participant["name"], role=role)
+                build_realtime_prompt(participant["name"], role=role, task_card_id=task_card_id)
             )
         else:
             log.info(

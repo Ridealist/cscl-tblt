@@ -4,15 +4,13 @@
     "marker": "# BASE PROMPT:"
   },
   "dominantPrompt": {
-    "file": "dominant.md",
+    "file": "roles/dominant.md",
     "marker": "# INTERLOCUTOR ROLE PROMPT: Dominant"
   },
   "collaborativePrompt": {
-    "file": "collaborative.md",
+    "file": "roles/collaborative.md",
     "marker": "# INTERLOCUTOR ROLE PROMPT: Collaborative"
   },
-  "taskCardPrompt": {
-    "file": "task_card.md",
-    "marker": "# TASK CARD:"
-  }
+  "taskCardManifest": "task-cards/manifest.json",
+  "defaultTaskCardId": "morning_exercise_challenge"
 }

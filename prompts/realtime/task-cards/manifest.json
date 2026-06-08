@@ -1,0 +1,16 @@
+{
+  "school_event_invitation": {
+    "file": "school_event_invitation.md",
+    "title": "L4. School Event Invitation",
+    "topic": "school event planning and invitation",
+    "level": "A1-A2",
+    "marker": "# TASK CARD:"
+  },
+  "morning_exercise_challenge": {
+    "file": "morning_exercise_challenge.md",
+    "title": "L5-T1. Our Class Morning Exercise Challenge",
+    "topic": "choosing and recommending a morning exercise activity",
+    "level": "A1-A2",
+    "marker": "# TASK CARD:"
+  }
+}
