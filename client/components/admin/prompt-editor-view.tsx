@@ -1,8 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { type AgentRole, getAgentRoleLabel, normalizeAgentRole } from '@/lib/agent-role';
 import type {
+  RealtimeFeedbackConditionSummary,
   RealtimePromptConfig,
   RealtimePromptState,
   RealtimeTaskCardSummary,
@@ -11,6 +14,10 @@ import type {
 type PromptField = keyof RealtimePromptConfig;
 
 type PromptResponse = RealtimePromptState;
+type RuntimeSettingsResponse = {
+  agentRole?: unknown;
+  feedbackConditionId?: unknown;
+};
 
 type PromptFieldConfig = {
   key: PromptField;
@@ -34,7 +41,7 @@ const PROMPT_GROUPS: PromptGroup[] = [
         key: 'basePrompt',
         title: 'Common Prompt',
         description: '모든 Realtime 에이전트 역할에 공통으로 적용됩니다.',
-        rows: 24,
+        rows: 18,
       },
     ],
   },
@@ -46,13 +53,13 @@ const PROMPT_GROUPS: PromptGroup[] = [
         key: 'dominantPrompt',
         title: 'Dominant Prompt',
         description: 'Dominant Condition에서 추가되는 주도적 상호작용 규칙입니다.',
-        rows: 14,
+        rows: 18,
       },
       {
         key: 'collaborativePrompt',
         title: 'Collaborative Prompt',
         description: 'Collaborative Condition에서 추가되는 협력적 상호작용 규칙입니다.',
-        rows: 14,
+        rows: 18,
       },
     ],
   },
@@ -62,6 +69,8 @@ const EMPTY_PROMPT: RealtimePromptConfig = {
   basePrompt: '',
   dominantPrompt: '',
   collaborativePrompt: '',
+  feedbackConditionId: 'no_corrective',
+  feedbackPrompt: '',
   taskCardId: 'school_event_invitation',
   taskCardPrompt: '',
 };
@@ -72,6 +81,8 @@ function samePrompt(a: RealtimePromptConfig | null, b: RealtimePromptConfig | nu
     a.basePrompt === b.basePrompt &&
     a.dominantPrompt === b.dominantPrompt &&
     a.collaborativePrompt === b.collaborativePrompt &&
+    a.feedbackConditionId === b.feedbackConditionId &&
+    a.feedbackPrompt === b.feedbackPrompt &&
     a.taskCardId === b.taskCardId &&
     a.taskCardPrompt === b.taskCardPrompt
   );
@@ -86,16 +97,73 @@ function confirmPromptChange(action: string) {
 export function PromptEditorView() {
   const [prompt, setPrompt] = useState<RealtimePromptConfig>(EMPTY_PROMPT);
   const [savedPrompt, setSavedPrompt] = useState<RealtimePromptConfig | null>(null);
+  const [selectedAgentRole, setSelectedAgentRole] = useState<AgentRole>('dominant');
   const [usingDefault, setUsingDefault] = useState(false);
   const [promptId, setPromptId] = useState('default');
   const [promptSavedAt, setPromptSavedAt] = useState<string | null>(null);
+  const [feedbackConditions, setFeedbackConditions] = useState<RealtimeFeedbackConditionSummary[]>(
+    []
+  );
   const [taskCards, setTaskCards] = useState<RealtimeTaskCardSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [examplesOpen, setExamplesOpen] = useState(false);
 
   const hasChanges = useMemo(() => !samePrompt(prompt, savedPrompt), [prompt, savedPrompt]);
+  const selectedRolePromptKey: PromptField =
+    selectedAgentRole === 'collaborative' ? 'collaborativePrompt' : 'dominantPrompt';
+  const selectedRoleLabel = getAgentRoleLabel(selectedAgentRole);
+  const visiblePromptGroups = useMemo(
+    () =>
+      PROMPT_GROUPS.map((group) =>
+        group.title === 'Interlocutor Role Prompt'
+          ? {
+              ...group,
+              description: `운영 설정에서 선택된 ${selectedRoleLabel} 에이전트 역할 규칙입니다.`,
+              fields: group.fields.filter((field) => field.key === selectedRolePromptKey),
+            }
+          : group
+      ),
+    [selectedRoleLabel, selectedRolePromptKey]
+  );
+  const selectedTaskCard = useMemo(
+    () => taskCards.find((taskCard) => taskCard.id === prompt.taskCardId) ?? null,
+    [prompt.taskCardId, taskCards]
+  );
+  const selectedFeedbackCondition = useMemo(
+    () =>
+      feedbackConditions.find((condition) => condition.id === prompt.feedbackConditionId) ?? null,
+    [feedbackConditions, prompt.feedbackConditionId]
+  );
+  const feedbackConditionTitles = useMemo(
+    () => new Map(feedbackConditions.map((condition) => [condition.id, condition.title])),
+    [feedbackConditions]
+  );
+  const exampleEntries = useMemo(() => {
+    const examples = selectedTaskCard?.examples;
+    if (!examples) return [];
+    const roleExamples = examples[selectedAgentRole];
+    if (!roleExamples) return [];
+    const example = roleExamples[prompt.feedbackConditionId] ?? roleExamples.default;
+    if (!example) return [];
+    const feedbackConditionTitle =
+      feedbackConditionTitles.get(prompt.feedbackConditionId) ?? prompt.feedbackConditionId;
+    return [
+      {
+        key: `${selectedAgentRole}.${prompt.feedbackConditionId}`,
+        title: `${selectedRoleLabel} + ${feedbackConditionTitle}`,
+        value: example.prompt,
+      },
+    ];
+  }, [
+    feedbackConditionTitles,
+    prompt.feedbackConditionId,
+    selectedAgentRole,
+    selectedRoleLabel,
+    selectedTaskCard,
+  ]);
 
   function formatPromptSavedAt(value: string | null) {
     return value ? new Date(value).toLocaleString('ko-KR') : '저장 이력 없음';
@@ -123,12 +191,18 @@ export function PromptEditorView() {
     setLoading(true);
     setMessage(null);
     try {
-      const res = await fetch('/api/admin/prompts/realtime', { cache: 'no-store' });
+      const [res, settingsRes] = await Promise.all([
+        fetch('/api/admin/prompts/realtime', { cache: 'no-store' }),
+        fetch('/api/admin/config', { cache: 'no-store' }),
+      ]);
       const data: PromptResponse = await res.json();
+      const settings: RuntimeSettingsResponse = await settingsRes.json();
       setPrompt({
         basePrompt: data.basePrompt,
         dominantPrompt: data.dominantPrompt,
         collaborativePrompt: data.collaborativePrompt,
+        feedbackConditionId: data.feedbackConditionId,
+        feedbackPrompt: data.feedbackPrompt,
         taskCardId: data.taskCardId,
         taskCardPrompt: data.taskCardPrompt,
       });
@@ -136,13 +210,17 @@ export function PromptEditorView() {
         basePrompt: data.basePrompt,
         dominantPrompt: data.dominantPrompt,
         collaborativePrompt: data.collaborativePrompt,
+        feedbackConditionId: data.feedbackConditionId,
+        feedbackPrompt: data.feedbackPrompt,
         taskCardId: data.taskCardId,
         taskCardPrompt: data.taskCardPrompt,
       });
+      setFeedbackConditions(data.feedbackConditions);
       setTaskCards(data.taskCards);
       setUsingDefault(data.usingDefault);
       setPromptId(data.promptId);
       setPromptSavedAt(data.savedAt);
+      setSelectedAgentRole(normalizeAgentRole(settings.agentRole));
     } catch {
       setMessage({ text: '프롬프트를 불러오지 못했습니다.', ok: false });
     } finally {
@@ -175,11 +253,14 @@ export function PromptEditorView() {
         basePrompt: saved.basePrompt,
         dominantPrompt: saved.dominantPrompt,
         collaborativePrompt: saved.collaborativePrompt,
+        feedbackConditionId: saved.feedbackConditionId,
+        feedbackPrompt: saved.feedbackPrompt,
         taskCardId: saved.taskCardId,
         taskCardPrompt: saved.taskCardPrompt,
       };
       setPrompt(next);
       setSavedPrompt(next);
+      setFeedbackConditions(saved.feedbackConditions);
       setTaskCards(saved.taskCards);
       setUsingDefault(saved.usingDefault);
       setPromptId(saved.promptId);
@@ -210,11 +291,14 @@ export function PromptEditorView() {
         basePrompt: saved.basePrompt,
         dominantPrompt: saved.dominantPrompt,
         collaborativePrompt: saved.collaborativePrompt,
+        feedbackConditionId: saved.feedbackConditionId,
+        feedbackPrompt: saved.feedbackPrompt,
         taskCardId: saved.taskCardId,
         taskCardPrompt: saved.taskCardPrompt,
       };
       setPrompt(next);
       setSavedPrompt(next);
+      setFeedbackConditions(saved.feedbackConditions);
       setTaskCards(saved.taskCards);
       setUsingDefault(saved.usingDefault);
       setPromptId(saved.promptId);
@@ -257,6 +341,13 @@ export function PromptEditorView() {
               {formatPromptSavedAt(promptSavedAt)}
             </span>
           </span>
+          <span>
+            운영 조합:{' '}
+            <span className="text-foreground font-semibold">
+              {selectedRoleLabel}
+              {selectedFeedbackCondition ? ` + ${selectedFeedbackCondition.title}` : ''}
+            </span>
+          </span>
         </div>
       </section>
 
@@ -264,7 +355,7 @@ export function PromptEditorView() {
         <p className="text-muted-foreground text-sm">프롬프트를 불러오는 중...</p>
       ) : (
         <>
-          {PROMPT_GROUPS.map((group) => {
+          {visiblePromptGroups.map((group) => {
             const singleField = group.fields.length === 1 ? group.fields[0] : null;
 
             return (
@@ -325,6 +416,7 @@ export function PromptEditorView() {
               disabled={saving}
               onChange={(e) => {
                 const selected = taskCards.find((taskCard) => taskCard.id === e.target.value);
+                setExamplesOpen(false);
                 setPrompt((current) => ({
                   ...current,
                   taskCardId: e.target.value,
@@ -342,11 +434,66 @@ export function PromptEditorView() {
             </select>
             <textarea
               value={prompt.taskCardPrompt}
-              rows={24}
+              rows={18}
               readOnly
               spellCheck={false}
               className="border-input bg-muted/40 text-foreground min-h-32 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none"
             />
+            <div className="border-border flex flex-col gap-3 border-t pt-3">
+              <button
+                type="button"
+                onClick={() => setExamplesOpen((open) => !open)}
+                disabled={exampleEntries.length === 0}
+                className="text-foreground enabled:hover:bg-muted flex w-full items-center justify-between gap-3 rounded-md px-1 py-1 text-left text-sm font-semibold transition-colors disabled:cursor-default disabled:opacity-60"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  {examplesOpen ? (
+                    <ChevronDown className="size-4 shrink-0" aria-hidden="true" />
+                  ) : (
+                    <ChevronRight className="size-4 shrink-0" aria-hidden="true" />
+                  )}
+                  <span>Conversation Examples</span>
+                </span>
+                <span className="text-muted-foreground shrink-0 font-mono text-xs">
+                  {exampleEntries.length > 0
+                    ? `${exampleEntries.length}개`
+                    : '등록된 examples 없음'}
+                </span>
+              </button>
+              {selectedFeedbackCondition && (
+                <p className="text-muted-foreground px-1 text-xs">
+                  운영 설정의 조합 기준:{' '}
+                  <span className="text-foreground font-semibold">
+                    {selectedRoleLabel} + {selectedFeedbackCondition.title}
+                  </span>
+                </p>
+              )}
+
+              {examplesOpen && exampleEntries.length > 0 && (
+                <div className="flex flex-col gap-4">
+                  {exampleEntries.map((entry) => (
+                    <div
+                      key={entry.key}
+                      className="border-border flex flex-col gap-2 border-l pl-4"
+                    >
+                      <div className="flex items-end justify-between gap-3">
+                        <h4 className="text-foreground text-xs font-semibold">{entry.title}</h4>
+                        <span className="text-muted-foreground shrink-0 font-mono text-xs">
+                          {entry.value.length.toLocaleString('ko-KR')}자
+                        </span>
+                      </div>
+                      <textarea
+                        value={entry.value}
+                        rows={18}
+                        readOnly
+                        spellCheck={false}
+                        className="border-input bg-muted/40 text-foreground min-h-32 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </section>
         </>
       )}

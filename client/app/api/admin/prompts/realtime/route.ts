@@ -4,6 +4,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
 import {
   DEFAULT_REALTIME_PROMPT_METADATA,
+  type RealtimeFeedbackConditionSummary,
   type RealtimePromptConfig,
   type RealtimePromptMetadata,
   type RealtimePromptState,
@@ -12,6 +13,7 @@ import {
 } from '@/lib/realtime-prompt-config';
 
 const PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.json');
+const RUNTIME_CONFIG_PATH = join(process.cwd(), '..', 'config.json');
 const DEFAULT_PROMPT_SOURCE_DIR = join(process.cwd(), '..', 'prompts', 'realtime');
 const PROMPT_SOURCE_MANIFEST_PATH = join(DEFAULT_PROMPT_SOURCE_DIR, 'manifest.json');
 const PROMPT_FIELDS = ['basePrompt', 'dominantPrompt', 'collaborativePrompt'] as const;
@@ -22,10 +24,20 @@ type PromptFileShape = {
 
 type StoredRealtimePrompt = Partial<RealtimePromptConfig> & Partial<RealtimePromptMetadata>;
 type PromptManifest = Record<(typeof PROMPT_FIELDS)[number], { file: string; marker: string }> & {
+  feedbackConditionManifest?: string;
+  defaultFeedbackConditionId?: string;
   taskCardManifest?: string;
   defaultTaskCardId?: string;
   taskCardPrompt?: { file: string; marker: string };
 };
+type FeedbackConditionManifest = Record<
+  string,
+  {
+    file: string;
+    title?: string;
+    marker: string;
+  }
+>;
 type TaskCardManifest = Record<
   string,
   {
@@ -35,17 +47,12 @@ type TaskCardManifest = Record<
     level?: string;
     marker: string;
     examples?: Partial<
-      Record<
-        'dominant' | 'collaborative',
-        {
-          file: string;
-          marker: string;
-        }
-      >
+      Record<'dominant' | 'collaborative', Record<string, { file: string; marker: string }>>
     >;
   }
 >;
 type PromptDefaults = RealtimePromptConfig & {
+  feedbackConditions: RealtimeFeedbackConditionSummary[];
   taskCards: RealtimeTaskCardSummary[];
 };
 
@@ -71,7 +78,23 @@ function readPromptMetadata(value: unknown): RealtimePromptMetadata {
   };
 }
 
-async function readDefaultPromptConfigForTask(taskCardId?: string): Promise<PromptDefaults> {
+async function readRuntimeFeedbackConditionId(): Promise<string | undefined> {
+  try {
+    const raw = JSON.parse(await readFile(RUNTIME_CONFIG_PATH, 'utf-8')) as {
+      feedbackConditionId?: unknown;
+    };
+    return typeof raw.feedbackConditionId === 'string' && raw.feedbackConditionId.trim()
+      ? raw.feedbackConditionId.trim()
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function readDefaultPromptConfigForTask(
+  taskCardId?: string,
+  feedbackConditionId?: string
+): Promise<PromptDefaults> {
   const manifest = JSON.parse(
     await readFile(PROMPT_SOURCE_MANIFEST_PATH, 'utf-8')
   ) as Partial<PromptManifest>;
@@ -90,16 +113,83 @@ async function readDefaultPromptConfigForTask(taskCardId?: string): Promise<Prom
       })
     )
   );
+  const feedbackCondition = await readFeedbackConditionConfig(manifest, feedbackConditionId);
   const taskCard = await readTaskCardConfig(manifest, taskCardId);
   const result = validateRealtimePromptConfig({
     ...config,
+    feedbackConditionId: feedbackCondition.feedbackConditionId,
+    feedbackPrompt: feedbackCondition.feedbackPrompt,
     taskCardId: taskCard.taskCardId,
     taskCardPrompt: taskCard.taskCardPrompt,
   });
   if (!result.ok) {
     throw new Error(result.error);
   }
-  return { ...result.config, taskCards: taskCard.taskCards };
+  return {
+    ...result.config,
+    feedbackConditions: feedbackCondition.feedbackConditions,
+    taskCards: taskCard.taskCards,
+  };
+}
+
+async function readFeedbackConditionConfig(
+  manifest: Partial<PromptManifest>,
+  feedbackConditionId?: string
+): Promise<{
+  feedbackConditionId: string;
+  feedbackPrompt: string;
+  feedbackConditions: RealtimeFeedbackConditionSummary[];
+}> {
+  const manifestFile =
+    typeof manifest.feedbackConditionManifest === 'string' && manifest.feedbackConditionManifest
+      ? manifest.feedbackConditionManifest
+      : 'feedbacks/manifest.json';
+  const defaultFeedbackConditionId =
+    typeof manifest.defaultFeedbackConditionId === 'string' && manifest.defaultFeedbackConditionId
+      ? manifest.defaultFeedbackConditionId
+      : null;
+  const feedbackManifest = JSON.parse(
+    await readFile(join(DEFAULT_PROMPT_SOURCE_DIR, manifestFile), 'utf-8')
+  ) as FeedbackConditionManifest;
+  const feedbackConditions = await Promise.all(
+    Object.entries(feedbackManifest).map(async ([id, entry]) => {
+      const prompt = (
+        await readFile(join(DEFAULT_PROMPT_SOURCE_DIR, 'feedbacks', entry.file), 'utf-8')
+      ).trim();
+      if (!prompt.startsWith(entry.marker)) {
+        throw new Error(`${entry.file} 파일은 ${entry.marker} 헤딩으로 시작해야 합니다.`);
+      }
+      return {
+        id,
+        title: typeof entry.title === 'string' && entry.title ? entry.title : id,
+        prompt,
+      };
+    })
+  );
+  const requestedFeedbackConditionId =
+    feedbackConditionId || defaultFeedbackConditionId || feedbackConditions[0]?.id;
+  const selectedFeedbackConditionId =
+    requestedFeedbackConditionId && feedbackManifest[requestedFeedbackConditionId]
+      ? requestedFeedbackConditionId
+      : defaultFeedbackConditionId && feedbackManifest[defaultFeedbackConditionId]
+        ? defaultFeedbackConditionId
+        : feedbackConditions[0]?.id;
+  const selected = selectedFeedbackConditionId
+    ? feedbackManifest[selectedFeedbackConditionId]
+    : null;
+  if (!selected || typeof selected.file !== 'string' || typeof selected.marker !== 'string') {
+    throw new Error(
+      `Feedback condition을 찾을 수 없습니다: ${selectedFeedbackConditionId ?? '(empty)'}`
+    );
+  }
+  const feedbackPrompt =
+    feedbackConditions.find((feedback) => feedback.id === selectedFeedbackConditionId)?.prompt ??
+    '';
+  return {
+    feedbackConditionId: selectedFeedbackConditionId,
+    feedbackPrompt,
+    feedbackConditions,
+  };
 }
 
 async function readTaskCardConfig(
@@ -156,19 +246,54 @@ async function readTaskCardConfig(
       const examples: NonNullable<RealtimeTaskCardSummary['examples']> = {};
       if (entry.examples) {
         for (const role of ['dominant', 'collaborative'] as const) {
-          const example = entry.examples[role];
-          if (!example) continue;
-          const examplePrompt = (
-            await readFile(join(DEFAULT_PROMPT_SOURCE_DIR, 'task-cards', example.file), 'utf-8')
-          ).trim();
-          if (!examplePrompt.startsWith(example.marker)) {
-            throw new Error(`${example.file} 파일은 ${example.marker} 헤딩으로 시작해야 합니다.`);
+          const roleExamples = entry.examples[role];
+          if (!roleExamples) continue;
+          examples[role] = {};
+
+          if ('file' in roleExamples || 'marker' in roleExamples) {
+            const legacyExample = roleExamples as unknown as { file?: string; marker?: string };
+            if (
+              typeof legacyExample.file !== 'string' ||
+              typeof legacyExample.marker !== 'string'
+            ) {
+              throw new Error(`${id} ${role} example 설정이 올바르지 않습니다.`);
+            }
+            const examplePrompt = (
+              await readFile(
+                join(DEFAULT_PROMPT_SOURCE_DIR, 'task-cards', legacyExample.file),
+                'utf-8'
+              )
+            ).trim();
+            if (!examplePrompt.startsWith(legacyExample.marker)) {
+              throw new Error(
+                `${legacyExample.file} 파일은 ${legacyExample.marker} 헤딩으로 시작해야 합니다.`
+              );
+            }
+            examples[role].default = {
+              file: legacyExample.file,
+              marker: legacyExample.marker,
+              prompt: examplePrompt,
+            };
+            continue;
           }
-          examples[role] = {
-            file: example.file,
-            marker: example.marker,
-            prompt: examplePrompt,
-          };
+
+          for (const [feedbackConditionId, example] of Object.entries(roleExamples)) {
+            const examplePrompt = (
+              await readFile(join(DEFAULT_PROMPT_SOURCE_DIR, 'task-cards', example.file), 'utf-8')
+            ).trim();
+            if (!examplePrompt.startsWith(example.marker)) {
+              throw new Error(`${example.file} 파일은 ${example.marker} 헤딩으로 시작해야 합니다.`);
+            }
+            examples[role][feedbackConditionId] = {
+              file: example.file,
+              marker: example.marker,
+              prompt: examplePrompt,
+            };
+          }
+
+          if (Object.keys(examples[role]).length === 0) {
+            delete examples[role];
+          }
         }
       }
       return {
@@ -199,11 +324,18 @@ async function readPromptConfig(): Promise<RealtimePromptState> {
   try {
     const raw = JSON.parse(await readFile(PROMPT_CONFIG_PATH, 'utf-8')) as PromptFileShape;
     const source = raw.realtime as StoredRealtimePrompt | undefined;
+    const runtimeFeedbackConditionId = await readRuntimeFeedbackConditionId();
     const defaults = await readDefaultPromptConfigForTask(
-      typeof source?.taskCardId === 'string' ? source.taskCardId : undefined
+      typeof source?.taskCardId === 'string' ? source.taskCardId : undefined,
+      runtimeFeedbackConditionId
     );
     const result = validateRealtimePromptConfig({
       ...source,
+      feedbackConditionId: defaults.feedbackConditionId,
+      feedbackPrompt:
+        typeof source?.feedbackPrompt === 'string' && source.feedbackPrompt.trim()
+          ? source.feedbackPrompt
+          : defaults.feedbackPrompt,
       taskCardId: defaults.taskCardId,
       taskCardPrompt:
         typeof source?.taskCardPrompt === 'string' && source.taskCardPrompt.trim()
@@ -213,6 +345,7 @@ async function readPromptConfig(): Promise<RealtimePromptState> {
     if (result.ok) {
       return {
         ...result.config,
+        feedbackConditions: defaults.feedbackConditions,
         taskCards: defaults.taskCards,
         ...readPromptMetadata(raw.realtime),
         usingDefault: false,
@@ -223,7 +356,7 @@ async function readPromptConfig(): Promise<RealtimePromptState> {
   }
 
   return {
-    ...(await readDefaultPromptConfigForTask()),
+    ...(await readDefaultPromptConfigForTask(undefined, await readRuntimeFeedbackConditionId())),
     ...DEFAULT_REALTIME_PROMPT_METADATA,
     usingDefault: true,
   };
@@ -259,11 +392,15 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+    const runtimeFeedbackConditionId = await readRuntimeFeedbackConditionId();
     const defaults = await readDefaultPromptConfigForTask(
-      typeof body?.taskCardId === 'string' ? body.taskCardId : undefined
+      typeof body?.taskCardId === 'string' ? body.taskCardId : undefined,
+      runtimeFeedbackConditionId
     );
     const result = validateRealtimePromptConfig({
       ...body,
+      feedbackConditionId: defaults.feedbackConditionId,
+      feedbackPrompt: defaults.feedbackPrompt,
       taskCardId: defaults.taskCardId,
       taskCardPrompt: defaults.taskCardPrompt,
     });
@@ -274,6 +411,7 @@ export async function POST(req: Request) {
     const metadata = await writePromptConfig(result.config);
     return NextResponse.json({
       ...result.config,
+      feedbackConditions: defaults.feedbackConditions,
       taskCards: defaults.taskCards,
       ...metadata,
       usingDefault: false,
@@ -294,7 +432,7 @@ export async function DELETE() {
 
   try {
     return NextResponse.json({
-      ...(await readDefaultPromptConfigForTask()),
+      ...(await readDefaultPromptConfigForTask(undefined, await readRuntimeFeedbackConditionId())),
       ...DEFAULT_REALTIME_PROMPT_METADATA,
       usingDefault: true,
     });

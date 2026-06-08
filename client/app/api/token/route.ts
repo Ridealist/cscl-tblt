@@ -28,10 +28,12 @@ const API_SECRET = process.env.LIVEKIT_API_SECRET;
 const LIVEKIT_URL = process.env.LIVEKIT_URL;
 const CONFIG_PATH = join(process.cwd(), '..', 'config.json');
 const PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.json');
+const DEFAULT_FEEDBACK_CONDITION_ID = 'no_corrective';
 
 type RuntimeConfig = {
   agentMode: AgentMode;
   agentRole: AgentRole;
+  feedbackConditionId: string;
   realtimeResetting: boolean;
 };
 
@@ -80,7 +82,13 @@ export async function POST(req: Request) {
 
     const agentName = getAgentNameForConfig(agentMode, config.agentRole);
     const promptSnapshot = agentMode === 'realtime' ? readRealtimePromptSnapshot() : undefined;
-    const roomConfig = buildRoomConfig(agentName, agentMode, config.agentRole, promptSnapshot);
+    const roomConfig = buildRoomConfig(
+      agentName,
+      agentMode,
+      config.agentRole,
+      config.feedbackConditionId,
+      promptSnapshot
+    );
     const roomMetadata = JSON.parse(roomConfig.metadata);
     const requestedAgents = roomConfig.agents.map((agent) => ({
       agentName: agent.agentName,
@@ -95,6 +103,7 @@ export async function POST(req: Request) {
       inferredAgentMode: agentMode,
       runtimeAgentMode: config.agentMode,
       runtimeAgentRole: config.agentRole,
+      runtimeFeedbackConditionId: config.feedbackConditionId,
       agentName,
       roomMetadata,
       requestedAgents,
@@ -149,15 +158,21 @@ function readRuntimeConfig(): RuntimeConfig {
     return {
       agentMode: normalizeAgentMode(raw.agentMode),
       agentRole: normalizeAgentRole(raw.agentRole ?? raw.agentStance),
+      feedbackConditionId: normalizeFeedbackConditionId(raw.feedbackConditionId),
       realtimeResetting: raw.realtimeResetting === true,
     };
   } catch {
     return {
       agentMode: 'pipeline',
       agentRole: DEFAULT_AGENT_ROLE,
+      feedbackConditionId: DEFAULT_FEEDBACK_CONDITION_ID,
       realtimeResetting: false,
     };
   }
+}
+
+function normalizeFeedbackConditionId(value: unknown): string {
+  return typeof value === 'string' && value.trim() ? value.trim() : DEFAULT_FEEDBACK_CONDITION_ID;
 }
 
 function inferAgentMode(value: unknown, roomName: string, fallback: AgentMode): AgentMode {
@@ -171,7 +186,9 @@ function readRealtimePromptSnapshot(): RealtimePromptSnapshot {
     if (!raw.realtime || typeof raw.realtime !== 'object') {
       return DEFAULT_REALTIME_PROMPT_METADATA;
     }
-    const realtime = raw.realtime as Partial<RealtimePromptMetadata> & { taskCardId?: unknown };
+    const realtime = raw.realtime as Partial<RealtimePromptMetadata> & {
+      taskCardId?: unknown;
+    };
     return {
       promptId:
         typeof realtime.promptId === 'string' && realtime.promptId
@@ -193,6 +210,7 @@ function buildRoomConfig(
   agentName: string,
   agentMode: AgentMode,
   agentRole: AgentRole,
+  feedbackConditionId: string,
   promptSnapshot?: RealtimePromptSnapshot
 ): RoomConfiguration {
   const metadata = JSON.stringify({
@@ -203,6 +221,7 @@ function buildRoomConfig(
           promptId: promptSnapshot?.promptId ?? DEFAULT_REALTIME_PROMPT_METADATA.promptId,
           promptSavedAt: promptSnapshot?.savedAt ?? DEFAULT_REALTIME_PROMPT_METADATA.savedAt,
           promptSource: promptSnapshot?.source ?? DEFAULT_REALTIME_PROMPT_METADATA.source,
+          feedbackConditionId,
           ...(promptSnapshot?.taskCardId ? { taskCardId: promptSnapshot.taskCardId } : {}),
         }
       : {}),

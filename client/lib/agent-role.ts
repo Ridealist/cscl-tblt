@@ -12,7 +12,7 @@ export function normalizeAgentRole(value: unknown): AgentRole {
 }
 
 export function getAgentRoleLabel(role: AgentRole): string {
-  return role === 'collaborative' ? '협력적' : '주도적';
+  return role === 'collaborative' ? 'Collaborative' : 'Dominant';
 }
 
 export function getRealtimeAgentNameForRole(role: AgentRole): string {
