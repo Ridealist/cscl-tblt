@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { AnimatePresence, type MotionProps, motion } from 'motion/react';
 import { useAgent, useSessionContext, useSessionMessages } from '@livekit/components-react';
 import { AgentChatTranscript } from '@/components/agents-ui/agent-chat-transcript';
@@ -179,7 +179,6 @@ export function AgentSessionView_01({
   const session = useSessionContext();
   const { messages } = useSessionMessages(session);
   const [chatOpen, setChatOpen] = useState(false);
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
   const { state: agentState } = useAgent();
 
   const controls: AgentControlBarControls = {
@@ -189,15 +188,6 @@ export function AgentSessionView_01({
     camera: supportsVideoInput,
     screenShare: supportsScreenShare,
   };
-
-  useEffect(() => {
-    const lastMessage = messages.at(-1);
-    const lastMessageIsLocal = lastMessage?.from?.isLocal === true;
-
-    if (scrollAreaRef.current && lastMessageIsLocal) {
-      scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
-    }
-  }, [messages]);
 
   return (
     <section
@@ -209,7 +199,12 @@ export function AgentSessionView_01({
       <ParticipantList />
       {/* transcript */}
 
-      <div className="absolute top-0 bottom-[135px] flex w-full flex-col md:bottom-[170px]">
+      <div
+        className={cn(
+          'absolute top-0 bottom-[135px] flex w-full flex-col md:bottom-[170px]',
+          chatOpen ? 'z-40' : 'pointer-events-none'
+        )}
+      >
         <AnimatePresence>
           {chatOpen && (
             <motion.div
