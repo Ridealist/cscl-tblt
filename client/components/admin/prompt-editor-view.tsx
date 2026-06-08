@@ -125,16 +125,20 @@ export function PromptEditorView() {
     return (['dominant', 'collaborative'] as const).flatMap((role) => {
       const roleExamples = examples[role];
       if (!roleExamples) return [];
+      const example = roleExamples[prompt.feedbackConditionId] ?? roleExamples.default;
+      if (!example) return [];
       const roleLabel = role === 'dominant' ? 'Dominant' : 'Collaborative';
-      return Object.entries(roleExamples).map(([feedbackConditionId, example]) => ({
-        key: `${role}.${feedbackConditionId}`,
-        title: `${roleLabel} + ${
-          feedbackConditionTitles.get(feedbackConditionId) ?? feedbackConditionId
-        }`,
-        value: example.prompt,
-      }));
+      const feedbackConditionTitle =
+        feedbackConditionTitles.get(prompt.feedbackConditionId) ?? prompt.feedbackConditionId;
+      return [
+        {
+          key: `${role}.${prompt.feedbackConditionId}`,
+          title: `${roleLabel} + ${feedbackConditionTitle}`,
+          value: example.prompt,
+        },
+      ];
     });
-  }, [feedbackConditionTitles, selectedTaskCard]);
+  }, [feedbackConditionTitles, prompt.feedbackConditionId, selectedTaskCard]);
 
   function formatPromptSavedAt(value: string | null) {
     return value ? new Date(value).toLocaleString('ko-KR') : '저장 이력 없음';
