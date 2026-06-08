@@ -41,7 +41,7 @@ const PROMPT_GROUPS: PromptGroup[] = [
         key: 'basePrompt',
         title: 'Common Prompt',
         description: '모든 Realtime 에이전트 역할에 공통으로 적용됩니다.',
-        rows: 16,
+        rows: 18,
       },
     ],
   },
@@ -53,13 +53,13 @@ const PROMPT_GROUPS: PromptGroup[] = [
         key: 'dominantPrompt',
         title: 'Dominant Prompt',
         description: 'Dominant Condition에서 추가되는 주도적 상호작용 규칙입니다.',
-        rows: 14,
+        rows: 18,
       },
       {
         key: 'collaborativePrompt',
         title: 'Collaborative Prompt',
         description: 'Collaborative Condition에서 추가되는 협력적 상호작용 규칙입니다.',
-        rows: 14,
+        rows: 18,
       },
     ],
   },
@@ -434,7 +434,7 @@ export function PromptEditorView() {
             </select>
             <textarea
               value={prompt.taskCardPrompt}
-              rows={16}
+              rows={18}
               readOnly
               spellCheck={false}
               className="border-input bg-muted/40 text-foreground min-h-32 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none"
@@ -484,7 +484,7 @@ export function PromptEditorView() {
                       </div>
                       <textarea
                         value={entry.value}
-                        rows={14}
+                        rows={18}
                         readOnly
                         spellCheck={false}
                         className="border-input bg-muted/40 text-foreground min-h-32 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none"
