@@ -29,6 +29,7 @@ def test_prompt_sources_are_read_as_realtime_prompt_config() -> None:
         "collaborativePrompt",
         "taskCardId",
         "taskCardPrompt",
+        "conversationExamplePrompts",
     }
     for key in check_prompts.PROMPT_FIELDS:
         assert config["realtime"][key] == (SOURCE_PATH / manifest[key]["file"]).read_text(
@@ -38,6 +39,10 @@ def test_prompt_sources_are_read_as_realtime_prompt_config() -> None:
     assert config["realtime"]["taskCardPrompt"] == (
         task_cards[task_card_id]["base_path"] / task_cards[task_card_id]["file"]
     ).read_text(encoding="utf-8").strip()
+    assert set(config["realtime"]["conversationExamplePrompts"]) == {
+        "dominant",
+        "collaborative",
+    }
 
 
 def test_prompt_source_parser_splits_pasted_document_sections() -> None:

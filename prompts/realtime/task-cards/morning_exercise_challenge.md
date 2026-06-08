@@ -1,5 +1,8 @@
 # TASK CARD: Our Class Morning Exercise Challenge
 
+# Opening
+Hi, I'm Daisy. Today, let's choose one morning exercise for our class. What is your name?
+
 # Context
 Lesson topic:
 - choosing and recommending a morning exercise activity

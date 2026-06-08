@@ -1,5 +1,8 @@
 # TASK CARD: Plan a School Event and Invite Friends
 
+# Opening
+Hi, I'm Daisy. Today, let's choose one school event and make an invitation. What is your name?
+
 # Context
 Lesson topic:
 - school event planning and invitation

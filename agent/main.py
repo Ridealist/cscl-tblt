@@ -23,6 +23,7 @@ from logger import ConversationLogger
 from prompt_pipeline import build_prompt as build_pipeline_prompt
 from prompt_pipeline import _clean_names
 from prompt_realtime import build_prompt as build_realtime_prompt
+from prompt_realtime import get_opening_sentence as get_realtime_opening_sentence
 from prompt_realtime import normalize_role as normalize_realtime_role
 from openai.types.beta.realtime.session import TurnDetection
 
@@ -66,10 +67,6 @@ REALTIME_AGENT_NAMES = {
     "collaborative": "realtime-agent",
 }
 REALTIME_AGENT_NAME = "realtime-agent"
-REALTIME_FIRST_SENTENCE = (
-    "Hi, I'm Daisy. Today, let's choose one school event and make an invitation. "
-    "What is your name?"
-)
 
 log.info(
     "Agent worker configuration: worker_mode=%s role=%s default_mode=%s default_role=%s "
@@ -354,6 +351,7 @@ class RealtimeAssistant(Agent):
         self._get_name = get_name_fn
         self._role = role
         self._task_card_id = task_card_id
+        self._opening_sentence = get_realtime_opening_sentence(task_card_id)
 
     async def on_enter(self) -> None:
         """1:1 realtime 세션 입장 직후 참가자 이름을 반영하고 첫 턴을 생성."""
@@ -371,9 +369,9 @@ class RealtimeAssistant(Agent):
 
         instruction = (
             "Say only this exact opening as Daisy, a friendly classmate, and nothing else: "
-            f"{json.dumps(REALTIME_FIRST_SENTENCE, ensure_ascii=False)}"
+            f"{json.dumps(self._opening_sentence, ensure_ascii=False)}"
         )
-        log.info("Realtime first reply requested: %s", REALTIME_FIRST_SENTENCE)
+        log.info("Realtime first reply requested: %s", self._opening_sentence)
         self.session.generate_reply(instructions=instruction)
 
 

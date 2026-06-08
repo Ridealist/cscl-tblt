@@ -5,6 +5,9 @@ from typing import Literal
 
 AgentRole = Literal["dominant", "collaborative"]
 ConversationExamples = dict[AgentRole, str]
+DEFAULT_OPENING_SENTENCE = (
+    "Hi, I'm Daisy. Let's talk about today's task together. What is your name?"
+)
 PROMPT_CONFIG_PATH = Path(__file__).parent.parent / "prompt_config.json"
 DEFAULT_PROMPT_SOURCE_DIR = Path(__file__).parent.parent / "prompts" / "realtime"
 PROMPT_SOURCE_MANIFEST_PATH = DEFAULT_PROMPT_SOURCE_DIR / "manifest.json"
@@ -21,6 +24,24 @@ def normalize_role(role: str | None = None) -> AgentRole:
 def _valid_prompt_text(value: object) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
+    return None
+
+
+def _extract_task_card_opening(task_card_prompt: str) -> str | None:
+    lines = task_card_prompt.splitlines()
+    for index, line in enumerate(lines):
+        if line.strip().lower() != "# opening":
+            continue
+
+        opening_lines = []
+        for candidate in lines[index + 1 :]:
+            stripped = candidate.strip()
+            if stripped.startswith("#"):
+                break
+            if stripped:
+                opening_lines.append(stripped)
+        opening = " ".join(opening_lines).strip()
+        return opening or None
     return None
 
 
@@ -227,6 +248,11 @@ def load_prompt_config(
 ) -> tuple[str, dict[AgentRole, str], str, ConversationExamples]:
     default_config = load_default_prompt_config(task_card_id)
     return _load_prompt_config_file(PROMPT_CONFIG_PATH, task_card_id) or default_config
+
+
+def get_opening_sentence(task_card_id: str | None = None) -> str:
+    _, _, task_card_prompt, _ = load_prompt_config(task_card_id)
+    return _extract_task_card_opening(task_card_prompt) or DEFAULT_OPENING_SENTENCE
 
 
 def build_prompt(

@@ -11,6 +11,16 @@
     "title": "L5-T1. Our Class Morning Exercise Challenge",
     "topic": "choosing and recommending a morning exercise activity",
     "level": "A1-A2",
-    "marker": "# TASK CARD:"
+    "marker": "# TASK CARD:",
+    "examples": {
+      "dominant": {
+        "file": "examples/morning_exercise_challenge.dominant.md",
+        "marker": "# CONVERSATION EXAMPLE: Dominant"
+      },
+      "collaborative": {
+        "file": "examples/morning_exercise_challenge.collaborative.md",
+        "marker": "# CONVERSATION EXAMPLE: Collaborative"
+      }
+    }
   }
 }

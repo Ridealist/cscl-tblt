@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type {
   RealtimePromptConfig,
@@ -34,7 +35,7 @@ const PROMPT_GROUPS: PromptGroup[] = [
         key: 'basePrompt',
         title: 'Common Prompt',
         description: '모든 Realtime 에이전트 역할에 공통으로 적용됩니다.',
-        rows: 24,
+        rows: 16,
       },
     ],
   },
@@ -94,8 +95,27 @@ export function PromptEditorView() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [examplesOpen, setExamplesOpen] = useState(false);
 
   const hasChanges = useMemo(() => !samePrompt(prompt, savedPrompt), [prompt, savedPrompt]);
+  const selectedTaskCard = useMemo(
+    () => taskCards.find((taskCard) => taskCard.id === prompt.taskCardId) ?? null,
+    [prompt.taskCardId, taskCards]
+  );
+  const exampleEntries = useMemo(() => {
+    const examples = selectedTaskCard?.examples;
+    if (!examples) return [];
+    return [
+      { role: 'dominant', title: 'Dominant Example', value: examples.dominant?.prompt },
+      {
+        role: 'collaborative',
+        title: 'Collaborative Example',
+        value: examples.collaborative?.prompt,
+      },
+    ].filter((entry): entry is { role: string; title: string; value: string } =>
+      Boolean(entry.value)
+    );
+  }, [selectedTaskCard]);
 
   function formatPromptSavedAt(value: string | null) {
     return value ? new Date(value).toLocaleString('ko-KR') : '저장 이력 없음';
@@ -325,6 +345,7 @@ export function PromptEditorView() {
               disabled={saving}
               onChange={(e) => {
                 const selected = taskCards.find((taskCard) => taskCard.id === e.target.value);
+                setExamplesOpen(false);
                 setPrompt((current) => ({
                   ...current,
                   taskCardId: e.target.value,
@@ -342,11 +363,58 @@ export function PromptEditorView() {
             </select>
             <textarea
               value={prompt.taskCardPrompt}
-              rows={24}
+              rows={16}
               readOnly
               spellCheck={false}
               className="border-input bg-muted/40 text-foreground min-h-32 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none"
             />
+            <div className="border-border flex flex-col gap-3 border-t pt-3">
+              <button
+                type="button"
+                onClick={() => setExamplesOpen((open) => !open)}
+                disabled={exampleEntries.length === 0}
+                className="text-foreground enabled:hover:bg-muted flex w-full items-center justify-between gap-3 rounded-md px-1 py-1 text-left text-sm font-semibold transition-colors disabled:cursor-default disabled:opacity-60"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  {examplesOpen ? (
+                    <ChevronDown className="size-4 shrink-0" aria-hidden="true" />
+                  ) : (
+                    <ChevronRight className="size-4 shrink-0" aria-hidden="true" />
+                  )}
+                  <span>Conversation Examples</span>
+                </span>
+                <span className="text-muted-foreground shrink-0 font-mono text-xs">
+                  {exampleEntries.length > 0
+                    ? `${exampleEntries.length}개`
+                    : '등록된 examples 없음'}
+                </span>
+              </button>
+
+              {examplesOpen && exampleEntries.length > 0 && (
+                <div className="flex flex-col gap-4">
+                  {exampleEntries.map((entry) => (
+                    <div
+                      key={entry.role}
+                      className="border-border flex flex-col gap-2 border-l pl-4"
+                    >
+                      <div className="flex items-end justify-between gap-3">
+                        <h4 className="text-foreground text-xs font-semibold">{entry.title}</h4>
+                        <span className="text-muted-foreground shrink-0 font-mono text-xs">
+                          {entry.value.length.toLocaleString('ko-KR')}자
+                        </span>
+                      </div>
+                      <textarea
+                        value={entry.value}
+                        rows={14}
+                        readOnly
+                        spellCheck={false}
+                        className="border-input bg-muted/40 text-foreground min-h-32 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </section>
         </>
       )}

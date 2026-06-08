@@ -1,7 +1,7 @@
 import json
 
 import prompt_realtime
-from prompt_realtime import build_prompt, normalize_role
+from prompt_realtime import build_prompt, get_opening_sentence, normalize_role
 
 
 def _read_realtime_config(path):
@@ -221,6 +221,32 @@ def test_realtime_prompt_call_task_card_id_overrides_runtime_selection(
 
     assert "# TASK CARD: Our Class Morning Exercise Challenge" in prompt
     assert "# TASK CARD: Plan a School Event and Invite Friends" not in prompt
+
+
+def test_realtime_opening_comes_from_selected_task_card(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
+
+    assert get_opening_sentence("morning_exercise_challenge") == (
+        "Hi, I'm Daisy. Today, let's choose one morning exercise for our class. "
+        "What is your name?"
+    )
+    assert get_opening_sentence("school_event_invitation") == (
+        "Hi, I'm Daisy. Today, let's choose one school event and make an invitation. "
+        "What is your name?"
+    )
+
+
+def test_realtime_opening_falls_back_when_task_card_has_no_opening(
+    tmp_path, monkeypatch
+) -> None:
+    source_dir = tmp_path / "realtime"
+    source_dir.mkdir()
+    _write_prompt_source_with_examples(source_dir)
+    monkeypatch.setattr(prompt_realtime, "DEFAULT_PROMPT_SOURCE_DIR", source_dir)
+    monkeypatch.setattr(prompt_realtime, "PROMPT_SOURCE_MANIFEST_PATH", source_dir / "manifest.json")
+    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
+
+    assert get_opening_sentence("example") == prompt_realtime.DEFAULT_OPENING_SENTENCE
 
 
 def test_realtime_prompt_appends_role_specific_conversation_example(tmp_path, monkeypatch) -> None:
