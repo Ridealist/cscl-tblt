@@ -12,6 +12,9 @@ PROMPT_FIELDS = (
     "basePrompt",
     "dominantPrompt",
     "collaborativePrompt",
+)
+LEGACY_PROMPT_FIELDS = (
+    *PROMPT_FIELDS,
     "taskCardPrompt",
 )
 
@@ -36,23 +39,113 @@ def read_manifest(path):
         if not isinstance(marker, str) or not marker:
             raise ValueError(f"Prompt manifest entry {key}.marker must be a string.")
         entries[key] = {"file": filename, "marker": marker}
+
+    legacy_task_card = manifest.get("taskCardPrompt")
+    if isinstance(legacy_task_card, dict):
+        filename = legacy_task_card.get("file")
+        marker = legacy_task_card.get("marker")
+        if not isinstance(filename, str) or not filename:
+            raise ValueError("Prompt manifest entry taskCardPrompt.file must be a string.")
+        if not isinstance(marker, str) or not marker:
+            raise ValueError("Prompt manifest entry taskCardPrompt.marker must be a string.")
+        entries["taskCardPrompt"] = {"file": filename, "marker": marker}
+        return entries
+
+    task_card_manifest = manifest.get("taskCardManifest")
+    default_task_card_id = manifest.get("defaultTaskCardId")
+    if not isinstance(task_card_manifest, str) or not task_card_manifest:
+        raise ValueError("Prompt manifest entry taskCardManifest must be a string.")
+    if not isinstance(default_task_card_id, str) or not default_task_card_id:
+        raise ValueError("Prompt manifest entry defaultTaskCardId must be a string.")
+    entries["taskCardManifest"] = task_card_manifest
+    entries["defaultTaskCardId"] = default_task_card_id
+    return entries
+
+
+def read_task_card_manifest(path, manifest):
+    manifest_file = manifest.get("taskCardManifest")
+    if not isinstance(manifest_file, str):
+        return None
+    task_card_manifest_path = path / manifest_file
+    try:
+        task_cards = json.loads(task_card_manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Task card manifest is not readable: {task_card_manifest_path}") from exc
+    if not isinstance(task_cards, dict) or not task_cards:
+        raise ValueError("Task card manifest must be a non-empty JSON object.")
+
+    entries = {}
+    for task_card_id, entry in task_cards.items():
+        if not isinstance(task_card_id, str) or not task_card_id:
+            raise ValueError("Task card id must be a non-empty string.")
+        if not isinstance(entry, dict):
+            raise ValueError(f"Task card manifest entry must be an object: {task_card_id}")
+        filename = entry.get("file")
+        marker = entry.get("marker")
+        if not isinstance(filename, str) or not filename:
+            raise ValueError(f"Task card {task_card_id}.file must be a string.")
+        if not isinstance(marker, str) or not marker:
+            raise ValueError(f"Task card {task_card_id}.marker must be a string.")
+        examples = entry.get("examples")
+        parsed_examples = {}
+        if examples is not None:
+            if not isinstance(examples, dict):
+                raise ValueError(f"Task card {task_card_id}.examples must be an object.")
+            for role in ("dominant", "collaborative"):
+                example = examples.get(role)
+                if example is None:
+                    continue
+                if not isinstance(example, dict):
+                    raise ValueError(
+                        f"Task card {task_card_id}.examples.{role} must be an object."
+                    )
+                example_filename = example.get("file")
+                example_marker = example.get("marker")
+                if not isinstance(example_filename, str) or not example_filename:
+                    raise ValueError(
+                        f"Task card {task_card_id}.examples.{role}.file must be a string."
+                    )
+                if not isinstance(example_marker, str) or not example_marker:
+                    raise ValueError(
+                        f"Task card {task_card_id}.examples.{role}.marker must be a string."
+                    )
+                parsed_examples[role] = {
+                    "file": example_filename,
+                    "marker": example_marker,
+                }
+
+        entries[task_card_id] = {
+            "file": filename,
+            "marker": marker,
+            "base_path": task_card_manifest_path.parent,
+            "examples": parsed_examples,
+        }
     return entries
 
 
 def parse_prompt_source(text, manifest):
     text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\f", "\n")
+    legacy_manifest = {
+        **manifest,
+        "taskCardPrompt": manifest.get(
+            "taskCardPrompt",
+            {"file": "task_card.md", "marker": "# TASK CARD:"},
+        ),
+    }
 
     matches = []
-    for key in PROMPT_FIELDS:
-        pattern = re.compile(rf"^{re.escape(manifest[key]['marker'])}", re.MULTILINE)
+    for key in LEGACY_PROMPT_FIELDS:
+        pattern = re.compile(rf"^{re.escape(legacy_manifest[key]['marker'])}", re.MULTILINE)
         match = pattern.search(text)
         if match is None:
-            raise ValueError(f"Missing prompt section marker for {key}: {manifest[key]['marker']}")
+            raise ValueError(
+                f"Missing prompt section marker for {key}: {legacy_manifest[key]['marker']}"
+            )
         matches.append((key, match.start()))
 
     starts = [start for _, start in matches]
     if starts != sorted(starts):
-        ordered = ", ".join(PROMPT_FIELDS)
+        ordered = ", ".join(LEGACY_PROMPT_FIELDS)
         raise ValueError(f"Prompt sections must appear in this order: {ordered}")
 
     realtime = {}
@@ -82,6 +175,60 @@ def read_prompt_folder(path):
         if not value.startswith(marker):
             raise ValueError(f"Prompt source file {prompt_path} must start with {marker!r}")
         realtime[key] = value
+
+    if "taskCardPrompt" in manifest:
+        filename = manifest["taskCardPrompt"]["file"]
+        marker = manifest["taskCardPrompt"]["marker"]
+        prompt_path = path / filename
+        try:
+            value = prompt_path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise ValueError(f"Prompt source file is not readable: {prompt_path}") from exc
+        if not value:
+            raise ValueError(f"Prompt source file is empty: {prompt_path}")
+        if not value.startswith(marker):
+            raise ValueError(f"Prompt source file {prompt_path} must start with {marker!r}")
+        realtime["taskCardPrompt"] = value
+        return {"realtime": realtime}
+
+    task_cards = read_task_card_manifest(path, manifest)
+    default_task_card_id = manifest["defaultTaskCardId"]
+    if default_task_card_id not in task_cards:
+        raise ValueError(f"defaultTaskCardId is not registered: {default_task_card_id}")
+    for task_card_id, entry in task_cards.items():
+        prompt_path = entry["base_path"] / entry["file"]
+        try:
+            value = prompt_path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise ValueError(f"Task card source file is not readable: {prompt_path}") from exc
+        if not value:
+            raise ValueError(f"Task card source file is empty: {prompt_path}")
+        if not value.startswith(entry["marker"]):
+            raise ValueError(
+                f"Task card source file {prompt_path} must start with {entry['marker']!r}"
+            )
+        example_prompts = {}
+        for role, example in entry.get("examples", {}).items():
+            example_path = entry["base_path"] / example["file"]
+            try:
+                example_value = example_path.read_text(encoding="utf-8").strip()
+            except OSError as exc:
+                raise ValueError(
+                    f"Conversation example source file is not readable: {example_path}"
+                ) from exc
+            if not example_value:
+                raise ValueError(f"Conversation example source file is empty: {example_path}")
+            if not example_value.startswith(example["marker"]):
+                raise ValueError(
+                    f"Conversation example source file {example_path} must start with "
+                    f"{example['marker']!r}"
+                )
+            example_prompts[role] = example_value
+        if task_card_id == default_task_card_id:
+            realtime["taskCardId"] = task_card_id
+            realtime["taskCardPrompt"] = value
+            if example_prompts:
+                realtime["conversationExamplePrompts"] = example_prompts
     return {"realtime": realtime}
 
 

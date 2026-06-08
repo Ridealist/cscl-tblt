@@ -2,7 +2,28 @@ export interface RealtimePromptConfig {
   basePrompt: string;
   dominantPrompt: string;
   collaborativePrompt: string;
+  taskCardId: string;
   taskCardPrompt: string;
+}
+
+export interface RealtimeTaskCardSummary {
+  id: string;
+  title: string;
+  topic: string | null;
+  level: string | null;
+  prompt: string;
+  examples?: {
+    dominant?: {
+      file: string;
+      marker: string;
+      prompt: string;
+    };
+    collaborative?: {
+      file: string;
+      marker: string;
+      prompt: string;
+    };
+  };
 }
 
 export type RealtimePromptSource = 'default' | 'custom';
@@ -15,6 +36,7 @@ export interface RealtimePromptMetadata {
 
 export type RealtimePromptState = RealtimePromptConfig &
   RealtimePromptMetadata & {
+    taskCards: RealtimeTaskCardSummary[];
     usingDefault: boolean;
   };
 
@@ -25,12 +47,7 @@ export const DEFAULT_REALTIME_PROMPT_METADATA: RealtimePromptMetadata = {
   source: 'default',
 };
 
-const PROMPT_FIELDS = [
-  'basePrompt',
-  'dominantPrompt',
-  'collaborativePrompt',
-  'taskCardPrompt',
-] as const;
+const PROMPT_FIELDS = ['basePrompt', 'dominantPrompt', 'collaborativePrompt'] as const;
 
 export function validateRealtimePromptConfig(
   value: unknown
@@ -40,7 +57,10 @@ export function validateRealtimePromptConfig(
   }
 
   const source = value as Partial<
-    Record<(typeof PROMPT_FIELDS)[number] | 'passivePrompt', unknown>
+    Record<
+      (typeof PROMPT_FIELDS)[number] | 'passivePrompt' | 'taskCardId' | 'taskCardPrompt',
+      unknown
+    >
   >;
   const config = {} as RealtimePromptConfig;
 
@@ -58,6 +78,23 @@ export function validateRealtimePromptConfig(
     }
     config[field] = text.trim();
   }
+
+  const taskCardId =
+    typeof source.taskCardId === 'string' && source.taskCardId.trim()
+      ? source.taskCardId.trim()
+      : 'school_event_invitation';
+  const taskCardPrompt = source.taskCardPrompt;
+  if (typeof taskCardPrompt !== 'string' || !taskCardPrompt.trim()) {
+    return { ok: false, error: 'taskCardPrompt 값이 비어 있습니다.' };
+  }
+  if (taskCardPrompt.length > REALTIME_PROMPT_MAX_CHARS) {
+    return {
+      ok: false,
+      error: `taskCardPrompt 값은 ${REALTIME_PROMPT_MAX_CHARS.toLocaleString('ko-KR')}자 이하여야 합니다.`,
+    };
+  }
+  config.taskCardId = taskCardId;
+  config.taskCardPrompt = taskCardPrompt.trim();
 
   return { ok: true, config };
 }

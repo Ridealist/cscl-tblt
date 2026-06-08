@@ -13,7 +13,6 @@ import {
 import {
   DEFAULT_REALTIME_PROMPT_METADATA,
   type RealtimePromptMetadata,
-  validateRealtimePromptConfig,
 } from '@/lib/realtime-prompt-config';
 
 type ConnectionDetails = {
@@ -36,7 +35,9 @@ type RuntimeConfig = {
   realtimeResetting: boolean;
 };
 
-type RealtimePromptSnapshot = RealtimePromptMetadata;
+type RealtimePromptSnapshot = RealtimePromptMetadata & {
+  taskCardId?: string;
+};
 
 // don't cache the results
 export const revalidate = 0;
@@ -167,11 +168,10 @@ function inferAgentMode(value: unknown, roomName: string, fallback: AgentMode): 
 function readRealtimePromptSnapshot(): RealtimePromptSnapshot {
   try {
     const raw = JSON.parse(readFileSync(PROMPT_CONFIG_PATH, 'utf-8')) as { realtime?: unknown };
-    const result = validateRealtimePromptConfig(raw.realtime);
-    if (!result.ok || !raw.realtime || typeof raw.realtime !== 'object') {
+    if (!raw.realtime || typeof raw.realtime !== 'object') {
       return DEFAULT_REALTIME_PROMPT_METADATA;
     }
-    const realtime = raw.realtime as Partial<RealtimePromptMetadata>;
+    const realtime = raw.realtime as Partial<RealtimePromptMetadata> & { taskCardId?: unknown };
     return {
       promptId:
         typeof realtime.promptId === 'string' && realtime.promptId
@@ -179,6 +179,10 @@ function readRealtimePromptSnapshot(): RealtimePromptSnapshot {
           : 'custom-unknown',
       savedAt: typeof realtime.savedAt === 'string' && realtime.savedAt ? realtime.savedAt : null,
       source: 'custom',
+      taskCardId:
+        typeof realtime.taskCardId === 'string' && realtime.taskCardId
+          ? realtime.taskCardId
+          : undefined,
     };
   } catch {
     return DEFAULT_REALTIME_PROMPT_METADATA;
@@ -199,6 +203,7 @@ function buildRoomConfig(
           promptId: promptSnapshot?.promptId ?? DEFAULT_REALTIME_PROMPT_METADATA.promptId,
           promptSavedAt: promptSnapshot?.savedAt ?? DEFAULT_REALTIME_PROMPT_METADATA.savedAt,
           promptSource: promptSnapshot?.source ?? DEFAULT_REALTIME_PROMPT_METADATA.source,
+          ...(promptSnapshot?.taskCardId ? { taskCardId: promptSnapshot.taskCardId } : {}),
         }
       : {}),
   });
