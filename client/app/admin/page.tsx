@@ -23,8 +23,18 @@ interface Settings {
   activeClass: number;
   agentMode: AgentMode;
   agentRole: AgentRole;
+  feedbackConditionId: string;
   realtimeResetting: boolean;
 }
+
+interface FeedbackConditionOption {
+  id: string;
+  title: string;
+}
+
+type SettingsResponse = Settings & {
+  feedbackConditions?: FeedbackConditionOption[];
+};
 
 // ─── 룸 관리 섹션 ─────────────────────────────────────────────────────────────
 
@@ -236,6 +246,12 @@ function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+function getFeedbackConditionDescription(id: string) {
+  if (id === 'no_corrective') return '학생 오류를 명시적으로 고치지 않고 의미를 받아 진행';
+  if (id === 'explicit_correction') return 'Step 1 Information Gap에서만 1회 명시적 교정';
+  return 'Realtime feedback condition';
+}
+
 function RealtimeSessionSection() {
   const [rooms, setRooms] = useState<RealtimeRoomStatus[]>([]);
   const [loading, setLoading] = useState(false);
@@ -369,12 +385,16 @@ export default function AdminPage() {
   const [realtimeSessionKey, setRealtimeSessionKey] = useState(0);
   const [pendingRole, setPendingRole] = useState<AgentRole | null>(null);
   const [roleChangeStatus, setRoleChangeStatus] = useState<string | null>(null);
+  const [feedbackConditions, setFeedbackConditions] = useState<FeedbackConditionOption[]>([]);
+  const [pendingFeedbackCondition, setPendingFeedbackCondition] = useState<string | null>(null);
+  const [feedbackChangeStatus, setFeedbackChangeStatus] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/admin/config')
       .then((r) => r.json())
-      .then((s: Settings) => {
+      .then((s: SettingsResponse) => {
         setSettings(s);
+        setFeedbackConditions(s.feedbackConditions ?? []);
         setClassStartInput(String(s.classStart));
         setGroupsInput(String(s.numGroupsPerClass));
       });
@@ -391,8 +411,11 @@ export default function AdminPage() {
       const message = typeof data.error === 'string' ? data.error : '설정 저장에 실패했습니다.';
       throw new Error(message);
     }
-    const saved = data as Settings;
+    const saved = data as SettingsResponse;
     setSettings(saved);
+    if (saved.feedbackConditions) {
+      setFeedbackConditions(saved.feedbackConditions);
+    }
     setClassStartInput(String(saved.classStart));
     setGroupsInput(String(saved.numGroupsPerClass));
     setSavedAt(new Date().toLocaleTimeString('ko-KR'));
@@ -436,16 +459,16 @@ export default function AdminPage() {
     }
   }
 
-  async function terminateRealtimeSessionsAndWait() {
+  async function terminateRealtimeSessionsAndWait(setStatus: (message: string) => void) {
     const startedAt = Date.now();
-    setRoleChangeStatus('개별 세션 목록을 확인하는 중입니다...');
+    setStatus('개별 세션 목록을 확인하는 중입니다...');
     const targetRooms = new Set(await fetchRealtimeRoomNames());
     let remainingRooms = Array.from(targetRooms);
 
     while (remainingRooms.length > 0) {
-      setRoleChangeStatus(`개별 세션 ${remainingRooms.length}개를 종료하는 중입니다...`);
+      setStatus(`개별 세션 ${remainingRooms.length}개를 종료하는 중입니다...`);
       await Promise.all(remainingRooms.map((room) => terminateRealtimeRoom(room)));
-      setRoleChangeStatus('전체 세션 종료 완료를 확인하는 중입니다...');
+      setStatus('전체 세션 종료 완료를 확인하는 중입니다...');
       await sleep(REALTIME_TERMINATION_POLL_MS);
       remainingRooms = (await fetchRealtimeRoomNames()).filter((room) => targetRooms.has(room));
 
@@ -478,7 +501,7 @@ export default function AdminPage() {
       setRoleChangeStatus('학생 재입장을 잠시 중지하는 중입니다...');
       await saveSettings({ ...settings, realtimeResetting: true });
       resetLocked = true;
-      await terminateRealtimeSessionsAndWait();
+      await terminateRealtimeSessionsAndWait(setRoleChangeStatus);
       setRoleChangeStatus('모든 개별 세션 종료를 확인했습니다. 설정을 저장하는 중입니다...');
       await saveSettings({ ...settings, agentRole: role, realtimeResetting: false });
       resetLocked = false;
@@ -493,6 +516,49 @@ export default function AdminPage() {
       setSaving(false);
       setPendingRole(null);
       setRoleChangeStatus(null);
+    }
+  }
+
+  async function handleFeedbackConditionChange(feedbackConditionId: string) {
+    if (!settings || settings.feedbackConditionId === feedbackConditionId) return;
+
+    const selected = feedbackConditions.find((condition) => condition.id === feedbackConditionId);
+    const label = selected?.title ?? feedbackConditionId;
+    const confirmed = window.confirm(
+      [
+        `Feedback Condition을 [${label}]로 변경하면 현재 진행 중인 모든 개별 세션이 종료됩니다.`,
+        '',
+        `변경 후에는 [${label}] 조건으로만 새 개별 세션을 생성할 수 있습니다.`,
+        '',
+        '계속하시겠습니까?',
+      ].join('\n')
+    );
+    if (!confirmed) return;
+
+    setSaving(true);
+    setPendingFeedbackCondition(feedbackConditionId);
+    setFeedbackChangeStatus(null);
+    let resetLocked = false;
+    try {
+      setFeedbackChangeStatus('학생 재입장을 잠시 중지하는 중입니다...');
+      await saveSettings({ ...settings, realtimeResetting: true });
+      resetLocked = true;
+      await terminateRealtimeSessionsAndWait(setFeedbackChangeStatus);
+      setFeedbackChangeStatus('모든 개별 세션 종료를 확인했습니다. 설정을 저장하는 중입니다...');
+      await saveSettings({ ...settings, feedbackConditionId, realtimeResetting: false });
+      resetLocked = false;
+      setRealtimeSessionKey((key) => key + 1);
+    } catch (error) {
+      if (resetLocked) {
+        await saveSettings({ ...settings, realtimeResetting: false }).catch(() => undefined);
+      }
+      const message =
+        error instanceof Error ? error.message : 'Feedback Condition 변경에 실패했습니다.';
+      window.alert(message);
+    } finally {
+      setSaving(false);
+      setPendingFeedbackCondition(null);
+      setFeedbackChangeStatus(null);
     }
   }
 
@@ -678,9 +744,9 @@ export default function AdminPage() {
               {/* 에이전트 상호작용 방식 */}
               <section className="flex flex-col gap-3">
                 <div>
-                  <h2 className="text-foreground text-sm font-semibold">에이전트 상호작용 방식</h2>
+                  <h2 className="text-foreground text-sm font-semibold">Agent Role</h2>
                   <p className="text-muted-foreground text-xs">
-                    실험 조건입니다. 학생 화면에는 표시되지 않습니다.
+                    실험 조건입니다. 에이전트의 상호작용 방식을 정합니다.
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -697,9 +763,7 @@ export default function AdminPage() {
                       }`}
                     >
                       <span className="block text-sm font-semibold">
-                        {pendingRole === role
-                          ? '변경 중...'
-                          : `${getAgentRoleLabel(role)} 에이전트`}
+                        {pendingRole === role ? '변경 중...' : `${getAgentRoleLabel(role)} Agent`}
                       </span>
                       <span
                         className={`mt-1 block text-xs ${settings.agentRole === role ? 'opacity-80' : 'text-muted-foreground'}`}
@@ -722,6 +786,57 @@ export default function AdminPage() {
                       className="border-muted-foreground/30 border-t-foreground size-4 shrink-0 animate-spin rounded-full border-2"
                     />
                     <span>{roleChangeStatus}</span>
+                  </div>
+                )}
+              </section>
+
+              {/* 피드백 조건 */}
+              <section className="flex flex-col gap-3">
+                <div>
+                  <h2 className="text-foreground text-sm font-semibold">Feedback Condition</h2>
+                  <p className="text-muted-foreground text-xs">
+                    실험 조건입니다. 새 개별 세션의 학생 오류 피드백 방식을 정합니다.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {feedbackConditions.map((condition) => (
+                    <button
+                      key={condition.id}
+                      onClick={() => handleFeedbackConditionChange(condition.id)}
+                      disabled={saving}
+                      aria-busy={pendingFeedbackCondition === condition.id}
+                      className={`rounded-lg border px-4 py-3 text-left transition-colors disabled:opacity-50 ${
+                        settings.feedbackConditionId === condition.id
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'border-border hover:bg-muted text-foreground'
+                      }`}
+                    >
+                      <span className="block text-sm font-semibold">
+                        {pendingFeedbackCondition === condition.id ? '변경 중...' : condition.title}
+                      </span>
+                      <span
+                        className={`mt-1 block text-xs ${
+                          settings.feedbackConditionId === condition.id
+                            ? 'opacity-80'
+                            : 'text-muted-foreground'
+                        }`}
+                      >
+                        {getFeedbackConditionDescription(condition.id)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                {pendingFeedbackCondition && feedbackChangeStatus && (
+                  <div
+                    role="status"
+                    aria-live="polite"
+                    className="border-border bg-muted/60 text-muted-foreground flex items-center gap-2 rounded-md border px-3 py-2 text-xs"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="border-muted-foreground/30 border-t-foreground size-4 shrink-0 animate-spin rounded-full border-2"
+                    />
+                    <span>{feedbackChangeStatus}</span>
                   </div>
                 )}
               </section>
@@ -798,12 +913,22 @@ export default function AdminPage() {
                 </span>
               </li>
               {settings.agentMode === 'realtime' && (
-                <li>
-                  상호작용 방식:{' '}
-                  <span className="text-foreground font-semibold">
-                    {getAgentRoleLabel(settings.agentRole)} 에이전트
-                  </span>
-                </li>
+                <>
+                  <li>
+                    상호작용 방식:{' '}
+                    <span className="text-foreground font-semibold">
+                      {getAgentRoleLabel(settings.agentRole)} 에이전트
+                    </span>
+                  </li>
+                  <li>
+                    Feedback Condition:{' '}
+                    <span className="text-foreground font-semibold">
+                      {feedbackConditions.find(
+                        (condition) => condition.id === settings.feedbackConditionId
+                      )?.title ?? settings.feedbackConditionId}
+                    </span>
+                  </li>
+                </>
               )}
               <li>
                 학급 범위:{' '}

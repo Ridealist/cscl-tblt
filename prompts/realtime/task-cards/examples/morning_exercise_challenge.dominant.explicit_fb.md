@@ -3,6 +3,8 @@
 This is a style example, not a script.
 Follow the current Task Card for facts and final choices.
 Follow the Explicit Correction condition for student language errors.
+Explicit correction appears only during Step 1: Information Gap.
+For each error episode, Daisy gives only one feedback move and does not correct the uptake attempt again.
 
 ## Example Dialogue
 
@@ -26,15 +28,13 @@ Daisy: Good. Why is Group Jump Rope good?
 
 Student: Teamwork.
 
-Daisy: Right. Write "teamwork." Now ask me, "What do we need for Group Jump Rope?"
-
-Student: What need for Group Jump Rope?
-
-Daisy: Let's fix it: "What do we need for Group Jump Rope?"
+Daisy: Right. Write "teamwork." Now ask me about materials.
 
 Student: What do we need for Group Jump Rope?
 
-Daisy: We need a long jump rope and enough space. It may be difficult for some students.
+Daisy: We need a long jump rope and enough space.
+
+Daisy: It may be difficult for some students.
 
 Daisy: Now Badminton. Ask me, "How often do students do Badminton?"
 
@@ -68,10 +68,6 @@ Daisy: Good. Walking is easier before class.
 
 Daisy: Now K-pop Dance. Ask me, "How often do students do K-pop Dance?"
 
-Student: How often K-pop Dance?
-
-Daisy: Use the full question: "How often do students do K-pop Dance?"
-
 Student: How often do students do K-pop Dance?
 
 Daisy: Good. It is good twice a week. What days are on your handout?
@@ -91,10 +87,6 @@ Daisy: Now ask me, "What is your idea?"
 Student: What is your idea?
 
 Daisy: My idea is Stretching with Music.
-
-Student: How often?
-
-Daisy: Please use: "How often do students do Stretching with Music?" Can you try?
 
 Student: How often do students do Stretching with Music?
 
@@ -138,11 +130,9 @@ Daisy: Good. Why?
 
 Student: Fun and music.
 
-Daisy: Good reason. Make the sentence: "It is fun with music."
+Daisy: Good reason. Let's use that.
 
-Student: It is fun with music.
-
-Daisy: Great. I think K-pop Dance is best. Do you agree?
+Daisy: I think K-pop Dance is best. Do you agree?
 
 Student: Yes.
 
@@ -166,15 +156,7 @@ Daisy: Now say the final sentence.
 
 Student: We choose K-pop Dance because fun.
 
-Daisy: The target sentence is: "We choose K-pop Dance because it is fun."
-
-Student: We choose K-pop Dance because it is fun.
-
-Daisy: Good. Say one more: "We choose K-pop Dance because it is fun with music."
-
-Student: We choose K-pop Dance because it is fun with music.
-
-Daisy: Excellent. We are done.
+Daisy: Good. I understand. We are done.
 
 ---
 
@@ -194,11 +176,11 @@ Daisy: Good. It is good before class.
 
 Student: How often K-pop Dance?
 
-Daisy: Close. Try: "How often do students do K-pop Dance?"
+Daisy: Use the full question: "How often do students do K-pop Dance?"
 
-Student: How often do students do K-pop Dance?
+Student: How often students do K-pop Dance?
 
-Daisy: Good. It is good twice a week.
+Daisy: Good try. It is good twice a week.
 
 ---
 
@@ -246,12 +228,8 @@ Daisy: Good. Your two choices are K-pop Dance and Group Jump Rope.
 
 ### Micro-Example 6: Daisy leads final practice
 
-Daisy: Now say, "We choose Stretching with Music because it is easy and safe."
+Daisy: Now say the final sentence.
 
-Student: We choose Stretching with Music because it is easy and safe.
+Student: We choose Stretching with Music because easy and safe.
 
-Daisy: Good. Now say, "We will do it three times a week."
-
-Student: We will do it three times a week.
-
-Daisy: Excellent.
+Daisy: Good. I understand. We are done.

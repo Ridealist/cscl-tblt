@@ -13,6 +13,7 @@ import {
 } from '@/lib/realtime-prompt-config';
 
 const PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.json');
+const RUNTIME_CONFIG_PATH = join(process.cwd(), '..', 'config.json');
 const DEFAULT_PROMPT_SOURCE_DIR = join(process.cwd(), '..', 'prompts', 'realtime');
 const PROMPT_SOURCE_MANIFEST_PATH = join(DEFAULT_PROMPT_SOURCE_DIR, 'manifest.json');
 const PROMPT_FIELDS = ['basePrompt', 'dominantPrompt', 'collaborativePrompt'] as const;
@@ -75,6 +76,19 @@ function readPromptMetadata(value: unknown): RealtimePromptMetadata {
     savedAt: typeof source.savedAt === 'string' && source.savedAt ? source.savedAt : null,
     source: 'custom',
   };
+}
+
+async function readRuntimeFeedbackConditionId(): Promise<string | undefined> {
+  try {
+    const raw = JSON.parse(await readFile(RUNTIME_CONFIG_PATH, 'utf-8')) as {
+      feedbackConditionId?: unknown;
+    };
+    return typeof raw.feedbackConditionId === 'string' && raw.feedbackConditionId.trim()
+      ? raw.feedbackConditionId.trim()
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function readDefaultPromptConfigForTask(
@@ -152,8 +166,14 @@ async function readFeedbackConditionConfig(
       };
     })
   );
-  const selectedFeedbackConditionId =
+  const requestedFeedbackConditionId =
     feedbackConditionId || defaultFeedbackConditionId || feedbackConditions[0]?.id;
+  const selectedFeedbackConditionId =
+    requestedFeedbackConditionId && feedbackManifest[requestedFeedbackConditionId]
+      ? requestedFeedbackConditionId
+      : defaultFeedbackConditionId && feedbackManifest[defaultFeedbackConditionId]
+        ? defaultFeedbackConditionId
+        : feedbackConditions[0]?.id;
   const selected = selectedFeedbackConditionId
     ? feedbackManifest[selectedFeedbackConditionId]
     : null;
@@ -304,9 +324,10 @@ async function readPromptConfig(): Promise<RealtimePromptState> {
   try {
     const raw = JSON.parse(await readFile(PROMPT_CONFIG_PATH, 'utf-8')) as PromptFileShape;
     const source = raw.realtime as StoredRealtimePrompt | undefined;
+    const runtimeFeedbackConditionId = await readRuntimeFeedbackConditionId();
     const defaults = await readDefaultPromptConfigForTask(
       typeof source?.taskCardId === 'string' ? source.taskCardId : undefined,
-      typeof source?.feedbackConditionId === 'string' ? source.feedbackConditionId : undefined
+      runtimeFeedbackConditionId
     );
     const result = validateRealtimePromptConfig({
       ...source,
@@ -335,7 +356,7 @@ async function readPromptConfig(): Promise<RealtimePromptState> {
   }
 
   return {
-    ...(await readDefaultPromptConfigForTask()),
+    ...(await readDefaultPromptConfigForTask(undefined, await readRuntimeFeedbackConditionId())),
     ...DEFAULT_REALTIME_PROMPT_METADATA,
     usingDefault: true,
   };
@@ -347,7 +368,6 @@ async function writePromptConfig(config: RealtimePromptConfig): Promise<Realtime
     basePrompt: config.basePrompt,
     dominantPrompt: config.dominantPrompt,
     collaborativePrompt: config.collaborativePrompt,
-    feedbackConditionId: config.feedbackConditionId,
     taskCardId: config.taskCardId,
     ...metadata,
   };
@@ -372,9 +392,10 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+    const runtimeFeedbackConditionId = await readRuntimeFeedbackConditionId();
     const defaults = await readDefaultPromptConfigForTask(
       typeof body?.taskCardId === 'string' ? body.taskCardId : undefined,
-      typeof body?.feedbackConditionId === 'string' ? body.feedbackConditionId : undefined
+      runtimeFeedbackConditionId
     );
     const result = validateRealtimePromptConfig({
       ...body,
@@ -390,6 +411,7 @@ export async function POST(req: Request) {
     const metadata = await writePromptConfig(result.config);
     return NextResponse.json({
       ...result.config,
+      feedbackConditions: defaults.feedbackConditions,
       taskCards: defaults.taskCards,
       ...metadata,
       usingDefault: false,
@@ -410,7 +432,7 @@ export async function DELETE() {
 
   try {
     return NextResponse.json({
-      ...(await readDefaultPromptConfigForTask()),
+      ...(await readDefaultPromptConfigForTask(undefined, await readRuntimeFeedbackConditionId())),
       ...DEFAULT_REALTIME_PROMPT_METADATA,
       usingDefault: true,
     });

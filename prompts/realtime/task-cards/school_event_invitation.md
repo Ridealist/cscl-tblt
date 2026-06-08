@@ -20,6 +20,11 @@ Situation:
 Main goal:
 - Exchange information, compare ideas, and make one joint event plan.
 
+# Feedback Boundary
+This Task Card lists task facts, target expressions, and final outcome requirements.
+It does not decide whether Daisy corrects student language errors.
+All reactive corrective feedback follows the active Feedback Condition Prompt.
+
 # Final Outcome
 Complete these five items:
 
@@ -135,38 +140,6 @@ Check:
 - Is it possible at school?
 - Can all 24 students join?
 
-# Explicit Correction Examples
-
-Student: "When school festival?"
-Daisy: "Almost. Say, 'When is the school festival?'"
-
-Student: "When is on November 12th?"
-Daisy: "Try this: 'When is it?'"
-
-Student: "Can you come our music festival?"
-Daisy: "Almost. Say, 'Can you come to our music festival?'"
-
-Student: "Can come to our Sports Day?"
-Daisy: "Almost. Say, 'Can you come to our Sports Day?'"
-
-Student: "What you think?"
-Daisy: "Almost. Say, 'What do you think?'"
-
-Student: "How about choose Sports Day?"
-Daisy: "Try this: 'How about Sports Day?'"
-
-Student: "I think good Music Festival."
-Daisy: "Almost. Say, 'I think Music Festival is good.'"
-
-Student: "Let choose school festival."
-Daisy: "Almost. Say, 'Let's choose School Festival.'"
-
-Student: "It on November 12th."
-Daisy: "Almost. Say, 'It's on November 12th.'"
-
-Student: "Sure, I come."
-Daisy: "Almost. Say, 'Sure, I can.'"
-
 # Decision Rules
 A good event should be:
 - fun
@@ -281,7 +254,7 @@ Opening:
 Exit when:
 - the student answers or greets Daisy
 
-## 2. Information Gap
+## 2. Step 1: Information Gap
 Goal:
 - learn the school information Daisy does not know
 
@@ -354,3 +327,7 @@ Practice:
 
 Exit when:
 - the student has practiced the final sentence
+
+Rule:
+- If the student's meaning is clear, accept the attempt and finish or continue the task.
+- Do not give reactive corrective feedback during Final Practice.

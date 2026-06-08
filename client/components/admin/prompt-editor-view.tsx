@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { type AgentRole, getAgentRoleLabel, normalizeAgentRole } from '@/lib/agent-role';
 import type {
   RealtimeFeedbackConditionSummary,
   RealtimePromptConfig,
@@ -13,6 +14,10 @@ import type {
 type PromptField = keyof RealtimePromptConfig;
 
 type PromptResponse = RealtimePromptState;
+type RuntimeSettingsResponse = {
+  agentRole?: unknown;
+  feedbackConditionId?: unknown;
+};
 
 type PromptFieldConfig = {
   key: PromptField;
@@ -92,6 +97,7 @@ function confirmPromptChange(action: string) {
 export function PromptEditorView() {
   const [prompt, setPrompt] = useState<RealtimePromptConfig>(EMPTY_PROMPT);
   const [savedPrompt, setSavedPrompt] = useState<RealtimePromptConfig | null>(null);
+  const [selectedAgentRole, setSelectedAgentRole] = useState<AgentRole>('dominant');
   const [usingDefault, setUsingDefault] = useState(false);
   const [promptId, setPromptId] = useState('default');
   const [promptSavedAt, setPromptSavedAt] = useState<string | null>(null);
@@ -106,6 +112,22 @@ export function PromptEditorView() {
   const [examplesOpen, setExamplesOpen] = useState(false);
 
   const hasChanges = useMemo(() => !samePrompt(prompt, savedPrompt), [prompt, savedPrompt]);
+  const selectedRolePromptKey: PromptField =
+    selectedAgentRole === 'collaborative' ? 'collaborativePrompt' : 'dominantPrompt';
+  const selectedRoleLabel = getAgentRoleLabel(selectedAgentRole);
+  const visiblePromptGroups = useMemo(
+    () =>
+      PROMPT_GROUPS.map((group) =>
+        group.title === 'Interlocutor Role Prompt'
+          ? {
+              ...group,
+              description: `운영 설정에서 선택된 ${selectedRoleLabel} 에이전트 역할 규칙입니다.`,
+              fields: group.fields.filter((field) => field.key === selectedRolePromptKey),
+            }
+          : group
+      ),
+    [selectedRoleLabel, selectedRolePromptKey]
+  );
   const selectedTaskCard = useMemo(
     () => taskCards.find((taskCard) => taskCard.id === prompt.taskCardId) ?? null,
     [prompt.taskCardId, taskCards]
@@ -122,23 +144,26 @@ export function PromptEditorView() {
   const exampleEntries = useMemo(() => {
     const examples = selectedTaskCard?.examples;
     if (!examples) return [];
-    return (['dominant', 'collaborative'] as const).flatMap((role) => {
-      const roleExamples = examples[role];
-      if (!roleExamples) return [];
-      const example = roleExamples[prompt.feedbackConditionId] ?? roleExamples.default;
-      if (!example) return [];
-      const roleLabel = role === 'dominant' ? 'Dominant' : 'Collaborative';
-      const feedbackConditionTitle =
-        feedbackConditionTitles.get(prompt.feedbackConditionId) ?? prompt.feedbackConditionId;
-      return [
-        {
-          key: `${role}.${prompt.feedbackConditionId}`,
-          title: `${roleLabel} + ${feedbackConditionTitle}`,
-          value: example.prompt,
-        },
-      ];
-    });
-  }, [feedbackConditionTitles, prompt.feedbackConditionId, selectedTaskCard]);
+    const roleExamples = examples[selectedAgentRole];
+    if (!roleExamples) return [];
+    const example = roleExamples[prompt.feedbackConditionId] ?? roleExamples.default;
+    if (!example) return [];
+    const feedbackConditionTitle =
+      feedbackConditionTitles.get(prompt.feedbackConditionId) ?? prompt.feedbackConditionId;
+    return [
+      {
+        key: `${selectedAgentRole}.${prompt.feedbackConditionId}`,
+        title: `${selectedRoleLabel} + ${feedbackConditionTitle}`,
+        value: example.prompt,
+      },
+    ];
+  }, [
+    feedbackConditionTitles,
+    prompt.feedbackConditionId,
+    selectedAgentRole,
+    selectedRoleLabel,
+    selectedTaskCard,
+  ]);
 
   function formatPromptSavedAt(value: string | null) {
     return value ? new Date(value).toLocaleString('ko-KR') : '저장 이력 없음';
@@ -166,8 +191,12 @@ export function PromptEditorView() {
     setLoading(true);
     setMessage(null);
     try {
-      const res = await fetch('/api/admin/prompts/realtime', { cache: 'no-store' });
+      const [res, settingsRes] = await Promise.all([
+        fetch('/api/admin/prompts/realtime', { cache: 'no-store' }),
+        fetch('/api/admin/config', { cache: 'no-store' }),
+      ]);
       const data: PromptResponse = await res.json();
+      const settings: RuntimeSettingsResponse = await settingsRes.json();
       setPrompt({
         basePrompt: data.basePrompt,
         dominantPrompt: data.dominantPrompt,
@@ -191,6 +220,7 @@ export function PromptEditorView() {
       setUsingDefault(data.usingDefault);
       setPromptId(data.promptId);
       setPromptSavedAt(data.savedAt);
+      setSelectedAgentRole(normalizeAgentRole(settings.agentRole));
     } catch {
       setMessage({ text: '프롬프트를 불러오지 못했습니다.', ok: false });
     } finally {
@@ -311,6 +341,13 @@ export function PromptEditorView() {
               {formatPromptSavedAt(promptSavedAt)}
             </span>
           </span>
+          <span>
+            운영 조합:{' '}
+            <span className="text-foreground font-semibold">
+              {selectedRoleLabel}
+              {selectedFeedbackCondition ? ` + ${selectedFeedbackCondition.title}` : ''}
+            </span>
+          </span>
         </div>
       </section>
 
@@ -318,7 +355,7 @@ export function PromptEditorView() {
         <p className="text-muted-foreground text-sm">프롬프트를 불러오는 중...</p>
       ) : (
         <>
-          {PROMPT_GROUPS.map((group) => {
+          {visiblePromptGroups.map((group) => {
             const singleField = group.fields.length === 1 ? group.fields[0] : null;
 
             return (
@@ -361,57 +398,6 @@ export function PromptEditorView() {
               </section>
             );
           })}
-
-          <section className="flex flex-col gap-3">
-            <div className="flex items-end justify-between gap-3">
-              <div>
-                <h3 className="text-foreground text-sm font-semibold">Feedback Condition</h3>
-                <p className="text-muted-foreground text-xs">
-                  학생 발화 오류에 대한 반응 조건을 선택합니다.
-                </p>
-              </div>
-              <span className="text-muted-foreground shrink-0 font-mono text-xs">
-                {prompt.feedbackPrompt.length.toLocaleString('ko-KR')}자
-              </span>
-            </div>
-            <select
-              value={prompt.feedbackConditionId}
-              disabled={saving}
-              onChange={(e) => {
-                const selected = feedbackConditions.find(
-                  (condition) => condition.id === e.target.value
-                );
-                setExamplesOpen(false);
-                setPrompt((current) => ({
-                  ...current,
-                  feedbackConditionId: e.target.value,
-                  feedbackPrompt: selected?.prompt ?? current.feedbackPrompt,
-                }));
-              }}
-              className="border-input bg-background text-foreground focus:ring-primary w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 disabled:opacity-50"
-            >
-              {feedbackConditions.map((condition) => (
-                <option key={condition.id} value={condition.id}>
-                  {condition.title}
-                </option>
-              ))}
-            </select>
-            {selectedFeedbackCondition && (
-              <p className="text-muted-foreground text-xs">
-                현재 조건:{' '}
-                <span className="text-foreground font-semibold">
-                  {selectedFeedbackCondition.title}
-                </span>
-              </p>
-            )}
-            <textarea
-              value={prompt.feedbackPrompt}
-              rows={14}
-              readOnly
-              spellCheck={false}
-              className="border-input bg-muted/40 text-foreground min-h-32 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none"
-            />
-          </section>
 
           <section className="flex flex-col gap-3">
             <div className="flex items-end justify-between gap-3">
@@ -474,6 +460,14 @@ export function PromptEditorView() {
                     : '등록된 examples 없음'}
                 </span>
               </button>
+              {selectedFeedbackCondition && (
+                <p className="text-muted-foreground px-1 text-xs">
+                  운영 설정의 조합 기준:{' '}
+                  <span className="text-foreground font-semibold">
+                    {selectedRoleLabel} + {selectedFeedbackCondition.title}
+                  </span>
+                </p>
+              )}
 
               {examplesOpen && exampleEntries.length > 0 && (
                 <div className="flex flex-col gap-4">
