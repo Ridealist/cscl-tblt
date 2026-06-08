@@ -2,9 +2,26 @@ export interface RealtimePromptConfig {
   basePrompt: string;
   dominantPrompt: string;
   collaborativePrompt: string;
+  feedbackConditionId: string;
+  feedbackPrompt: string;
   taskCardId: string;
   taskCardPrompt: string;
 }
+
+export interface RealtimeFeedbackConditionSummary {
+  id: string;
+  title: string;
+  prompt: string;
+}
+
+export type RealtimeFeedbackExamples = Record<
+  string,
+  {
+    file: string;
+    marker: string;
+    prompt: string;
+  }
+>;
 
 export interface RealtimeTaskCardSummary {
   id: string;
@@ -13,16 +30,8 @@ export interface RealtimeTaskCardSummary {
   level: string | null;
   prompt: string;
   examples?: {
-    dominant?: {
-      file: string;
-      marker: string;
-      prompt: string;
-    };
-    collaborative?: {
-      file: string;
-      marker: string;
-      prompt: string;
-    };
+    dominant?: RealtimeFeedbackExamples;
+    collaborative?: RealtimeFeedbackExamples;
   };
 }
 
@@ -36,6 +45,7 @@ export interface RealtimePromptMetadata {
 
 export type RealtimePromptState = RealtimePromptConfig &
   RealtimePromptMetadata & {
+    feedbackConditions: RealtimeFeedbackConditionSummary[];
     taskCards: RealtimeTaskCardSummary[];
     usingDefault: boolean;
   };
@@ -58,7 +68,12 @@ export function validateRealtimePromptConfig(
 
   const source = value as Partial<
     Record<
-      (typeof PROMPT_FIELDS)[number] | 'passivePrompt' | 'taskCardId' | 'taskCardPrompt',
+      | (typeof PROMPT_FIELDS)[number]
+      | 'passivePrompt'
+      | 'feedbackConditionId'
+      | 'feedbackPrompt'
+      | 'taskCardId'
+      | 'taskCardPrompt',
       unknown
     >
   >;
@@ -78,6 +93,23 @@ export function validateRealtimePromptConfig(
     }
     config[field] = text.trim();
   }
+
+  const feedbackConditionId =
+    typeof source.feedbackConditionId === 'string' && source.feedbackConditionId.trim()
+      ? source.feedbackConditionId.trim()
+      : 'no_corrective';
+  const feedbackPrompt = source.feedbackPrompt;
+  if (typeof feedbackPrompt !== 'string' || !feedbackPrompt.trim()) {
+    return { ok: false, error: 'feedbackPrompt 값이 비어 있습니다.' };
+  }
+  if (feedbackPrompt.length > REALTIME_PROMPT_MAX_CHARS) {
+    return {
+      ok: false,
+      error: `feedbackPrompt 값은 ${REALTIME_PROMPT_MAX_CHARS.toLocaleString('ko-KR')}자 이하여야 합니다.`,
+    };
+  }
+  config.feedbackConditionId = feedbackConditionId;
+  config.feedbackPrompt = feedbackPrompt.trim();
 
   const taskCardId =
     typeof source.taskCardId === 'string' && source.taskCardId.trim()

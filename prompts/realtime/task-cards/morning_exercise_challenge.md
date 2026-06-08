@@ -32,6 +32,11 @@ Important:
 - Do NOT choose alone.
 - Help the student ask questions, answer questions, compare ideas, and decide through conversation.
 
+# Feedback Boundary
+This Task Card lists task facts, target expressions, and final outcome requirements.
+It does not decide whether Daisy corrects student language errors.
+All reactive corrective feedback follows the active Feedback Condition Prompt.
+
 # Final Outcome
 Complete these five items:
 
@@ -49,7 +54,7 @@ Final practice:
 If materials are useful:
 - "We need ___."
 
-The task is complete only when all five items are decided and the student has practiced the final sentence.
+The task is complete when all five items are decided and the student has attempted the final sentence. Accuracy support follows the active Feedback Condition.
 
 # Target Expressions
 Use these naturally:
@@ -255,44 +260,6 @@ Useful questions Daisy can ask:
 - "Is it good before class?"
 - "Which activity is better for your class?"
 
-# Explicit Correction Examples
-Use explicit correction when the student's target expression is incorrect.
-
-Keep correction short, then continue the task.
-
-Student: "How often Group Jump Rope?"
-Daisy: "Almost. Say, 'How often do students do Group Jump Rope?'"
-
-Student: "How many times a week Walking/Running?"
-Daisy: "Almost. Say, 'How many times a week do students do Walking/Running?'"
-
-Student: "When Badminton?"
-Daisy: "Try this: 'When do students play Badminton?'"
-
-Student: "Why Group Jump Rope good?"
-Daisy: "Almost. Say, 'Why is Group Jump Rope good?'"
-
-Student: "What need for K-pop Dance?"
-Daisy: "Almost. Say, 'What do we need for K-pop Dance?'"
-
-Student: "It good before class."
-Daisy: "Almost. Say, 'It is good before class.'"
-
-Student: "It good once a week."
-Daisy: "Almost. Say, 'It is good once a week.'"
-
-Student: "We need long jump rope."
-Daisy: "Almost. Say, 'We need a long jump rope.'"
-
-Student: "I think Stretching with Music good."
-Daisy: "Almost. Say, 'I think Stretching with Music is good.'"
-
-Student: "Let choose K-pop Dance."
-Daisy: "Almost. Say, 'Let's choose K-pop Dance.'"
-
-Student: "We choose Stretching with Music because easy."
-Daisy: "Almost. Say, 'We choose Stretching with Music because it is easy.'"
-
 # Decision Rules
 A good morning exercise activity should be:
 - short
@@ -403,8 +370,9 @@ Optional supporting sentences:
 
 Rules:
 - keep the final sentence short and easy to say
-- help the student say the final sentence accurately
+- prompt the student to attempt the final sentence; accuracy support follows the active Feedback Condition
 - do not add too many reasons at once
+- if the student makes a language error in the final sentence, follow the active Feedback Condition
 
 # Korean Vocabulary
 If the student asks, give one short English answer.
@@ -563,4 +531,4 @@ Example:
 - "It is good before class."
 
 Exit when:
-- the student has practiced the final sentence clearly
+- the student has attempted the final sentence and Daisy can understand the meaning

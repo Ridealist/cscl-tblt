@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type {
+  RealtimeFeedbackConditionSummary,
   RealtimePromptConfig,
   RealtimePromptState,
   RealtimeTaskCardSummary,
@@ -63,6 +64,8 @@ const EMPTY_PROMPT: RealtimePromptConfig = {
   basePrompt: '',
   dominantPrompt: '',
   collaborativePrompt: '',
+  feedbackConditionId: 'no_corrective',
+  feedbackPrompt: '',
   taskCardId: 'school_event_invitation',
   taskCardPrompt: '',
 };
@@ -73,6 +76,8 @@ function samePrompt(a: RealtimePromptConfig | null, b: RealtimePromptConfig | nu
     a.basePrompt === b.basePrompt &&
     a.dominantPrompt === b.dominantPrompt &&
     a.collaborativePrompt === b.collaborativePrompt &&
+    a.feedbackConditionId === b.feedbackConditionId &&
+    a.feedbackPrompt === b.feedbackPrompt &&
     a.taskCardId === b.taskCardId &&
     a.taskCardPrompt === b.taskCardPrompt
   );
@@ -90,6 +95,9 @@ export function PromptEditorView() {
   const [usingDefault, setUsingDefault] = useState(false);
   const [promptId, setPromptId] = useState('default');
   const [promptSavedAt, setPromptSavedAt] = useState<string | null>(null);
+  const [feedbackConditions, setFeedbackConditions] = useState<RealtimeFeedbackConditionSummary[]>(
+    []
+  );
   const [taskCards, setTaskCards] = useState<RealtimeTaskCardSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -102,20 +110,31 @@ export function PromptEditorView() {
     () => taskCards.find((taskCard) => taskCard.id === prompt.taskCardId) ?? null,
     [prompt.taskCardId, taskCards]
   );
+  const selectedFeedbackCondition = useMemo(
+    () =>
+      feedbackConditions.find((condition) => condition.id === prompt.feedbackConditionId) ?? null,
+    [feedbackConditions, prompt.feedbackConditionId]
+  );
+  const feedbackConditionTitles = useMemo(
+    () => new Map(feedbackConditions.map((condition) => [condition.id, condition.title])),
+    [feedbackConditions]
+  );
   const exampleEntries = useMemo(() => {
     const examples = selectedTaskCard?.examples;
     if (!examples) return [];
-    return [
-      { role: 'dominant', title: 'Dominant Example', value: examples.dominant?.prompt },
-      {
-        role: 'collaborative',
-        title: 'Collaborative Example',
-        value: examples.collaborative?.prompt,
-      },
-    ].filter((entry): entry is { role: string; title: string; value: string } =>
-      Boolean(entry.value)
-    );
-  }, [selectedTaskCard]);
+    return (['dominant', 'collaborative'] as const).flatMap((role) => {
+      const roleExamples = examples[role];
+      if (!roleExamples) return [];
+      const roleLabel = role === 'dominant' ? 'Dominant' : 'Collaborative';
+      return Object.entries(roleExamples).map(([feedbackConditionId, example]) => ({
+        key: `${role}.${feedbackConditionId}`,
+        title: `${roleLabel} + ${
+          feedbackConditionTitles.get(feedbackConditionId) ?? feedbackConditionId
+        }`,
+        value: example.prompt,
+      }));
+    });
+  }, [feedbackConditionTitles, selectedTaskCard]);
 
   function formatPromptSavedAt(value: string | null) {
     return value ? new Date(value).toLocaleString('ko-KR') : '저장 이력 없음';
@@ -149,6 +168,8 @@ export function PromptEditorView() {
         basePrompt: data.basePrompt,
         dominantPrompt: data.dominantPrompt,
         collaborativePrompt: data.collaborativePrompt,
+        feedbackConditionId: data.feedbackConditionId,
+        feedbackPrompt: data.feedbackPrompt,
         taskCardId: data.taskCardId,
         taskCardPrompt: data.taskCardPrompt,
       });
@@ -156,9 +177,12 @@ export function PromptEditorView() {
         basePrompt: data.basePrompt,
         dominantPrompt: data.dominantPrompt,
         collaborativePrompt: data.collaborativePrompt,
+        feedbackConditionId: data.feedbackConditionId,
+        feedbackPrompt: data.feedbackPrompt,
         taskCardId: data.taskCardId,
         taskCardPrompt: data.taskCardPrompt,
       });
+      setFeedbackConditions(data.feedbackConditions);
       setTaskCards(data.taskCards);
       setUsingDefault(data.usingDefault);
       setPromptId(data.promptId);
@@ -195,11 +219,14 @@ export function PromptEditorView() {
         basePrompt: saved.basePrompt,
         dominantPrompt: saved.dominantPrompt,
         collaborativePrompt: saved.collaborativePrompt,
+        feedbackConditionId: saved.feedbackConditionId,
+        feedbackPrompt: saved.feedbackPrompt,
         taskCardId: saved.taskCardId,
         taskCardPrompt: saved.taskCardPrompt,
       };
       setPrompt(next);
       setSavedPrompt(next);
+      setFeedbackConditions(saved.feedbackConditions);
       setTaskCards(saved.taskCards);
       setUsingDefault(saved.usingDefault);
       setPromptId(saved.promptId);
@@ -230,11 +257,14 @@ export function PromptEditorView() {
         basePrompt: saved.basePrompt,
         dominantPrompt: saved.dominantPrompt,
         collaborativePrompt: saved.collaborativePrompt,
+        feedbackConditionId: saved.feedbackConditionId,
+        feedbackPrompt: saved.feedbackPrompt,
         taskCardId: saved.taskCardId,
         taskCardPrompt: saved.taskCardPrompt,
       };
       setPrompt(next);
       setSavedPrompt(next);
+      setFeedbackConditions(saved.feedbackConditions);
       setTaskCards(saved.taskCards);
       setUsingDefault(saved.usingDefault);
       setPromptId(saved.promptId);
@@ -331,6 +361,57 @@ export function PromptEditorView() {
           <section className="flex flex-col gap-3">
             <div className="flex items-end justify-between gap-3">
               <div>
+                <h3 className="text-foreground text-sm font-semibold">Feedback Condition</h3>
+                <p className="text-muted-foreground text-xs">
+                  학생 발화 오류에 대한 반응 조건을 선택합니다.
+                </p>
+              </div>
+              <span className="text-muted-foreground shrink-0 font-mono text-xs">
+                {prompt.feedbackPrompt.length.toLocaleString('ko-KR')}자
+              </span>
+            </div>
+            <select
+              value={prompt.feedbackConditionId}
+              disabled={saving}
+              onChange={(e) => {
+                const selected = feedbackConditions.find(
+                  (condition) => condition.id === e.target.value
+                );
+                setExamplesOpen(false);
+                setPrompt((current) => ({
+                  ...current,
+                  feedbackConditionId: e.target.value,
+                  feedbackPrompt: selected?.prompt ?? current.feedbackPrompt,
+                }));
+              }}
+              className="border-input bg-background text-foreground focus:ring-primary w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 disabled:opacity-50"
+            >
+              {feedbackConditions.map((condition) => (
+                <option key={condition.id} value={condition.id}>
+                  {condition.title}
+                </option>
+              ))}
+            </select>
+            {selectedFeedbackCondition && (
+              <p className="text-muted-foreground text-xs">
+                현재 조건:{' '}
+                <span className="text-foreground font-semibold">
+                  {selectedFeedbackCondition.title}
+                </span>
+              </p>
+            )}
+            <textarea
+              value={prompt.feedbackPrompt}
+              rows={14}
+              readOnly
+              spellCheck={false}
+              className="border-input bg-muted/40 text-foreground min-h-32 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none"
+            />
+          </section>
+
+          <section className="flex flex-col gap-3">
+            <div className="flex items-end justify-between gap-3">
+              <div>
                 <h3 className="text-foreground text-sm font-semibold">Task Card</h3>
                 <p className="text-muted-foreground text-xs">
                   개별 세션에 적용할 주제별 과업 카드를 선택합니다.
@@ -394,7 +475,7 @@ export function PromptEditorView() {
                 <div className="flex flex-col gap-4">
                   {exampleEntries.map((entry) => (
                     <div
-                      key={entry.role}
+                      key={entry.key}
                       className="border-border flex flex-col gap-2 border-l pl-4"
                     >
                       <div className="flex items-end justify-between gap-3">

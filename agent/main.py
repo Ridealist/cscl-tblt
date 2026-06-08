@@ -24,6 +24,7 @@ from prompt_pipeline import build_prompt as build_pipeline_prompt
 from prompt_pipeline import _clean_names
 from prompt_realtime import build_prompt as build_realtime_prompt
 from prompt_realtime import get_opening_sentence as get_realtime_opening_sentence
+from prompt_realtime import normalize_feedback_condition as normalize_realtime_feedback_condition
 from prompt_realtime import normalize_role as normalize_realtime_role
 from openai.types.beta.realtime.session import TurnDetection
 
@@ -116,6 +117,23 @@ def _metadata_task_card_id(metadata) -> str | None:
     return task_card_id.strip() if isinstance(task_card_id, str) and task_card_id.strip() else None
 
 
+def _metadata_feedback_condition_id(metadata) -> str | None:
+    if not metadata:
+        return None
+    try:
+        parsed = json.loads(metadata) if isinstance(metadata, str) else metadata
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    feedback_condition_id = parsed.get("feedbackConditionId")
+    return (
+        normalize_realtime_feedback_condition(feedback_condition_id)
+        if isinstance(feedback_condition_id, str) and feedback_condition_id.strip()
+        else None
+    )
+
+
 def _resolve_realtime_job_role(ctx: JobContext, fallback: str) -> str:
     for metadata in (
         getattr(ctx.job, "metadata", None),
@@ -137,6 +155,18 @@ def _resolve_realtime_task_card_id(ctx: JobContext) -> str | None:
         task_card_id = _metadata_task_card_id(metadata)
         if task_card_id:
             return task_card_id
+    return None
+
+
+def _resolve_realtime_feedback_condition_id(ctx: JobContext) -> str | None:
+    for metadata in (
+        getattr(ctx.job, "metadata", None),
+        getattr(ctx.room, "metadata", None),
+        getattr(getattr(ctx.job, "room", None), "metadata", None),
+    ):
+        feedback_condition_id = _metadata_feedback_condition_id(metadata)
+        if feedback_condition_id:
+            return feedback_condition_id
     return None
 
 
@@ -346,25 +376,48 @@ async def _run(ctx: JobContext) -> None:
 
 
 class RealtimeAssistant(Agent):
-    def __init__(self, get_name_fn, role: str, task_card_id: str | None = None) -> None:
-        super().__init__(instructions=build_realtime_prompt(role=role, task_card_id=task_card_id))
+    def __init__(
+        self,
+        get_name_fn,
+        role: str,
+        task_card_id: str | None = None,
+        feedback_condition_id: str | None = None,
+    ) -> None:
+        super().__init__(
+            instructions=build_realtime_prompt(
+                role=role,
+                task_card_id=task_card_id,
+                feedback_condition_id=feedback_condition_id,
+            )
+        )
         self._get_name = get_name_fn
         self._role = role
         self._task_card_id = task_card_id
-        self._opening_sentence = get_realtime_opening_sentence(task_card_id)
+        self._feedback_condition_id = feedback_condition_id
+        self._opening_sentence = get_realtime_opening_sentence(
+            task_card_id,
+            feedback_condition_id,
+        )
 
     async def on_enter(self) -> None:
         """1:1 realtime 세션 입장 직후 참가자 이름을 반영하고 첫 턴을 생성."""
         await asyncio.sleep(1.0)
         name = self._get_name()
         log.info(
-            "Realtime assistant entering session: role=%s task_card_id=%s participant_name=%s",
+            "Realtime assistant entering session: role=%s feedback_condition_id=%s "
+            "task_card_id=%s participant_name=%s",
             self._role,
+            self._feedback_condition_id,
             self._task_card_id,
             name,
         )
         await self.update_instructions(
-            build_realtime_prompt(name, role=self._role, task_card_id=self._task_card_id)
+            build_realtime_prompt(
+                name,
+                role=self._role,
+                task_card_id=self._task_card_id,
+                feedback_condition_id=self._feedback_condition_id,
+            )
         )
 
         instruction = (
@@ -379,20 +432,33 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
     """1:1 OpenAI Realtime 세션 로직."""
     role = _resolve_realtime_job_role(ctx, fallback=role)
     task_card_id = _resolve_realtime_task_card_id(ctx)
-    ctx.log_context_fields = {"room": ctx.room.name, "mode": "realtime", "role": role}
+    feedback_condition_id = _resolve_realtime_feedback_condition_id(ctx)
+    ctx.log_context_fields = {
+        "room": ctx.room.name,
+        "mode": "realtime",
+        "role": role,
+        "feedback_condition_id": feedback_condition_id,
+    }
     log.info(
-        "Starting realtime job: room=%s room_sid=%s job_id=%s role=%s task_card_id=%s metadata=%s",
+        "Starting realtime job: room=%s room_sid=%s job_id=%s role=%s "
+        "feedback_condition_id=%s task_card_id=%s metadata=%s",
         ctx.room.name,
         ctx.job.room.sid,
         getattr(ctx.job, "id", None),
         role,
+        feedback_condition_id,
         task_card_id,
         getattr(ctx.job, "metadata", None),
     )
     conv_logger = ConversationLogger(
         ctx.job.room.sid,
         ctx.room.name,
-        metadata={"agent_mode": "realtime", "agent_role": role, "task_card_id": task_card_id},
+        metadata={
+            "agent_mode": "realtime",
+            "agent_role": role,
+            "feedback_condition_id": feedback_condition_id,
+            "task_card_id": task_card_id,
+        },
     )
     egress = EgressRecorder(ctx.room.name, conv_logger.session_id)
 
@@ -414,6 +480,7 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
         get_name_fn=lambda: participant["name"],
         role=role,
         task_card_id=task_card_id,
+        feedback_condition_id=feedback_condition_id,
     )
 
     session = AgentSession(
@@ -486,7 +553,12 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
         if participant["identity"] is None:
             _register_participant(p)
             await assistant.update_instructions(
-                build_realtime_prompt(participant["name"], role=role, task_card_id=task_card_id)
+                build_realtime_prompt(
+                    participant["name"],
+                    role=role,
+                    task_card_id=task_card_id,
+                    feedback_condition_id=feedback_condition_id,
+                )
             )
         else:
             log.info(

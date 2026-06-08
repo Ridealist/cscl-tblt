@@ -1,12 +1,22 @@
 import json
 
 import prompt_realtime
-from prompt_realtime import build_prompt, get_opening_sentence, normalize_role
+from prompt_realtime import build_prompt, get_opening_sentence, normalize_feedback_condition, normalize_role
 
 
 def _read_realtime_config(path):
     with open(path, encoding="utf-8") as f:
-        return json.load(f)["realtime"]
+        config = json.load(f)["realtime"]
+    if "feedbackPrompt" not in config:
+        source_dir = prompt_realtime.DEFAULT_PROMPT_SOURCE_DIR
+        manifest = json.loads(prompt_realtime.PROMPT_SOURCE_MANIFEST_PATH.read_text(encoding="utf-8"))
+        feedbacks = json.loads((source_dir / manifest["feedbackConditionManifest"]).read_text(encoding="utf-8"))
+        feedback_id = config.get("feedbackConditionId", manifest["defaultFeedbackConditionId"])
+        config["feedbackConditionId"] = feedback_id
+        config["feedbackPrompt"] = (
+            source_dir / "feedbacks" / feedbacks[feedback_id]["file"]
+        ).read_text(encoding="utf-8").strip()
+    return config
 
 
 def _read_default_prompt_sources():
@@ -16,6 +26,12 @@ def _read_default_prompt_sources():
         key: (source_dir / manifest[key]["file"]).read_text(encoding="utf-8").strip()
         for key in prompt_realtime.PROMPT_FIELDS
     }
+    feedbacks = json.loads((source_dir / manifest["feedbackConditionManifest"]).read_text(encoding="utf-8"))
+    feedback_id = manifest["defaultFeedbackConditionId"]
+    config["feedbackConditionId"] = feedback_id
+    config["feedbackPrompt"] = (
+        source_dir / "feedbacks" / feedbacks[feedback_id]["file"]
+    ).read_text(encoding="utf-8").strip()
     task_cards = json.loads((source_dir / manifest["taskCardManifest"]).read_text(encoding="utf-8"))
     task_card_id = manifest["defaultTaskCardId"]
     config["taskCardId"] = task_card_id
@@ -24,10 +40,11 @@ def _read_default_prompt_sources():
     ).read_text(encoding="utf-8").strip()
     examples = task_cards[task_card_id].get("examples", {})
     conversation_examples = {}
-    for role, example in examples.items():
-        conversation_examples[role] = (
-            source_dir / "task-cards" / example["file"]
-        ).read_text(encoding="utf-8").strip()
+    for role, role_examples in examples.items():
+        for feedback_condition_id, example in role_examples.items():
+            conversation_examples[f"{role}.{feedback_condition_id}"] = (
+                source_dir / "task-cards" / example["file"]
+            ).read_text(encoding="utf-8").strip()
     if conversation_examples:
         config["conversationExamplePrompts"] = conversation_examples
     return config
@@ -35,8 +52,14 @@ def _read_default_prompt_sources():
 
 def _expected_prompt(config, role: str) -> str:
     role_key = f"{role}Prompt"
-    prompt = f"{config['basePrompt']}\n\n{config[role_key]}\n\n{config['taskCardPrompt']}"
-    example = config.get("conversationExamplePrompts", {}).get(role)
+    prompt = (
+        f"{config['basePrompt']}\n\n{config[role_key]}\n\n"
+        f"{config['feedbackPrompt']}\n\n{config['taskCardPrompt']}"
+    )
+    feedback_condition_id = normalize_feedback_condition(config.get("feedbackConditionId"))
+    example = config.get("conversationExamplePrompts", {}).get(
+        f"{role}.{feedback_condition_id}"
+    ) or config.get("conversationExamplePrompts", {}).get(role)
     return f"{prompt}\n\n{example}" if example else prompt
 
 
@@ -56,6 +79,8 @@ def _write_prompt_source_with_examples(source_dir):
             "file": "roles/collaborative.md",
             "marker": "# INTERLOCUTOR ROLE PROMPT: Collaborative"
           },
+          "feedbackConditionManifest": "feedbacks/manifest.json",
+          "defaultFeedbackConditionId": "no_corrective",
           "taskCardManifest": "task-cards/manifest.json",
           "defaultTaskCardId": "example"
         }
@@ -72,6 +97,30 @@ def _write_prompt_source_with_examples(source_dir):
         "# INTERLOCUTOR ROLE PROMPT: Collaborative\ncollaborative",
         encoding="utf-8",
     )
+    (source_dir / "feedbacks").mkdir()
+    (source_dir / "feedbacks" / "manifest.json").write_text(
+        """
+        {
+          "no_corrective": {
+            "file": "no_corrective.md",
+            "marker": "# FEEDBACK CONDITION PROMPT: No Corrective Feedback"
+          },
+          "explicit_correction": {
+            "file": "explicit_correction.md",
+            "marker": "# FEEDBACK CONDITION PROMPT: Explicit Correction"
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+    (source_dir / "feedbacks" / "no_corrective.md").write_text(
+        "# FEEDBACK CONDITION PROMPT: No Corrective Feedback\nno feedback",
+        encoding="utf-8",
+    )
+    (source_dir / "feedbacks" / "explicit_correction.md").write_text(
+        "# FEEDBACK CONDITION PROMPT: Explicit Correction\nexplicit feedback",
+        encoding="utf-8",
+    )
     (task_cards_dir / "manifest.json").write_text(
         """
         {
@@ -80,12 +129,24 @@ def _write_prompt_source_with_examples(source_dir):
             "marker": "# TASK CARD:",
             "examples": {
               "dominant": {
-                "file": "examples/example.dominant.md",
-                "marker": "# CONVERSATION EXAMPLE: Dominant"
+                "no_corrective": {
+                  "file": "examples/example.dominant.no_fb.md",
+                  "marker": "# CONVERSATION EXAMPLE: Dominant + No Corrective Feedback"
+                },
+                "explicit_correction": {
+                  "file": "examples/example.dominant.explicit_fb.md",
+                  "marker": "# CONVERSATION EXAMPLE: Dominant + Explicit Correction"
+                }
               },
               "collaborative": {
-                "file": "examples/example.collaborative.md",
-                "marker": "# CONVERSATION EXAMPLE: Collaborative"
+                "no_corrective": {
+                  "file": "examples/example.collaborative.no_fb.md",
+                  "marker": "# CONVERSATION EXAMPLE: Collaborative + No Corrective Feedback"
+                },
+                "explicit_correction": {
+                  "file": "examples/example.collaborative.explicit_fb.md",
+                  "marker": "# CONVERSATION EXAMPLE: Collaborative + Explicit Correction"
+                }
               }
             }
           }
@@ -94,12 +155,20 @@ def _write_prompt_source_with_examples(source_dir):
         encoding="utf-8",
     )
     (task_cards_dir / "task_card.md").write_text("# TASK CARD: Example\ntask", encoding="utf-8")
-    (examples_dir / "example.dominant.md").write_text(
-        "# CONVERSATION EXAMPLE: Dominant\ndominant example",
+    (examples_dir / "example.dominant.no_fb.md").write_text(
+        "# CONVERSATION EXAMPLE: Dominant + No Corrective Feedback\ndominant no feedback example",
         encoding="utf-8",
     )
-    (examples_dir / "example.collaborative.md").write_text(
-        "# CONVERSATION EXAMPLE: Collaborative\ncollaborative example",
+    (examples_dir / "example.dominant.explicit_fb.md").write_text(
+        "# CONVERSATION EXAMPLE: Dominant + Explicit Correction\ndominant explicit feedback example",
+        encoding="utf-8",
+    )
+    (examples_dir / "example.collaborative.no_fb.md").write_text(
+        "# CONVERSATION EXAMPLE: Collaborative + No Corrective Feedback\ncollaborative no feedback example",
+        encoding="utf-8",
+    )
+    (examples_dir / "example.collaborative.explicit_fb.md").write_text(
+        "# CONVERSATION EXAMPLE: Collaborative + Explicit Correction\ncollaborative explicit feedback example",
         encoding="utf-8",
     )
 
@@ -127,6 +196,7 @@ def test_realtime_prompt_defaults_to_dominant_role(tmp_path, monkeypatch) -> Non
 
     assert normalize_role("unknown") == "dominant"
     assert build_prompt(role="unknown") == build_prompt(role="dominant")
+    assert normalize_feedback_condition("unknown") == "no_corrective"
 
 
 def test_realtime_prompt_maps_legacy_passive_to_collaborative(tmp_path, monkeypatch) -> None:
@@ -161,6 +231,7 @@ def test_realtime_prompt_uses_runtime_config(tmp_path, monkeypatch) -> None:
             "basePrompt": "Runtime base prompt.",
             "dominantPrompt": "Runtime dominant role.",
             "collaborativePrompt": "Runtime collaborative role.",
+            "feedbackPrompt": "Runtime feedback condition.",
             "taskCardPrompt": "Runtime task card."
           }
         }
@@ -194,9 +265,65 @@ def test_realtime_prompt_uses_runtime_task_card_id(tmp_path, monkeypatch) -> Non
 
     assert prompt.startswith(
         "Runtime base prompt.\n\nRuntime dominant role.\n\n"
-        "# TASK CARD: Plan a School Event and Invite Friends"
+        "# FEEDBACK CONDITION PROMPT: No Corrective Feedback"
     )
+    assert "# TASK CARD: Plan a School Event and Invite Friends" in prompt
     assert "Runtime task card." not in prompt
+
+
+def test_realtime_prompt_uses_runtime_feedback_condition_id(
+    tmp_path, monkeypatch
+) -> None:
+    config_path = tmp_path / "prompt_config.json"
+    config_path.write_text(
+        """
+        {
+          "realtime": {
+            "basePrompt": "Runtime base prompt.",
+            "dominantPrompt": "Runtime dominant role.",
+            "collaborativePrompt": "Runtime collaborative role.",
+            "feedbackConditionId": "explicit_correction",
+            "taskCardId": "morning_exercise_challenge"
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", config_path)
+    prompt = build_prompt(role="dominant")
+
+    assert "# FEEDBACK CONDITION PROMPT: Explicit Correction" in prompt
+    assert "# FEEDBACK CONDITION PROMPT: No Corrective Feedback" not in prompt
+    assert "# CONVERSATION EXAMPLE: Dominant + Explicit Correction" in prompt
+
+
+def test_realtime_prompt_call_feedback_condition_overrides_runtime_selection(
+    tmp_path, monkeypatch
+) -> None:
+    config_path = tmp_path / "prompt_config.json"
+    config_path.write_text(
+        """
+        {
+          "realtime": {
+            "basePrompt": "Runtime base prompt.",
+            "dominantPrompt": "Runtime dominant role.",
+            "collaborativePrompt": "Runtime collaborative role.",
+            "feedbackConditionId": "explicit_correction",
+            "taskCardId": "morning_exercise_challenge"
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", config_path)
+    prompt = build_prompt(
+        role="dominant",
+        feedback_condition_id="no_corrective",
+    )
+
+    assert "# FEEDBACK CONDITION PROMPT: No Corrective Feedback" in prompt
+    assert "# FEEDBACK CONDITION PROMPT: Explicit Correction" not in prompt
+    assert "# CONVERSATION EXAMPLE: Dominant + No Corrective Feedback" in prompt
 
 
 def test_realtime_prompt_call_task_card_id_overrides_runtime_selection(
@@ -261,12 +388,15 @@ def test_realtime_prompt_appends_role_specific_conversation_example(tmp_path, mo
     collaborative_prompt = build_prompt(role="collaborative")
 
     assert dominant_prompt.endswith(
-        "# TASK CARD: Example\ntask\n\n# CONVERSATION EXAMPLE: Dominant\ndominant example"
+        "# TASK CARD: Example\ntask\n\n"
+        "# CONVERSATION EXAMPLE: Dominant + No Corrective Feedback\n"
+        "dominant no feedback example"
     )
     assert "# CONVERSATION EXAMPLE: Collaborative" not in dominant_prompt
     assert collaborative_prompt.endswith(
         "# TASK CARD: Example\ntask\n\n"
-        "# CONVERSATION EXAMPLE: Collaborative\ncollaborative example"
+        "# CONVERSATION EXAMPLE: Collaborative + No Corrective Feedback\n"
+        "collaborative no feedback example"
     )
     assert "# CONVERSATION EXAMPLE: Dominant" not in collaborative_prompt
 
@@ -282,6 +412,7 @@ def test_realtime_prompt_uses_legacy_passive_prompt_runtime_config(
             "basePrompt": "Runtime base prompt.",
             "dominantPrompt": "Runtime dominant role.",
             "passivePrompt": "Runtime passive role.",
+            "feedbackPrompt": "Runtime feedback condition.",
             "taskCardPrompt": "Runtime task card."
           }
         }
@@ -291,7 +422,8 @@ def test_realtime_prompt_uses_legacy_passive_prompt_runtime_config(
     monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", config_path)
 
     assert build_prompt(role="collaborative") == (
-        "Runtime base prompt.\n\nRuntime passive role.\n\nRuntime task card."
+        "Runtime base prompt.\n\nRuntime passive role.\n\n"
+        "Runtime feedback condition.\n\nRuntime task card."
     )
 
 
@@ -306,6 +438,7 @@ def test_realtime_prompt_runtime_config_overrides_markdown_sources(
             "basePrompt": "Runtime base prompt.",
             "dominantPrompt": "Runtime dominant role.",
             "collaborativePrompt": "Runtime collaborative role.",
+            "feedbackPrompt": "Runtime feedback condition.",
             "taskCardPrompt": "Runtime task card."
           }
         }
@@ -316,7 +449,10 @@ def test_realtime_prompt_runtime_config_overrides_markdown_sources(
 
     prompt = build_prompt(role="dominant")
 
-    assert prompt == "Runtime base prompt.\n\nRuntime dominant role.\n\nRuntime task card."
+    assert prompt == (
+        "Runtime base prompt.\n\nRuntime dominant role.\n\n"
+        "Runtime feedback condition.\n\nRuntime task card."
+    )
     assert prompt != _expected_prompt(_read_default_prompt_sources(), "dominant")
 
 

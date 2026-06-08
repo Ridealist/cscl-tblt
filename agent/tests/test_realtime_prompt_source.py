@@ -16,6 +16,26 @@ def _load_check_module():
     return module
 
 
+def _write_feedback_source(source: Path) -> None:
+    feedbacks = source / "feedbacks"
+    feedbacks.mkdir()
+    (feedbacks / "manifest.json").write_text(
+        """
+        {
+          "no_corrective": {
+            "file": "no_corrective.md",
+            "marker": "# FEEDBACK CONDITION PROMPT: No Corrective Feedback"
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+    (feedbacks / "no_corrective.md").write_text(
+        "# FEEDBACK CONDITION PROMPT: No Corrective Feedback\nno feedback",
+        encoding="utf-8",
+    )
+
+
 def test_prompt_sources_are_read_as_realtime_prompt_config() -> None:
     check_prompts = _load_check_module()
     config = check_prompts.read_prompt_source(SOURCE_PATH)
@@ -27,6 +47,8 @@ def test_prompt_sources_are_read_as_realtime_prompt_config() -> None:
         "basePrompt",
         "dominantPrompt",
         "collaborativePrompt",
+        "feedbackConditionId",
+        "feedbackPrompt",
         "taskCardId",
         "taskCardPrompt",
         "conversationExamplePrompts",
@@ -40,8 +62,10 @@ def test_prompt_sources_are_read_as_realtime_prompt_config() -> None:
         task_cards[task_card_id]["base_path"] / task_cards[task_card_id]["file"]
     ).read_text(encoding="utf-8").strip()
     assert set(config["realtime"]["conversationExamplePrompts"]) == {
-        "dominant",
-        "collaborative",
+        "dominant.no_corrective",
+        "dominant.explicit_correction",
+        "collaborative.no_corrective",
+        "collaborative.explicit_correction",
     }
 
 
@@ -108,6 +132,8 @@ def test_prompt_folder_rejects_wrong_file_heading(tmp_path) -> None:
             "file": "collaborative.md",
             "marker": "# INTERLOCUTOR ROLE PROMPT: Collaborative"
           },
+          "feedbackConditionManifest": "feedbacks/manifest.json",
+          "defaultFeedbackConditionId": "no_corrective",
           "taskCardManifest": "task-cards/manifest.json",
           "defaultTaskCardId": "example"
         }
@@ -157,6 +183,8 @@ def test_prompt_folder_rejects_missing_file(tmp_path) -> None:
             "file": "collaborative.md",
             "marker": "# INTERLOCUTOR ROLE PROMPT: Collaborative"
           },
+          "feedbackConditionManifest": "feedbacks/manifest.json",
+          "defaultFeedbackConditionId": "no_corrective",
           "taskCardManifest": "task-cards/manifest.json",
           "defaultTaskCardId": "example"
         }
@@ -198,12 +226,15 @@ def test_prompt_folder_reads_optional_conversation_examples(tmp_path) -> None:
             "file": "roles/collaborative.md",
             "marker": "# INTERLOCUTOR ROLE PROMPT: Collaborative"
           },
+          "feedbackConditionManifest": "feedbacks/manifest.json",
+          "defaultFeedbackConditionId": "no_corrective",
           "taskCardManifest": "task-cards/manifest.json",
           "defaultTaskCardId": "example"
         }
         """,
         encoding="utf-8",
     )
+    _write_feedback_source(source)
     task_cards = source / "task-cards"
     examples = task_cards / "examples"
     examples.mkdir(parents=True)
@@ -242,7 +273,7 @@ def test_prompt_folder_reads_optional_conversation_examples(tmp_path) -> None:
     config = check_prompts.read_prompt_folder(source)
 
     assert config["realtime"]["conversationExamplePrompts"] == {
-        "dominant": "# CONVERSATION EXAMPLE: Dominant\ndominant example"
+        "dominant.default": "# CONVERSATION EXAMPLE: Dominant\ndominant example"
     }
 
 
@@ -263,12 +294,15 @@ def test_prompt_folder_rejects_wrong_conversation_example_heading(tmp_path) -> N
             "file": "roles/collaborative.md",
             "marker": "# INTERLOCUTOR ROLE PROMPT: Collaborative"
           },
+          "feedbackConditionManifest": "feedbacks/manifest.json",
+          "defaultFeedbackConditionId": "no_corrective",
           "taskCardManifest": "task-cards/manifest.json",
           "defaultTaskCardId": "example"
         }
         """,
         encoding="utf-8",
     )
+    _write_feedback_source(source)
     task_cards = source / "task-cards"
     examples = task_cards / "examples"
     examples.mkdir(parents=True)

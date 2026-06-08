@@ -11,6 +11,8 @@
     "file": "roles/collaborative.md",
     "marker": "# INTERLOCUTOR ROLE PROMPT: Collaborative"
   },
+  "feedbackConditionManifest": "feedbacks/manifest.json",
+  "defaultFeedbackConditionId": "no_corrective",
   "taskCardManifest": "task-cards/manifest.json",
   "defaultTaskCardId": "morning_exercise_challenge"
 }

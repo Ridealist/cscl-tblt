@@ -37,6 +37,7 @@ type RuntimeConfig = {
 
 type RealtimePromptSnapshot = RealtimePromptMetadata & {
   taskCardId?: string;
+  feedbackConditionId?: string;
 };
 
 // don't cache the results
@@ -171,7 +172,10 @@ function readRealtimePromptSnapshot(): RealtimePromptSnapshot {
     if (!raw.realtime || typeof raw.realtime !== 'object') {
       return DEFAULT_REALTIME_PROMPT_METADATA;
     }
-    const realtime = raw.realtime as Partial<RealtimePromptMetadata> & { taskCardId?: unknown };
+    const realtime = raw.realtime as Partial<RealtimePromptMetadata> & {
+      taskCardId?: unknown;
+      feedbackConditionId?: unknown;
+    };
     return {
       promptId:
         typeof realtime.promptId === 'string' && realtime.promptId
@@ -182,6 +186,10 @@ function readRealtimePromptSnapshot(): RealtimePromptSnapshot {
       taskCardId:
         typeof realtime.taskCardId === 'string' && realtime.taskCardId
           ? realtime.taskCardId
+          : undefined,
+      feedbackConditionId:
+        typeof realtime.feedbackConditionId === 'string' && realtime.feedbackConditionId
+          ? realtime.feedbackConditionId
           : undefined,
     };
   } catch {
@@ -204,6 +212,9 @@ function buildRoomConfig(
           promptSavedAt: promptSnapshot?.savedAt ?? DEFAULT_REALTIME_PROMPT_METADATA.savedAt,
           promptSource: promptSnapshot?.source ?? DEFAULT_REALTIME_PROMPT_METADATA.source,
           ...(promptSnapshot?.taskCardId ? { taskCardId: promptSnapshot.taskCardId } : {}),
+          ...(promptSnapshot?.feedbackConditionId
+            ? { feedbackConditionId: promptSnapshot.feedbackConditionId }
+            : {}),
         }
       : {}),
   });

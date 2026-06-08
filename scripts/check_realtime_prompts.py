@@ -53,12 +53,52 @@ def read_manifest(path):
 
     task_card_manifest = manifest.get("taskCardManifest")
     default_task_card_id = manifest.get("defaultTaskCardId")
+    feedback_condition_manifest = manifest.get("feedbackConditionManifest")
+    default_feedback_condition_id = manifest.get("defaultFeedbackConditionId")
+    if not isinstance(feedback_condition_manifest, str) or not feedback_condition_manifest:
+        raise ValueError("Prompt manifest entry feedbackConditionManifest must be a string.")
+    if not isinstance(default_feedback_condition_id, str) or not default_feedback_condition_id:
+        raise ValueError("Prompt manifest entry defaultFeedbackConditionId must be a string.")
     if not isinstance(task_card_manifest, str) or not task_card_manifest:
         raise ValueError("Prompt manifest entry taskCardManifest must be a string.")
     if not isinstance(default_task_card_id, str) or not default_task_card_id:
         raise ValueError("Prompt manifest entry defaultTaskCardId must be a string.")
+    entries["feedbackConditionManifest"] = feedback_condition_manifest
+    entries["defaultFeedbackConditionId"] = default_feedback_condition_id
     entries["taskCardManifest"] = task_card_manifest
     entries["defaultTaskCardId"] = default_task_card_id
+    return entries
+
+
+def read_feedback_condition_manifest(path, manifest):
+    manifest_file = manifest.get("feedbackConditionManifest")
+    if not isinstance(manifest_file, str):
+        return None
+    feedback_manifest_path = path / manifest_file
+    try:
+        feedbacks = json.loads(feedback_manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Feedback condition manifest is not readable: {feedback_manifest_path}") from exc
+    if not isinstance(feedbacks, dict) or not feedbacks:
+        raise ValueError("Feedback condition manifest must be a non-empty JSON object.")
+
+    entries = {}
+    for feedback_id, entry in feedbacks.items():
+        if not isinstance(feedback_id, str) or not feedback_id:
+            raise ValueError("Feedback condition id must be a non-empty string.")
+        if not isinstance(entry, dict):
+            raise ValueError(f"Feedback condition manifest entry must be an object: {feedback_id}")
+        filename = entry.get("file")
+        marker = entry.get("marker")
+        if not isinstance(filename, str) or not filename:
+            raise ValueError(f"Feedback condition {feedback_id}.file must be a string.")
+        if not isinstance(marker, str) or not marker:
+            raise ValueError(f"Feedback condition {feedback_id}.marker must be a string.")
+        entries[feedback_id] = {
+            "file": filename,
+            "marker": marker,
+            "base_path": feedback_manifest_path.parent,
+        }
     return entries
 
 
@@ -92,27 +132,52 @@ def read_task_card_manifest(path, manifest):
             if not isinstance(examples, dict):
                 raise ValueError(f"Task card {task_card_id}.examples must be an object.")
             for role in ("dominant", "collaborative"):
-                example = examples.get(role)
-                if example is None:
+                role_examples = examples.get(role)
+                if role_examples is None:
                     continue
-                if not isinstance(example, dict):
+                if not isinstance(role_examples, dict):
                     raise ValueError(
                         f"Task card {task_card_id}.examples.{role} must be an object."
                     )
-                example_filename = example.get("file")
-                example_marker = example.get("marker")
-                if not isinstance(example_filename, str) or not example_filename:
-                    raise ValueError(
-                        f"Task card {task_card_id}.examples.{role}.file must be a string."
-                    )
-                if not isinstance(example_marker, str) or not example_marker:
-                    raise ValueError(
-                        f"Task card {task_card_id}.examples.{role}.marker must be a string."
-                    )
-                parsed_examples[role] = {
-                    "file": example_filename,
-                    "marker": example_marker,
-                }
+                if "file" in role_examples or "marker" in role_examples:
+                    example_filename = role_examples.get("file")
+                    example_marker = role_examples.get("marker")
+                    if not isinstance(example_filename, str) or not example_filename:
+                        raise ValueError(
+                            f"Task card {task_card_id}.examples.{role}.file must be a string."
+                        )
+                    if not isinstance(example_marker, str) or not example_marker:
+                        raise ValueError(
+                            f"Task card {task_card_id}.examples.{role}.marker must be a string."
+                        )
+                    parsed_examples[role] = {
+                        "default": {
+                            "file": example_filename,
+                            "marker": example_marker,
+                        }
+                    }
+                    continue
+
+                parsed_examples[role] = {}
+                for feedback_id, example in role_examples.items():
+                    if not isinstance(example, dict):
+                        raise ValueError(
+                            f"Task card {task_card_id}.examples.{role}.{feedback_id} must be an object."
+                        )
+                    example_filename = example.get("file")
+                    example_marker = example.get("marker")
+                    if not isinstance(example_filename, str) or not example_filename:
+                        raise ValueError(
+                            f"Task card {task_card_id}.examples.{role}.{feedback_id}.file must be a string."
+                        )
+                    if not isinstance(example_marker, str) or not example_marker:
+                        raise ValueError(
+                            f"Task card {task_card_id}.examples.{role}.{feedback_id}.marker must be a string."
+                        )
+                    parsed_examples[role][feedback_id] = {
+                        "file": example_filename,
+                        "marker": example_marker,
+                    }
 
         entries[task_card_id] = {
             "file": filename,
@@ -191,6 +256,28 @@ def read_prompt_folder(path):
         realtime["taskCardPrompt"] = value
         return {"realtime": realtime}
 
+    feedback_conditions = read_feedback_condition_manifest(path, manifest)
+    default_feedback_condition_id = manifest["defaultFeedbackConditionId"]
+    if default_feedback_condition_id not in feedback_conditions:
+        raise ValueError(
+            f"defaultFeedbackConditionId is not registered: {default_feedback_condition_id}"
+        )
+    for feedback_id, entry in feedback_conditions.items():
+        prompt_path = entry["base_path"] / entry["file"]
+        try:
+            value = prompt_path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise ValueError(f"Feedback condition source file is not readable: {prompt_path}") from exc
+        if not value:
+            raise ValueError(f"Feedback condition source file is empty: {prompt_path}")
+        if not value.startswith(entry["marker"]):
+            raise ValueError(
+                f"Feedback condition source file {prompt_path} must start with {entry['marker']!r}"
+            )
+        if feedback_id == default_feedback_condition_id:
+            realtime["feedbackConditionId"] = feedback_id
+            realtime["feedbackPrompt"] = value
+
     task_cards = read_task_card_manifest(path, manifest)
     default_task_card_id = manifest["defaultTaskCardId"]
     if default_task_card_id not in task_cards:
@@ -208,22 +295,23 @@ def read_prompt_folder(path):
                 f"Task card source file {prompt_path} must start with {entry['marker']!r}"
             )
         example_prompts = {}
-        for role, example in entry.get("examples", {}).items():
-            example_path = entry["base_path"] / example["file"]
-            try:
-                example_value = example_path.read_text(encoding="utf-8").strip()
-            except OSError as exc:
-                raise ValueError(
-                    f"Conversation example source file is not readable: {example_path}"
-                ) from exc
-            if not example_value:
-                raise ValueError(f"Conversation example source file is empty: {example_path}")
-            if not example_value.startswith(example["marker"]):
-                raise ValueError(
-                    f"Conversation example source file {example_path} must start with "
-                    f"{example['marker']!r}"
-                )
-            example_prompts[role] = example_value
+        for role, role_examples in entry.get("examples", {}).items():
+            for feedback_id, example in role_examples.items():
+                example_path = entry["base_path"] / example["file"]
+                try:
+                    example_value = example_path.read_text(encoding="utf-8").strip()
+                except OSError as exc:
+                    raise ValueError(
+                        f"Conversation example source file is not readable: {example_path}"
+                    ) from exc
+                if not example_value:
+                    raise ValueError(f"Conversation example source file is empty: {example_path}")
+                if not example_value.startswith(example["marker"]):
+                    raise ValueError(
+                        f"Conversation example source file {example_path} must start with "
+                        f"{example['marker']!r}"
+                    )
+                example_prompts[f"{role}.{feedback_id}"] = example_value
         if task_card_id == default_task_card_id:
             realtime["taskCardId"] = task_card_id
             realtime["taskCardPrompt"] = value
