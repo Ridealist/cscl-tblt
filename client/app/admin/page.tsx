@@ -746,7 +746,7 @@ export default function AdminPage() {
                 <div>
                   <h2 className="text-foreground text-sm font-semibold">Agent Role</h2>
                   <p className="text-muted-foreground text-xs">
-                    실험 조건입니다. 에이전트의 상호작용 방식을 정합니다.
+                    실험 조건(1) 입니다. 에이전트의 상호작용 방식을 정합니다.
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -795,7 +795,7 @@ export default function AdminPage() {
                 <div>
                   <h2 className="text-foreground text-sm font-semibold">Feedback Condition</h2>
                   <p className="text-muted-foreground text-xs">
-                    실험 조건입니다. 새 개별 세션의 학생 오류 피드백 방식을 정합니다.
+                    실험 조건(2) 입니다. 학생 오류 피드백 방식을 정합니다.
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
