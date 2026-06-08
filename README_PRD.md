@@ -329,6 +329,7 @@ Ship 플랜 포함 5,000분/월. 월 12회 이상 수업 시 초과 가능.
 
 | 항목 | 우선순위 | 설명 |
 |---|---|---|
+| EC2 start/stop 운영 | 높음 | Issue #21. Phase 1 런북은 `docs/production-start-stop.md`, 인프라 설정 노트는 `docs/infra.md` 참고 |
 | `client/static/` 삭제 | 중간 | Issue #1. deprecated 경고 제거, dead code 정리 |
 | LiveKit Cloud 사용량 초과 대응 | 중간 | Scale 플랜 업그레이드 또는 세션 시간 단축 정책 수립 |
 | 에이전트 분 알림 설정 | 낮음 | LiveKit 콘솔 또는 별도 모니터링으로 임계값 알림 구성 |
