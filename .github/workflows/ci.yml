@@ -36,6 +36,8 @@ jobs:
           cache-dependency-path: client/pnpm-lock.yaml
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Test
+        run: pnpm test
       - name: ESLint
         run: pnpm lint
       - name: Prettier
