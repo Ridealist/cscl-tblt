@@ -11,6 +11,7 @@ import {
   type RealtimeTaskCardSummary,
   validateRealtimePromptConfig,
 } from '@/lib/realtime-prompt-config';
+import { requireAdmin } from '@/lib/supabase/admin-auth';
 
 const PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.json');
 const RUNTIME_CONFIG_PATH = join(process.cwd(), '..', 'config.json');
@@ -379,6 +380,9 @@ async function writePromptConfig(config: RealtimePromptConfig): Promise<Realtime
 }
 
 export async function GET() {
+  const adminError = await requireAdmin();
+  if (adminError) return adminError;
+
   try {
     return NextResponse.json(await readPromptConfig());
   } catch {
@@ -390,6 +394,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const adminError = await requireAdmin();
+  if (adminError) return adminError;
+
   try {
     const body = await req.json();
     const runtimeFeedbackConditionId = await readRuntimeFeedbackConditionId();
@@ -422,6 +429,9 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE() {
+  const adminError = await requireAdmin();
+  if (adminError) return adminError;
+
   try {
     await unlink(PROMPT_CONFIG_PATH);
   } catch (error) {

@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { type AgentMode, normalizeAgentMode } from '@/lib/agent-mode';
 import { type AgentRole, DEFAULT_AGENT_ROLE, normalizeAgentRole } from '@/lib/agent-role';
+import { requireAdmin } from '@/lib/supabase/admin-auth';
 
 const CONFIG_PATH = join(process.cwd(), '..', 'config.json');
 const DEFAULT_PROMPT_SOURCE_DIR = join(process.cwd(), '..', 'prompts', 'realtime');
@@ -98,11 +99,17 @@ function readConfig(feedbackConditions = readFeedbackConditions()): AppSettings 
 }
 
 export async function GET() {
+  const adminError = await requireAdmin();
+  if (adminError) return adminError;
+
   const feedbackConditions = readFeedbackConditions();
   return NextResponse.json({ ...readConfig(feedbackConditions), feedbackConditions });
 }
 
 export async function POST(req: Request) {
+  const adminError = await requireAdmin();
+  if (adminError) return adminError;
+
   try {
     const body = await req.json();
     const feedbackConditions = readFeedbackConditions();
