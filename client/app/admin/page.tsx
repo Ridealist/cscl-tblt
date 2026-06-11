@@ -231,6 +231,7 @@ interface RealtimeRoomStatus {
   name: string;
   agentRole?: AgentRole;
   promptId?: string;
+  promptVersionId?: string;
   promptSavedAt?: string | null;
   promptSource?: RealtimePromptSource;
   numParticipants: number;

@@ -63,6 +63,18 @@ const PROMPT_GROUPS: PromptGroup[] = [
       },
     ],
   },
+  {
+    title: 'Feedback Condition Prompt',
+    description: '운영 설정에서 선택된 feedback condition의 corrective feedback 규칙입니다.',
+    fields: [
+      {
+        key: 'feedbackPrompt',
+        title: 'Feedback Condition Prompt',
+        description: '학생 오류에 대한 피드백 제공 방식을 제어합니다.',
+        rows: 14,
+      },
+    ],
+  },
 ];
 
 const EMPTY_PROMPT: RealtimePromptConfig = {
@@ -115,6 +127,15 @@ export function PromptEditorView() {
   const selectedRolePromptKey: PromptField =
     selectedAgentRole === 'collaborative' ? 'collaborativePrompt' : 'dominantPrompt';
   const selectedRoleLabel = getAgentRoleLabel(selectedAgentRole);
+  const selectedTaskCard = useMemo(
+    () => taskCards.find((taskCard) => taskCard.id === prompt.taskCardId) ?? null,
+    [prompt.taskCardId, taskCards]
+  );
+  const selectedFeedbackCondition = useMemo(
+    () =>
+      feedbackConditions.find((condition) => condition.id === prompt.feedbackConditionId) ?? null,
+    [feedbackConditions, prompt.feedbackConditionId]
+  );
   const visiblePromptGroups = useMemo(
     () =>
       PROMPT_GROUPS.map((group) =>
@@ -124,18 +145,16 @@ export function PromptEditorView() {
               description: `운영 설정에서 선택된 ${selectedRoleLabel} 에이전트 역할 규칙입니다.`,
               fields: group.fields.filter((field) => field.key === selectedRolePromptKey),
             }
-          : group
+          : group.title === 'Feedback Condition Prompt'
+            ? {
+                ...group,
+                description: selectedFeedbackCondition
+                  ? `운영 설정에서 선택된 ${selectedFeedbackCondition.title} (${selectedFeedbackCondition.id}) 조건 규칙입니다.`
+                  : group.description,
+              }
+            : group
       ),
-    [selectedRoleLabel, selectedRolePromptKey]
-  );
-  const selectedTaskCard = useMemo(
-    () => taskCards.find((taskCard) => taskCard.id === prompt.taskCardId) ?? null,
-    [prompt.taskCardId, taskCards]
-  );
-  const selectedFeedbackCondition = useMemo(
-    () =>
-      feedbackConditions.find((condition) => condition.id === prompt.feedbackConditionId) ?? null,
-    [feedbackConditions, prompt.feedbackConditionId]
+    [selectedFeedbackCondition, selectedRoleLabel, selectedRolePromptKey]
   );
   const feedbackConditionTitles = useMemo(
     () => new Map(feedbackConditions.map((condition) => [condition.id, condition.title])),
@@ -324,7 +343,7 @@ export function PromptEditorView() {
             <p className="text-muted-foreground text-xs">
               {usingDefault
                 ? '현재 prompts/realtime/*.md 기본값을 사용합니다.'
-                : '현재 prompt_config.json 사용자 설정이 md 기본값보다 우선합니다.'}
+                : '현재 Supabase active prompt version이 md 기본값보다 우선합니다.'}
             </p>
           </div>
           <span className="bg-muted text-muted-foreground shrink-0 rounded px-2 py-1 text-xs">

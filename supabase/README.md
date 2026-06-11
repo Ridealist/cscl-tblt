@@ -8,7 +8,8 @@ The first migration adds the shared foundation used by the staged Supabase rollo
 
 - `profiles`: Supabase Auth user metadata and app role.
 - `app_settings`: runtime storage for class and agent operation settings.
-- `realtime_prompt_versions`: future replacement for `prompt_config.json`.
+- `realtime_prompt_versions`: versioned Realtime prompt overrides that replace
+  `prompt_config.json`.
 
 Conversation log tables are intentionally deferred to #36, where `ConversationLogger` will introduce dual-write behavior.
 
@@ -43,9 +44,11 @@ Admin routes use Supabase Auth sessions and `profiles.role = 'admin'` checks.
 
 ## Local Development Policy
 
-Production uses Supabase `app_settings(id = 'default')` as the source of truth for class count, active class, agent mode, agent role, feedback condition, and realtime reset lock state.
+Production uses Supabase `app_settings(id = 'default')` as the source of truth for class count, active class, agent mode, agent role, feedback condition, and realtime reset lock state. Custom Realtime prompt overrides are stored as rows in `realtime_prompt_versions`; at most one row is active.
 
 Local development may run without Supabase for the settings store. When the Supabase admin environment variables are missing, or a local Supabase read/write fails, the Next.js settings store falls back to root `config.json`. This fallback is for local development and migration only; production returns a setup/runtime error instead.
+
+Prompt editing requires Supabase when saving a custom prompt version. Without an active prompt row, the admin prompt API and token route use the tracked markdown defaults under `prompts/realtime/`.
 
 `supabase/config.toml` pins this repo to the `5532x` local port range so it can run alongside another Supabase project using the CLI defaults.
 
@@ -102,3 +105,22 @@ set num_classes = excluded.num_classes,
     feedback_condition_id = excluded.feedback_condition_id,
     realtime_resetting = excluded.realtime_resetting;
 ```
+
+## realtime_prompt_versions Migration
+
+To migrate an existing root `prompt_config.json` override, create one active version row that snapshots every resolved prompt field. If the old file only contains `basePrompt`, role prompts, and `taskCardId`, first resolve `feedbackPrompt`, `feedbackConditionId`, and `taskCardPrompt` from the current tracked markdown defaults and `app_settings.feedback_condition_id`.
+
+```sql
+select public.activate_realtime_prompt_version(
+  p_base_prompt := '<prompt_config.json realtime.basePrompt>',
+  p_dominant_prompt := '<prompt_config.json realtime.dominantPrompt>',
+  p_collaborative_prompt := '<prompt_config.json realtime.collaborativePrompt>',
+  p_feedback_condition_id := '<resolved feedback condition id>',
+  p_feedback_prompt := '<resolved or edited feedback prompt>',
+  p_task_card_id := '<resolved task card id>',
+  p_task_card_prompt := '<resolved task card prompt>',
+  p_created_by := '<admin auth user id>'
+);
+```
+
+After verifying `/admin` shows the migrated prompt as the active custom version, remove the old `prompt_config.json` from the runtime host so it is not mistaken for the source of truth. The Python agent still reads local prompt files until issue #35 wires the agent runtime to the Supabase prompt version referenced in LiveKit metadata.
