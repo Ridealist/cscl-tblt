@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import { readFileSync } from 'fs';
 import { AccessToken, type AccessTokenOptions, type VideoGrant } from 'livekit-server-sdk';
-import { join } from 'path';
 import { RoomConfiguration } from '@livekit/protocol';
 import { type AgentMode, normalizeAgentMode } from '@/lib/agent-mode';
 import { type AgentRole, getAgentNameForConfig } from '@/lib/agent-role';
@@ -9,6 +7,10 @@ import {
   DEFAULT_REALTIME_PROMPT_METADATA,
   type RealtimePromptMetadata,
 } from '@/lib/realtime-prompt-config';
+import {
+  RealtimePromptStoreError,
+  readActiveRealtimePromptVersion,
+} from '@/lib/realtime-prompt-store';
 import { type AppSettings, SettingsStoreError, readSettings } from '@/lib/settings-store';
 
 type ConnectionDetails = {
@@ -22,7 +24,6 @@ type ConnectionDetails = {
 const API_KEY = process.env.LIVEKIT_API_KEY;
 const API_SECRET = process.env.LIVEKIT_API_SECRET;
 const LIVEKIT_URL = process.env.LIVEKIT_URL;
-const PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.json');
 
 type RuntimeConfig = {
   agentMode: AgentMode;
@@ -32,6 +33,8 @@ type RuntimeConfig = {
 };
 
 type RealtimePromptSnapshot = RealtimePromptMetadata & {
+  feedbackConditionId?: string;
+  promptVersionId?: string;
   taskCardId?: string;
 };
 
@@ -75,7 +78,8 @@ export async function POST(req: Request) {
     }
 
     const agentName = getAgentNameForConfig(agentMode, config.agentRole);
-    const promptSnapshot = agentMode === 'realtime' ? readRealtimePromptSnapshot() : undefined;
+    const promptSnapshot =
+      agentMode === 'realtime' ? await readRealtimePromptSnapshot() : undefined;
     const roomConfig = buildRoomConfig(
       agentName,
       agentMode,
@@ -128,7 +132,7 @@ export async function POST(req: Request) {
     });
     return NextResponse.json(data, { headers });
   } catch (error) {
-    if (error instanceof SettingsStoreError) {
+    if (error instanceof SettingsStoreError || error instanceof RealtimePromptStoreError) {
       return NextResponse.json(
         { error: error.message },
         { status: error.status, headers: { 'Cache-Control': 'no-store' } }
@@ -168,30 +172,20 @@ function inferAgentMode(value: unknown, roomName: string, fallback: AgentMode): 
   return normalizeAgentMode(value ?? fallback);
 }
 
-function readRealtimePromptSnapshot(): RealtimePromptSnapshot {
-  try {
-    const raw = JSON.parse(readFileSync(PROMPT_CONFIG_PATH, 'utf-8')) as { realtime?: unknown };
-    if (!raw.realtime || typeof raw.realtime !== 'object') {
-      return DEFAULT_REALTIME_PROMPT_METADATA;
-    }
-    const realtime = raw.realtime as Partial<RealtimePromptMetadata> & {
-      taskCardId?: unknown;
-    };
-    return {
-      promptId:
-        typeof realtime.promptId === 'string' && realtime.promptId
-          ? realtime.promptId
-          : 'custom-unknown',
-      savedAt: typeof realtime.savedAt === 'string' && realtime.savedAt ? realtime.savedAt : null,
-      source: 'custom',
-      taskCardId:
-        typeof realtime.taskCardId === 'string' && realtime.taskCardId
-          ? realtime.taskCardId
-          : undefined,
-    };
-  } catch {
+async function readRealtimePromptSnapshot(): Promise<RealtimePromptSnapshot> {
+  const activeVersion = await readActiveRealtimePromptVersion();
+  if (!activeVersion) {
     return DEFAULT_REALTIME_PROMPT_METADATA;
   }
+
+  return {
+    promptId: activeVersion.promptId,
+    promptVersionId: activeVersion.promptId,
+    savedAt: activeVersion.savedAt,
+    source: activeVersion.source,
+    feedbackConditionId: activeVersion.feedbackConditionId,
+    taskCardId: activeVersion.taskCardId,
+  };
 }
 
 function buildRoomConfig(
@@ -207,9 +201,12 @@ function buildRoomConfig(
       ? {
           agentRole,
           promptId: promptSnapshot?.promptId ?? DEFAULT_REALTIME_PROMPT_METADATA.promptId,
+          ...(promptSnapshot?.promptVersionId
+            ? { promptVersionId: promptSnapshot.promptVersionId }
+            : {}),
           promptSavedAt: promptSnapshot?.savedAt ?? DEFAULT_REALTIME_PROMPT_METADATA.savedAt,
           promptSource: promptSnapshot?.source ?? DEFAULT_REALTIME_PROMPT_METADATA.source,
-          feedbackConditionId,
+          feedbackConditionId: promptSnapshot?.feedbackConditionId ?? feedbackConditionId,
           ...(promptSnapshot?.taskCardId ? { taskCardId: promptSnapshot.taskCardId } : {}),
         }
       : {}),

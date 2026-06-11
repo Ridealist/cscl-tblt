@@ -22,6 +22,7 @@ type RoomCounts = {
 function parseRealtimeRoomMetadata(metadata?: string): {
   agentRole?: AgentRole;
   promptId?: string;
+  promptVersionId?: string;
   promptSavedAt?: string | null;
   promptSource?: RealtimePromptSource;
 } {
@@ -32,6 +33,7 @@ function parseRealtimeRoomMetadata(metadata?: string): {
       agentRole?: unknown;
       agentStance?: unknown;
       promptId?: unknown;
+      promptVersionId?: unknown;
       promptSavedAt?: unknown;
       promptSource?: unknown;
     };
@@ -40,6 +42,8 @@ function parseRealtimeRoomMetadata(metadata?: string): {
     return {
       agentRole: normalizeAgentRole(rawRole),
       promptId: typeof parsed.promptId === 'string' ? parsed.promptId : undefined,
+      promptVersionId:
+        typeof parsed.promptVersionId === 'string' ? parsed.promptVersionId : undefined,
       promptSavedAt:
         typeof parsed.promptSavedAt === 'string' || parsed.promptSavedAt === null
           ? parsed.promptSavedAt
