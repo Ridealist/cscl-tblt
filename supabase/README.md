@@ -4,10 +4,10 @@ This directory contains the database foundation for the staged Supabase migratio
 
 ## Current Scope
 
-The first migration adds only the shared foundation needed by later issues:
+The first migration adds the shared foundation used by the staged Supabase rollout:
 
 - `profiles`: Supabase Auth user metadata and app role.
-- `app_settings`: future replacement for `config.json`.
+- `app_settings`: runtime storage for class and agent operation settings.
 - `realtime_prompt_versions`: future replacement for `prompt_config.json`.
 
 Conversation log tables are intentionally deferred to #36, where `ConversationLogger` will introduce dual-write behavior.
@@ -43,7 +43,9 @@ Admin routes use Supabase Auth sessions and `profiles.role = 'admin'` checks.
 
 ## Local Development Policy
 
-Supabase is optional during this foundation step. Existing `config.json`, `prompt_config.json`, and `logs/*.json` behavior remains unchanged until the follow-up migration issues wire routes to the Supabase-backed stores.
+Production uses Supabase `app_settings(id = 'default')` as the source of truth for class count, active class, agent mode, agent role, feedback condition, and realtime reset lock state.
+
+Local development may run without Supabase for the settings store. When the Supabase admin environment variables are missing, or a local Supabase read/write fails, the Next.js settings store falls back to root `config.json`. This fallback is for local development and migration only; production returns a setup/runtime error instead.
 
 `supabase/config.toml` pins this repo to the `5532x` local port range so it can run alongside another Supabase project using the CLI defaults.
 
@@ -62,3 +64,41 @@ SUPABASE_SECRET_KEY=<secret-key-from-supabase-status>
 ```
 
 Local Studio runs at `http://127.0.0.1:55323`; the local database URL is `postgresql://postgres:postgres@127.0.0.1:55322/postgres`.
+
+## app_settings Seed
+
+Import existing `config.json` values into the default row before production use:
+
+```sql
+insert into public.app_settings (
+  id,
+  num_classes,
+  num_groups_per_class,
+  class_start,
+  active_class,
+  agent_mode,
+  agent_role,
+  feedback_condition_id,
+  realtime_resetting
+)
+values (
+  'default',
+  4,
+  12,
+  9,
+  9,
+  'realtime',
+  'collaborative',
+  'explicit_correction',
+  false
+)
+on conflict (id) do update
+set num_classes = excluded.num_classes,
+    num_groups_per_class = excluded.num_groups_per_class,
+    class_start = excluded.class_start,
+    active_class = excluded.active_class,
+    agent_mode = excluded.agent_mode,
+    agent_role = excluded.agent_role,
+    feedback_condition_id = excluded.feedback_condition_id,
+    realtime_resetting = excluded.realtime_resetting;
+```

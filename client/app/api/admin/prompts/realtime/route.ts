@@ -11,10 +11,10 @@ import {
   type RealtimeTaskCardSummary,
   validateRealtimePromptConfig,
 } from '@/lib/realtime-prompt-config';
+import { readSettings } from '@/lib/settings-store';
 import { requireAdmin } from '@/lib/supabase/admin-auth';
 
 const PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.json');
-const RUNTIME_CONFIG_PATH = join(process.cwd(), '..', 'config.json');
 const DEFAULT_PROMPT_SOURCE_DIR = join(process.cwd(), '..', 'prompts', 'realtime');
 const PROMPT_SOURCE_MANIFEST_PATH = join(DEFAULT_PROMPT_SOURCE_DIR, 'manifest.json');
 const PROMPT_FIELDS = ['basePrompt', 'dominantPrompt', 'collaborativePrompt'] as const;
@@ -81,12 +81,7 @@ function readPromptMetadata(value: unknown): RealtimePromptMetadata {
 
 async function readRuntimeFeedbackConditionId(): Promise<string | undefined> {
   try {
-    const raw = JSON.parse(await readFile(RUNTIME_CONFIG_PATH, 'utf-8')) as {
-      feedbackConditionId?: unknown;
-    };
-    return typeof raw.feedbackConditionId === 'string' && raw.feedbackConditionId.trim()
-      ? raw.feedbackConditionId.trim()
-      : undefined;
+    return (await readSettings()).feedbackConditionId;
   } catch {
     return undefined;
   }
