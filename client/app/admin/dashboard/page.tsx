@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { AdminLogoutButton } from '@/components/admin/admin-logout-button';
 import {
   Conversation,
   ConversationContent,
@@ -313,6 +314,9 @@ export default function DashboardPage() {
         <h1 className="text-center text-lg font-semibold">
           {selected ? '대화 기록' : '세션 목록'}
         </h1>
+        <div className="flex justify-end">
+          <AdminLogoutButton />
+        </div>
       </div>
       {selected ? (
         <ConversationView session={selected} onBack={() => setSelected(null)} />

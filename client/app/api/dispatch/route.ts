@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { AgentDispatchClient, RoomServiceClient } from 'livekit-server-sdk';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
+import { requireAdmin } from '@/lib/supabase/admin-auth';
 
 const API_KEY = process.env.LIVEKIT_API_KEY!;
 const API_SECRET = process.env.LIVEKIT_API_SECRET!;
@@ -33,6 +34,9 @@ async function checkAgentPresence(roomName: string): Promise<boolean> {
 
 /** GET /api/dispatch?room=X — 방의 에이전트 존재 여부 확인 */
 export async function GET(req: NextRequest) {
+  const adminError = await requireAdmin();
+  if (adminError) return adminError;
+
   const room = req.nextUrl.searchParams.get('room');
   if (!room) {
     return NextResponse.json({ error: 'room 파라미터가 필요합니다.' }, { status: 400 });
@@ -45,6 +49,9 @@ export async function GET(req: NextRequest) {
 
 /** POST /api/dispatch  body: { room: string } — 에이전트 수동 배치 */
 export async function POST(req: NextRequest) {
+  const adminError = await requireAdmin();
+  if (adminError) return adminError;
+
   const body = await req.json().catch(() => ({}));
   const room: string | undefined = body?.room;
   if (!room) {

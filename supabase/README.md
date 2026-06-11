@@ -39,7 +39,7 @@ set role = 'admin',
     display_name = excluded.display_name;
 ```
 
-Until #32 is implemented, the app still uses the existing Basic Auth middleware for admin routes.
+Admin routes use Supabase Auth sessions and `profiles.role = 'admin'` checks.
 
 ## Local Development Policy
 

@@ -250,10 +250,8 @@ uv run python main.py start
 LIVEKIT_URL=wss://your-project.livekit.cloud
 LIVEKIT_API_KEY=your_api_key
 LIVEKIT_API_SECRET=your_api_secret
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=strong_password_here
 
-# Supabase foundation (admin auth / persistent state migration)
+# Supabase admin auth / persistent state migration
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 SUPABASE_SECRET_KEY=sb_secret_...
@@ -271,9 +269,8 @@ Next.js API routes:
 | `GET /api/logs`, `GET /api/logs/stream` | 대화 로그 목록/스트리밍                                 |
 
 > **주의:** Production에서 `/admin`, `/api/admin`, 관리자성 API(`/api/dispatch`, `/api/logs`, `/api/rooms/terminate`)는
-> `ADMIN_USERNAME`/`ADMIN_PASSWORD` Basic Auth로 보호된다.
-> Supabase Auth 전환은 단계적으로 진행한다. 현재 Supabase helper와 schema는 `supabase/` 및 `client/lib/supabase/`에 준비되어 있으며,
-> Basic Auth 제거와 route guard 전환은 별도 작업에서 처리한다.
+> Supabase Auth session과 `profiles.role = 'admin'` 권한으로 보호된다.
+> `ADMIN_USERNAME`/`ADMIN_PASSWORD` Basic Auth는 더 이상 사용하지 않는다.
 
 ### Supabase migration foundation
 
@@ -305,6 +302,8 @@ set role = 'admin',
 ```
 
 `SUPABASE_SECRET_KEY`는 RLS를 우회할 수 있으므로 server-only 코드에서만 사용한다.
+
+관리자 로그인 화면은 `/admin/login`이다. 로그인은 Supabase email/password 계정을 사용하며, 계정의 `profiles.role`이 `admin`이어야 `/admin` 및 관리자성 API를 사용할 수 있다.
 
 로컬 Supabase CLI는 기존 프로젝트와 기본 포트가 충돌하지 않도록 `5532x` 대역을 사용한다.
 
@@ -537,8 +536,9 @@ S3_ENDPOINT=
 LIVEKIT_URL=wss://cscl-t8duxbt1.livekit.cloud
 LIVEKIT_API_KEY=<값>
 LIVEKIT_API_SECRET=<값>
-ADMIN_USERNAME=<관리자_아이디>
-ADMIN_PASSWORD=<관리자_비밀번호>
+NEXT_PUBLIC_SUPABASE_URL=<Supabase Project URL>
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<Supabase publishable key>
+SUPABASE_SECRET_KEY=<Supabase secret key>
 ```
 
 > `S3_ENDPOINT`는 AWS S3 사용 시 반드시 비워두어야 합니다. 값을 넣으면 Egress 업로드 실패.
@@ -738,7 +738,8 @@ Production 배포는 GitHub Actions가 SSH로 EC2에 접속해 `scripts/deploy-p
 - `pnpm`, `uv`, `pm2`, `curl`이 설치되어 있어야 한다.
 - 서버의 `.env`, `client/.env.local`, `config.json`, `prompt_config.json`은 배포 중 백업 후 복원된다.
 - `config.json`은 git 추적 대상이 아니며, 없으면 `config.example.json`에서 자동 생성된다.
-- Production에서는 `client/.env.local`에 `ADMIN_USERNAME`, `ADMIN_PASSWORD`가 있어야 한다.
+- Production에서는 `client/.env.local`에 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`가 있어야 한다.
+- 최초 admin 계정은 Supabase Auth 사용자 생성 후 `profiles.role = 'admin'`으로 bootstrap해야 한다.
 
 배포 후 health check:
 

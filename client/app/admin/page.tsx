@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { AdminLogoutButton } from '@/components/admin/admin-logout-button';
 import { PromptEditorView } from '@/components/admin/prompt-editor-view';
 import { type AgentMode, getAgentModeLabel } from '@/lib/agent-mode';
 import { type AgentRole, getAgentRoleLabel } from '@/lib/agent-role';
@@ -594,12 +595,15 @@ export default function AdminPage() {
       {/* 헤더 */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold">관리자</h1>
-        <a
-          href="/admin/dashboard"
-          className="text-muted-foreground hover:text-foreground text-sm transition-colors"
-        >
-          대시보드 →
-        </a>
+        <div className="flex items-center gap-3">
+          <a
+            href="/admin/dashboard"
+            className="text-muted-foreground hover:text-foreground text-sm transition-colors"
+          >
+            대시보드 →
+          </a>
+          <AdminLogoutButton />
+        </div>
       </div>
 
       <div className="bg-muted grid grid-cols-2 rounded-lg p-1">
