@@ -1,40 +1,13 @@
 import { NextResponse } from 'next/server';
-import { readFileSync } from 'fs';
 import { RoomServiceClient } from 'livekit-server-sdk';
-import { join } from 'path';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
-import { type AgentMode, normalizeAgentMode } from '@/lib/agent-mode';
 import { type AgentRole, normalizeAgentRole } from '@/lib/agent-role';
 import type { RealtimePromptSource } from '@/lib/realtime-prompt-config';
+import { SettingsStoreError, readSettings } from '@/lib/settings-store';
 
 const API_KEY = process.env.LIVEKIT_API_KEY;
 const API_SECRET = process.env.LIVEKIT_API_SECRET;
 const LIVEKIT_URL = process.env.LIVEKIT_URL;
-
-const CONFIG_PATH = join(process.cwd(), '..', 'config.json');
-
-function readConfig() {
-  try {
-    const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
-    return {
-      numClasses: typeof raw.numClasses === 'number' ? raw.numClasses : 4,
-      numGroupsPerClass: typeof raw.numGroupsPerClass === 'number' ? raw.numGroupsPerClass : 4,
-      classStart: typeof raw.classStart === 'number' ? raw.classStart : 1,
-      activeClass: typeof raw.activeClass === 'number' ? raw.activeClass : 1,
-      agentMode: normalizeAgentMode(raw.agentMode),
-      realtimeResetting: raw.realtimeResetting === true,
-    };
-  } catch {
-    return {
-      numClasses: 4,
-      numGroupsPerClass: 4,
-      classStart: 1,
-      activeClass: 1,
-      agentMode: 'pipeline' as AgentMode,
-      realtimeResetting: false,
-    };
-  }
-}
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -105,7 +78,19 @@ export async function GET() {
     return NextResponse.json({ error: 'LiveKit credentials not configured' }, { status: 500 });
   }
 
-  const { activeClass, numGroupsPerClass, agentMode, realtimeResetting } = readConfig();
+  let settings: Awaited<ReturnType<typeof readSettings>>;
+  try {
+    settings = await readSettings();
+  } catch (error) {
+    const status = error instanceof SettingsStoreError ? error.status : 500;
+    const message = error instanceof Error ? error.message : 'Settings store is unavailable.';
+    return NextResponse.json(
+      { error: message },
+      { status, headers: { 'Cache-Control': 'no-store' } }
+    );
+  }
+
+  const { activeClass, numGroupsPerClass, agentMode, realtimeResetting } = settings;
 
   const predefinedNames: string[] = Array.from(
     { length: numGroupsPerClass },

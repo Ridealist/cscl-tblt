@@ -4,16 +4,12 @@ import { AccessToken, type AccessTokenOptions, type VideoGrant } from 'livekit-s
 import { join } from 'path';
 import { RoomConfiguration } from '@livekit/protocol';
 import { type AgentMode, normalizeAgentMode } from '@/lib/agent-mode';
-import {
-  type AgentRole,
-  DEFAULT_AGENT_ROLE,
-  getAgentNameForConfig,
-  normalizeAgentRole,
-} from '@/lib/agent-role';
+import { type AgentRole, getAgentNameForConfig } from '@/lib/agent-role';
 import {
   DEFAULT_REALTIME_PROMPT_METADATA,
   type RealtimePromptMetadata,
 } from '@/lib/realtime-prompt-config';
+import { type AppSettings, SettingsStoreError, readSettings } from '@/lib/settings-store';
 
 type ConnectionDetails = {
   serverUrl: string;
@@ -26,9 +22,7 @@ type ConnectionDetails = {
 const API_KEY = process.env.LIVEKIT_API_KEY;
 const API_SECRET = process.env.LIVEKIT_API_SECRET;
 const LIVEKIT_URL = process.env.LIVEKIT_URL;
-const CONFIG_PATH = join(process.cwd(), '..', 'config.json');
 const PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.json');
-const DEFAULT_FEEDBACK_CONDITION_ID = 'no_corrective';
 
 type RuntimeConfig = {
   agentMode: AgentMode;
@@ -66,7 +60,7 @@ export async function POST(req: Request) {
     const participantName = body?.participant_name?.trim() || 'user';
     const participantIdentity = `${participantName}_${Math.floor(Math.random() * 10_000)}`;
     const roomName = body?.room_name?.trim() || `room_${Math.floor(Math.random() * 10_000)}`;
-    const config = readRuntimeConfig();
+    const config = await readRuntimeConfig();
     const agentMode = inferAgentMode(body?.agent_mode, roomName, config.agentMode);
     if (agentMode === 'realtime' && config.realtimeResetting) {
       logTokenEvent('rejected realtime token during reset', {
@@ -134,6 +128,13 @@ export async function POST(req: Request) {
     });
     return NextResponse.json(data, { headers });
   } catch (error) {
+    if (error instanceof SettingsStoreError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
     if (error instanceof Error) {
       console.error('[api/token] token issuance failed', {
         message: error.message,
@@ -152,27 +153,14 @@ function safeParseJson(value: string): unknown {
   }
 }
 
-function readRuntimeConfig(): RuntimeConfig {
-  try {
-    const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
-    return {
-      agentMode: normalizeAgentMode(raw.agentMode),
-      agentRole: normalizeAgentRole(raw.agentRole ?? raw.agentStance),
-      feedbackConditionId: normalizeFeedbackConditionId(raw.feedbackConditionId),
-      realtimeResetting: raw.realtimeResetting === true,
-    };
-  } catch {
-    return {
-      agentMode: 'pipeline',
-      agentRole: DEFAULT_AGENT_ROLE,
-      feedbackConditionId: DEFAULT_FEEDBACK_CONDITION_ID,
-      realtimeResetting: false,
-    };
-  }
-}
-
-function normalizeFeedbackConditionId(value: unknown): string {
-  return typeof value === 'string' && value.trim() ? value.trim() : DEFAULT_FEEDBACK_CONDITION_ID;
+async function readRuntimeConfig(): Promise<RuntimeConfig> {
+  const settings: AppSettings = await readSettings();
+  return {
+    agentMode: settings.agentMode,
+    agentRole: settings.agentRole,
+    feedbackConditionId: settings.feedbackConditionId,
+    realtimeResetting: settings.realtimeResetting,
+  };
 }
 
 function inferAgentMode(value: unknown, roomName: string, fallback: AgentMode): AgentMode {

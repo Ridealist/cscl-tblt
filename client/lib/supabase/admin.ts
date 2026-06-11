@@ -12,7 +12,9 @@ function getSupabaseSecretKey(): string {
 
 export function hasSupabaseAdminEnv(): boolean {
   return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() && process.env.SUPABASE_SECRET_KEY?.trim()
+    process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() &&
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() &&
+      process.env.SUPABASE_SECRET_KEY?.trim()
   );
 }
 
