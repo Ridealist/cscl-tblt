@@ -51,10 +51,10 @@ CSCL_TBLT/
 
 이 저장소는 `main` / `develop` 기준으로 운영한다.
 
-| 브랜치    | 역할                              | 운영 원칙                                                                 |
-| --------- | --------------------------------- | ------------------------------------------------------------------------- |
+| 브랜치    | 역할                                  | 운영 원칙                                                                         |
+| --------- | ------------------------------------- | --------------------------------------------------------------------------------- |
 | `main`    | 실제 서버 배포와 연결되는 안정 브랜치 | 배포 가능한 상태만 유지한다. 검증된 변경만 병합하고, 미완성 실험은 올리지 않는다. |
-| `develop` | 기능 개발과 실험 통합 브랜치         | 새 기능, UI/프롬프트 실험, 검증 전 변경의 기본 합류 지점으로 사용한다.        |
+| `develop` | 기능 개발과 실험 통합 브랜치          | 새 기능, UI/프롬프트 실험, 검증 전 변경의 기본 합류 지점으로 사용한다.            |
 
 기본 흐름:
 
@@ -252,6 +252,11 @@ LIVEKIT_API_KEY=your_api_key
 LIVEKIT_API_SECRET=your_api_secret
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=strong_password_here
+
+# Supabase foundation (admin auth / persistent state migration)
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+SUPABASE_SECRET_KEY=sb_secret_...
 ```
 
 Next.js API routes:
@@ -267,6 +272,57 @@ Next.js API routes:
 
 > **주의:** Production에서 `/admin`, `/api/admin`, 관리자성 API(`/api/dispatch`, `/api/logs`, `/api/rooms/terminate`)는
 > `ADMIN_USERNAME`/`ADMIN_PASSWORD` Basic Auth로 보호된다.
+> Supabase Auth 전환은 단계적으로 진행한다. 현재 Supabase helper와 schema는 `supabase/` 및 `client/lib/supabase/`에 준비되어 있으며,
+> Basic Auth 제거와 route guard 전환은 별도 작업에서 처리한다.
+
+### Supabase migration foundation
+
+Supabase 도입은 GitHub issue #4의 단계별 작업으로 진행한다. 첫 단계는 runtime 동작을 바꾸지 않고 다음 기반만 추가한다.
+
+- `client/lib/supabase/client.ts`: browser/client component용 Supabase client
+- `client/lib/supabase/server.ts`: server component, route handler, server action용 cookie-aware client
+- `client/lib/supabase/admin.ts`: 서버 전용 secret-key client
+- `client/lib/supabase/proxy.ts`: 이후 Auth session refresh에 사용할 proxy/middleware helper
+- `supabase/config.toml`: 로컬 Supabase CLI 실행 포트와 migration 설정
+- `supabase/migrations/20260611000000_foundation.sql`: 초기 schema와 RLS policy
+
+초기 schema는 다음 테이블을 만든다.
+
+| Table                      | 역할                                          |
+| -------------------------- | --------------------------------------------- |
+| `profiles`                 | Supabase Auth 사용자별 앱 권한 및 표시명      |
+| `app_settings`             | 향후 `config.json` 대체 저장소                |
+| `realtime_prompt_versions` | 향후 `prompt_config.json` 대체 version 저장소 |
+
+최초 admin은 Supabase Auth 사용자 생성 후 SQL 또는 dashboard에서 `profiles.role = 'admin'`으로 부여한다.
+
+```sql
+insert into public.profiles (user_id, role, display_name)
+values ('<auth-user-id>', 'admin', 'Admin')
+on conflict (user_id) do update
+set role = 'admin',
+    display_name = excluded.display_name;
+```
+
+`SUPABASE_SECRET_KEY`는 RLS를 우회할 수 있으므로 server-only 코드에서만 사용한다.
+
+로컬 Supabase CLI는 기존 프로젝트와 기본 포트가 충돌하지 않도록 `5532x` 대역을 사용한다.
+
+```bash
+supabase start
+supabase db reset --no-seed
+supabase status
+```
+
+`client/.env.local`에서 로컬 Supabase를 사용할 때는 `supabase status` 출력의 key를 넣는다.
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:55321
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<publishable-key-from-supabase-status>
+SUPABASE_SECRET_KEY=<secret-key-from-supabase-status>
+```
+
+Studio는 `http://127.0.0.1:55323`, Postgres는 `postgresql://postgres:postgres@127.0.0.1:55322/postgres`에서 열린다.
 
 ## 관리자 설정
 
@@ -368,7 +424,7 @@ logs/
 | 항목                             | 위치                                                                                                 |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | Realtime AI 시스템 프롬프트 수정 | 기본값은 `prompts/realtime/*.md`, 런타임 수정은 `/admin` 또는 `prompt_config.json`                   |
-| 기본 AI 시스템 프롬프트 fallback | 그룹 대화는 `agent/prompt_pipeline.py`, 개별 대화는 `prompts/realtime/*.md`                         |
+| 기본 AI 시스템 프롬프트 fallback | 그룹 대화는 `agent/prompt_pipeline.py`, 개별 대화는 `prompts/realtime/*.md`                          |
 | 그룹 대화 모드 모델 변경         | `agent/main.py` (STT `deepgram/nova-3`, LLM `openai/gpt-4.1-mini`, TTS `cartesia/sonic-3`)           |
 | 개별 대화 모드 모델 변경         | `agent/main.py` (`openai.realtime.RealtimeModel`)                                                    |
 | 실행할 worker 모드               | `AGENT_WORKER_MODE=pipeline` 또는 `AGENT_WORKER_MODE=realtime` + `AGENT_ROLE=dominant/collaborative` |
@@ -717,14 +773,14 @@ sudo nginx -t
 
 ### 현재 구현 메모
 
-| 항목                        | 내용                                                           |
-| --------------------------- | -------------------------------------------------------------- |
-| 운영 모드 저장              | `config.json.agentMode`에 `pipeline` 또는 `realtime` 저장      |
-| Realtime 상호작용 role 저장 | `config.json.agentRole`에 `dominant` 또는 `collaborative` 저장 |
-| Agent entrypoint            | `agent/main.py`에 `pipeline-agent`, `realtime-agent` 등록      |
+| 항목                        | 내용                                                                               |
+| --------------------------- | ---------------------------------------------------------------------------------- |
+| 운영 모드 저장              | `config.json.agentMode`에 `pipeline` 또는 `realtime` 저장                          |
+| Realtime 상호작용 role 저장 | `config.json.agentRole`에 `dominant` 또는 `collaborative` 저장                     |
+| Agent entrypoint            | `agent/main.py`에 `pipeline-agent`, `realtime-agent` 등록                          |
 | 프롬프트 분리               | 그룹 대화는 `agent/prompt_pipeline.py`, 개별 대화 기본값은 `prompts/realtime/*.md` |
-| Realtime 의존성             | `livekit-agents[openai,silero,turn-detector]~=1.5`             |
-| Egress 업로드               | `S3_ENDPOINT` 값이 `http`로 시작하는 경우만 endpoint로 사용    |
+| Realtime 의존성             | `livekit-agents[openai,silero,turn-detector]~=1.5`                                 |
+| Egress 업로드               | `S3_ENDPOINT` 값이 `http`로 시작하는 경우만 endpoint로 사용                        |
 
 ---
 
