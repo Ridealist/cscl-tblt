@@ -713,11 +713,11 @@ pm2 restart cscl-client
 
 GitHub Actions는 세 종류로 구성한다.
 
-| Workflow            | Trigger                     | 역할                                  |
-| ------------------- | --------------------------- | ------------------------------------- |
-| `pre-commit`        | PR/push → `main`, 수동 실행 | 공통 파일 형식 및 repo guardrail 검사 |
-| `CI`                | PR → `main`                 | Client lint/format/build, Agent tests |
-| `Deploy Production` | `main` push 또는 수동 실행  | 검증 후 EC2 production 배포           |
+| Workflow            | Trigger                                | 역할                                  |
+| ------------------- | -------------------------------------- | ------------------------------------- |
+| `pre-commit`        | PR/push → `main`, `develop`, 수동 실행 | 공통 파일 형식 및 repo guardrail 검사 |
+| `CI`                | PR → `main`, `develop`, 수동 실행      | Client lint/format/build, Agent tests |
+| `Deploy Production` | `main` push 또는 수동 실행             | 검증 후 EC2 production 배포           |
 
 Production 배포는 GitHub Actions가 SSH로 EC2에 접속해 `scripts/deploy-production.sh`를 실행한다.
 
