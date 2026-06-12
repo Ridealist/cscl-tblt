@@ -359,7 +359,7 @@ function RealtimeSessionSection({
                 <span className="text-foreground font-semibold">{formatPromptApplied(room)}</span>
               </span>
               <span className="text-muted-foreground text-xs">
-                상호작용 방식:{' '}
+                Agent Role:{' '}
                 <span className="text-foreground font-semibold">
                   {room.agentRole ? `${getAgentRoleLabel(room.agentRole)} 에이전트` : '미기록'}
                 </span>
