@@ -18,6 +18,8 @@ import {
   readActiveRealtimePromptVersion,
 } from '@/lib/realtime-prompt-store';
 import { type AppSettings, SettingsStoreError, readSettings } from '@/lib/settings-store';
+import { studentDefaultDisplayName } from '@/lib/student';
+import { type StudentSession, getStudentSession } from '@/lib/student-auth';
 
 type ConnectionDetails = {
   serverUrl: string;
@@ -44,6 +46,11 @@ type RealtimePromptSnapshot = RealtimePromptMetadata & {
   taskCardId?: string;
 };
 
+type StudentTokenContext = {
+  displayName: string;
+  student: StudentSession;
+};
+
 // don't cache the results
 export const revalidate = 0;
 
@@ -65,22 +72,32 @@ export async function POST(req: Request) {
 
     const body = await req.json();
 
-    const participantName =
-      typeof body?.participant_name === 'string' ? body.participant_name.trim() : '';
-    const roomName = typeof body?.room_name === 'string' ? body.room_name.trim() : '';
-    if (!participantName || !roomName) {
+    const student = await getStudentSession();
+    if (!student) {
       return NextResponse.json(
-        { error: 'participant_name and room_name are required.' },
+        { error: '학생 로그인이 필요합니다.' },
+        { status: 401, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    const displayName =
+      typeof body?.display_name === 'string' && body.display_name.trim()
+        ? body.display_name.trim()
+        : studentDefaultDisplayName(student);
+    const roomName = typeof body?.room_name === 'string' ? body.room_name.trim() : '';
+    if (!displayName || !roomName) {
+      return NextResponse.json(
+        { error: 'display_name and room_name are required.' },
         { status: 400, headers: { 'Cache-Control': 'no-store' } }
       );
     }
-    const participantIdentity = `${participantName}_${Math.floor(Math.random() * 10_000)}`;
+    const participantIdentity = createStudentParticipantIdentity(student);
     const config = await readRuntimeConfig();
     const agentMode = inferAgentMode(body?.agent_mode, roomName, config.agentMode);
     if (agentMode === 'realtime' && config.realtimeResetting) {
       logTokenEvent('rejected realtime token during reset', {
         roomName,
-        participantName,
+        studentNumber: student.studentNumber,
         requestedAgentMode: body?.agent_mode ?? null,
       });
       return NextResponse.json(
@@ -98,7 +115,8 @@ export async function POST(req: Request) {
       agentMode,
       config.agentRole,
       config.feedbackConditionId,
-      promptSnapshot
+      promptSnapshot,
+      { displayName, student }
     );
     const roomMetadata = JSON.parse(roomConfig.metadata);
     const requestedAgents = roomConfig.agents.map((agent) => ({
@@ -108,7 +126,9 @@ export async function POST(req: Request) {
 
     logTokenEvent('issuing participant token', {
       roomName,
-      participantName,
+      displayName,
+      studentId: student.id,
+      studentNumber: student.studentNumber,
       participantIdentity,
       requestedAgentMode: body?.agent_mode ?? null,
       inferredAgentMode: agentMode,
@@ -123,7 +143,7 @@ export async function POST(req: Request) {
     });
 
     const participantToken = await createParticipantToken(
-      { identity: participantIdentity, name: participantName },
+      { identity: participantIdentity, name: displayName },
       roomName,
       roomConfig
     );
@@ -135,7 +155,7 @@ export async function POST(req: Request) {
     const data: ConnectionDetails = {
       serverUrl: LIVEKIT_URL,
       roomName,
-      participantName,
+      participantName: displayName,
       participantToken,
     };
     logTokenEvent('participant token issued', {
@@ -171,6 +191,19 @@ function safeParseJson(value: string): unknown {
   } catch {
     return value;
   }
+}
+
+function safeIdentityPart(value: string) {
+  return (
+    value
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]+/g, '_')
+      .slice(0, 64) || 'student'
+  );
+}
+
+function createStudentParticipantIdentity(student: StudentSession) {
+  return `student-${safeIdentityPart(student.studentNumber)}-${Math.floor(Math.random() * 10_000)}`;
 }
 
 async function readRuntimeConfig(): Promise<RuntimeConfig> {
@@ -210,10 +243,22 @@ function buildRoomConfig(
   agentMode: AgentMode,
   agentRole: AgentRole,
   feedbackConditionId: string,
-  promptSnapshot?: RealtimePromptSnapshot
+  promptSnapshot?: RealtimePromptSnapshot,
+  studentContext?: StudentTokenContext
 ): RoomConfiguration {
+  const studentMetadata = studentContext
+    ? {
+        studentId: studentContext.student.id,
+        studentNumber: studentContext.student.studentNumber,
+        studentName: studentContext.student.name,
+        studentDisplayName: studentContext.displayName,
+        studentClassNumber: studentContext.student.classNumber,
+        studentRollNumber: studentContext.student.rollNumber,
+      }
+    : {};
   const metadata = JSON.stringify({
     agentMode,
+    ...studentMetadata,
     ...(agentMode === 'realtime'
       ? {
           agentRole,

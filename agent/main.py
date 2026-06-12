@@ -155,6 +155,31 @@ def _metadata_prompt_version_id(metadata) -> str | None:
     return version_id if version_id and version_id != "default" else None
 
 
+def _metadata_student_context(metadata) -> dict:
+    if not metadata:
+        return {}
+    try:
+        parsed = json.loads(metadata) if isinstance(metadata, str) else metadata
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+
+    values = {
+        "student_id": parsed.get("studentId"),
+        "student_number": parsed.get("studentNumber"),
+        "student_name": parsed.get("studentName"),
+        "student_display_name": parsed.get("studentDisplayName"),
+        "student_class_number": parsed.get("studentClassNumber"),
+        "student_roll_number": parsed.get("studentRollNumber"),
+    }
+    return {
+        key: value
+        for key, value in values.items()
+        if isinstance(value, (str, int)) and str(value).strip()
+    }
+
+
 def _resolve_realtime_job_role(ctx: JobContext, fallback: str) -> str:
     for metadata in (
         getattr(ctx.job, "metadata", None),
@@ -201,6 +226,18 @@ def _resolve_realtime_prompt_version_id(ctx: JobContext) -> str | None:
         if prompt_version_id:
             return prompt_version_id
     return None
+
+
+def _resolve_realtime_student_context(ctx: JobContext) -> dict:
+    for metadata in (
+        getattr(ctx.job, "metadata", None),
+        getattr(ctx.room, "metadata", None),
+        getattr(getattr(ctx.job, "room", None), "metadata", None),
+    ):
+        student_context = _metadata_student_context(metadata)
+        if student_context:
+            return student_context
+    return {}
 
 
 class Assistant(Agent):
@@ -492,6 +529,7 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
     task_card_id = _resolve_realtime_task_card_id(ctx)
     feedback_condition_id = _resolve_realtime_feedback_condition_id(ctx)
     prompt_version_id = _resolve_realtime_prompt_version_id(ctx)
+    student_context = _resolve_realtime_student_context(ctx)
     prompt_source = await asyncio.to_thread(
         load_realtime_prompt_source,
         task_card_id,
@@ -534,6 +572,7 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
             "prompt_id": prompt_source.prompt_version_id or "default",
             "prompt_version_id": prompt_source.prompt_version_id,
             "prompt_saved_at": prompt_source.saved_at,
+            **student_context,
         },
     )
     egress = EgressRecorder(ctx.room.name, conv_logger.session_id)

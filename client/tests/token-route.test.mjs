@@ -79,6 +79,18 @@ function loadTokenRoute(options = {}) {
   const accessTokens = [];
   const createdRooms = [];
   const createdDispatches = [];
+  const studentSession = Object.prototype.hasOwnProperty.call(options, 'studentSession')
+    ? options.studentSession
+    : {
+        id: 'student-id-1',
+        studentNumber: '20260001',
+        name: '김민지',
+        englishName: 'Minji Kim',
+        classNumber: 9,
+        rollNumber: 2,
+        issuedAt: 1,
+        expiresAt: 9999999999,
+      };
   const processMock = {
     env: {
       LIVEKIT_API_KEY: 'test-key',
@@ -123,14 +135,14 @@ function loadTokenRoute(options = {}) {
       this.apiSecret = apiSecret;
     }
 
-    async createRoom(options) {
-      createdRooms.push(options);
-      if (options.throwAlreadyExists) {
+    async createRoom(roomOptions) {
+      createdRooms.push(roomOptions);
+      if (options.roomAlreadyExists) {
         const error = new Error('room already exists');
         error.code = 'already_exists';
         throw error;
       }
-      return options;
+      return roomOptions;
     }
   }
 
@@ -141,7 +153,10 @@ function loadTokenRoute(options = {}) {
       this.apiSecret = apiSecret;
     }
 
-    async listDispatch() {
+    async listDispatch(roomName) {
+      if (options.existingDispatchAgentName) {
+        return [{ roomName, agentName: options.existingDispatchAgentName }];
+      }
       return [];
     }
 
@@ -208,6 +223,16 @@ function loadTokenRoute(options = {}) {
           }),
         };
       }
+      if (specifier === '@/lib/student-auth') {
+        return {
+          getStudentSession: async () => studentSession,
+        };
+      }
+      if (specifier === '@/lib/student') {
+        return {
+          studentDefaultDisplayName: (student) => student.englishName || student.name,
+        };
+      }
       return require(specifier);
     },
     processMock
@@ -223,7 +248,7 @@ test('token route creates a named LiveKit room config with agent dispatch', asyn
 
   const response = await exports.POST({
     json: async () => ({
-      participant_name: 'Debug User',
+      display_name: 'Debug User',
       room_name: 'realtime-debug-room',
       agent_mode: 'realtime',
     }),
@@ -231,8 +256,11 @@ test('token route creates a named LiveKit room config with agent dispatch', asyn
 
   assert.equal(response.status, 200);
   assert.equal(response.jsonBody.participantToken, 'fake-token');
+  assert.equal(response.jsonBody.participantName, 'Debug User');
 
   const token = accessTokens[0];
+  assert.match(token.tokenOptions.identity, /^student-20260001-/);
+  assert.equal(token.tokenOptions.name, 'Debug User');
   assert.equal(token.grant.room, 'realtime-debug-room');
   assert.equal(token.grant.roomCreate, true);
   assert.equal(token.grant.roomJoin, true);
@@ -242,9 +270,57 @@ test('token route creates a named LiveKit room config with agent dispatch', asyn
   const metadata = JSON.parse(token.assignedRoomConfig.agents[0].metadata);
   assert.equal(metadata.promptVersionId, CUSTOM_PROMPT_VERSION.promptId);
   assert.equal(metadata.promptSource, 'custom');
+  assert.equal(metadata.studentId, 'student-id-1');
+  assert.equal(metadata.studentNumber, '20260001');
+  assert.equal(metadata.studentDisplayName, 'Debug User');
+  assert.equal(metadata.studentClassNumber, 9);
+  assert.equal(metadata.studentRollNumber, 2);
 
   assert.equal(createdRooms.length, 1);
   assert.equal(createdRooms[0].name, 'realtime-debug-room');
   assert.equal(createdRooms[0].agents[0].agentName, 'realtime-agent');
   assert.equal(createdDispatches.length, 0);
+});
+
+test('token route includes student metadata for pipeline rooms', async () => {
+  const { exports, accessTokens, createdRooms } = loadTokenRoute();
+
+  const response = await exports.POST({
+    json: async () => ({
+      display_name: 'Debug User',
+      room_name: '1반-1그룹',
+      agent_mode: 'pipeline',
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.jsonBody.participantName, 'Debug User');
+
+  const token = accessTokens[0];
+  assert.match(token.tokenOptions.identity, /^student-20260001-/);
+  assert.equal(token.assignedRoomConfig.agents[0].agentName, 'pipeline-agent');
+  const metadata = JSON.parse(token.assignedRoomConfig.metadata);
+  assert.equal(metadata.agentMode, 'pipeline');
+  assert.equal(metadata.studentId, 'student-id-1');
+  assert.equal(metadata.studentNumber, '20260001');
+  assert.equal(metadata.studentDisplayName, 'Debug User');
+  assert.equal(metadata.studentClassNumber, 9);
+  assert.equal(metadata.studentRollNumber, 2);
+  assert.equal(createdRooms.length, 0);
+});
+
+test('token route rejects requests without a student session', async () => {
+  const { exports, accessTokens } = loadTokenRoute({ studentSession: null });
+
+  const response = await exports.POST({
+    json: async () => ({
+      display_name: 'Debug User',
+      room_name: 'realtime-debug-room',
+      agent_mode: 'realtime',
+    }),
+  });
+
+  assert.equal(response.status, 401);
+  assert.equal(response.jsonBody.error, '학생 로그인이 필요합니다.');
+  assert.equal(accessTokens.length, 0);
 });
