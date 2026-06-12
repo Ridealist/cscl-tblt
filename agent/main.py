@@ -77,6 +77,18 @@ REALTIME_TTS_VOICE_BY_SESSION_PURPOSE = {
     "evaluation": "cccc21e8-5bcf-4ff0-bc7f-be4e40afc544",  # Kate
     "practice": "32b3f3c5-7171-46aa-abe7-b598964aa793",  # Daisy
 }
+REALTIME_TTS_EXTRA_KWARGS_BY_SESSION_PURPOSE = {
+    "evaluation": {
+        "speed": 0.7,
+        "volume": 1.0,
+        # "emotion": "excited",
+    },
+    "practice": {
+        "speed": 0.8,
+        "volume": 1.2,
+        # "emotion": "excited",
+    },
+}
 
 log.info(
     "Agent worker configuration: worker_mode=%s role=%s default_mode=%s default_role=%s "
@@ -200,6 +212,15 @@ def _realtime_tts_voice_for_session_purpose(session_purpose: str | None) -> str:
     return REALTIME_TTS_VOICE_BY_SESSION_PURPOSE.get(
         session_purpose or "practice",
         REALTIME_TTS_VOICE_BY_SESSION_PURPOSE["practice"],
+    )
+
+
+def _realtime_tts_extra_kwargs_for_session_purpose(session_purpose: str | None) -> dict:
+    return dict(
+        REALTIME_TTS_EXTRA_KWARGS_BY_SESSION_PURPOSE.get(
+            session_purpose or "practice",
+            REALTIME_TTS_EXTRA_KWARGS_BY_SESSION_PURPOSE["practice"],
+        )
     )
 
 
@@ -570,6 +591,9 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
         resolved_task_card_id = task_card_id
         resolved_feedback_condition_id = feedback_condition_id
     tts_voice = _realtime_tts_voice_for_session_purpose(activity_context.get("session_purpose"))
+    tts_extra_kwargs = _realtime_tts_extra_kwargs_for_session_purpose(
+        activity_context.get("session_purpose")
+    )
     ctx.log_context_fields = {
         "room": ctx.room.name,
         "mode": "realtime",
@@ -580,11 +604,14 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
         "prompt_source": prompt_source,
         "prompt_version_id": prompt_version_id,
         "tts_voice_id": tts_voice,
+        "tts_speed": tts_extra_kwargs["speed"],
+        "tts_volume": tts_extra_kwargs["volume"],
     }
     log.info(
         "Starting realtime job: room=%s room_sid=%s job_id=%s role=%s "
         "session_purpose=%s activity_type=%s feedback_condition_id=%s "
-        "task_card_id=%s prompt_source=%s prompt_version_id=%s tts_voice_id=%s metadata=%s",
+        "task_card_id=%s prompt_source=%s prompt_version_id=%s tts_voice_id=%s "
+        "tts_speed=%s tts_volume=%s metadata=%s",
         ctx.room.name,
         ctx.job.room.sid,
         getattr(ctx.job, "id", None),
@@ -596,6 +623,8 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
         prompt_source,
         prompt_version_id,
         tts_voice,
+        tts_extra_kwargs["speed"],
+        tts_extra_kwargs["volume"],
         getattr(ctx.job, "metadata", None),
     )
     prompt_metadata = (
@@ -623,6 +652,8 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
             "activity_type": activity_context.get("activity_type"),
             "session_purpose": activity_context.get("session_purpose"),
             "tts_voice_id": tts_voice,
+            "tts_speed": tts_extra_kwargs["speed"],
+            "tts_volume": tts_extra_kwargs["volume"],
             **prompt_metadata,
         },
     )
@@ -666,17 +697,13 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
         ),
         tts=inference.TTS(
             model="cartesia/sonic-3",
-            # voice="e3827ec5-697a-4b7c-9704-1a23041bbc51", # Dottie
+            language="en",
             voice=tts_voice,
+            # voice="e3827ec5-697a-4b7c-9704-1a23041bbc51", # Dottie
             # voice="df872fcd-da17-4b01-a49f-a80d7aaee95e", # Cameron
             # voice="c58bda25-abd5-4c72-97a2-4dbe049b368d", # Garrett
             # voice="f4a3a8e4-694c-4c45-9ca0-27caf97901b5", # Gavin
-            language="en",
-            extra_kwargs={
-                "speed": 0.8,
-                "volume": 1.2,
-                # "emotion": "excited"
-            }
+            extra_kwargs=tts_extra_kwargs,
         ),
     )
 

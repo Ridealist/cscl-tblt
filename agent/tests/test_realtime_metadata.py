@@ -72,6 +72,7 @@ _install_livekit_mocks()
 from main import (  # noqa: E402
     _metadata_activity_context,
     _normalize_activity_context,
+    _realtime_tts_extra_kwargs_for_session_purpose,
     _realtime_tts_voice_for_session_purpose,
 )
 
@@ -126,3 +127,18 @@ def test_realtime_tts_voice_changes_by_session_purpose() -> None:
         _realtime_tts_voice_for_session_purpose(None)
         == "32b3f3c5-7171-46aa-abe7-b598964aa793"
     )
+
+
+def test_realtime_tts_extra_kwargs_change_by_session_purpose() -> None:
+    assert _realtime_tts_extra_kwargs_for_session_purpose("evaluation") == {
+        "speed": 0.7,
+        "volume": 1.0,
+    }
+    assert _realtime_tts_extra_kwargs_for_session_purpose("practice") == {
+        "speed": 0.8,
+        "volume": 1.2,
+    }
+    assert _realtime_tts_extra_kwargs_for_session_purpose(None) == {
+        "speed": 0.8,
+        "volume": 1.2,
+    }
