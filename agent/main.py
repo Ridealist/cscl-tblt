@@ -22,10 +22,13 @@ from egress_recorder import EgressRecorder
 from logger import ConversationLogger
 from prompt_pipeline import build_prompt as build_pipeline_prompt
 from prompt_pipeline import _clean_names
-from prompt_realtime import build_prompt as build_realtime_prompt
-from prompt_realtime import get_opening_sentence as get_realtime_opening_sentence
-from prompt_realtime import normalize_feedback_condition as normalize_realtime_feedback_condition
-from prompt_realtime import normalize_role as normalize_realtime_role
+from prompt_realtime import (
+    build_prompt_from_source as build_realtime_prompt_from_source,
+    get_opening_sentence_from_source as get_realtime_opening_sentence_from_source,
+    load_prompt_source as load_realtime_prompt_source,
+    normalize_feedback_condition as normalize_realtime_feedback_condition,
+    normalize_role as normalize_realtime_role,
+)
 from openai.types.beta.realtime.session import TurnDetection
 
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -134,6 +137,24 @@ def _metadata_feedback_condition_id(metadata) -> str | None:
     )
 
 
+def _metadata_prompt_version_id(metadata) -> str | None:
+    if not metadata:
+        return None
+    try:
+        parsed = json.loads(metadata) if isinstance(metadata, str) else metadata
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    version_id = parsed.get("promptVersionId")
+    if not isinstance(version_id, str) or not version_id.strip():
+        version_id = parsed.get("promptId") if parsed.get("promptSource") == "custom" else None
+    if not isinstance(version_id, str):
+        return None
+    version_id = version_id.strip()
+    return version_id if version_id and version_id != "default" else None
+
+
 def _resolve_realtime_job_role(ctx: JobContext, fallback: str) -> str:
     for metadata in (
         getattr(ctx.job, "metadata", None),
@@ -167,6 +188,18 @@ def _resolve_realtime_feedback_condition_id(ctx: JobContext) -> str | None:
         feedback_condition_id = _metadata_feedback_condition_id(metadata)
         if feedback_condition_id:
             return feedback_condition_id
+    return None
+
+
+def _resolve_realtime_prompt_version_id(ctx: JobContext) -> str | None:
+    for metadata in (
+        getattr(ctx.job, "metadata", None),
+        getattr(ctx.room, "metadata", None),
+        getattr(getattr(ctx.job, "room", None), "metadata", None),
+    ):
+        prompt_version_id = _metadata_prompt_version_id(metadata)
+        if prompt_version_id:
+            return prompt_version_id
     return None
 
 
@@ -380,24 +413,18 @@ class RealtimeAssistant(Agent):
         self,
         get_name_fn,
         role: str,
-        task_card_id: str | None = None,
-        feedback_condition_id: str | None = None,
+        prompt_source,
     ) -> None:
         super().__init__(
-            instructions=build_realtime_prompt(
-                role=role,
-                task_card_id=task_card_id,
-                feedback_condition_id=feedback_condition_id,
-            )
+            instructions=build_realtime_prompt_from_source(prompt_source, role=role)
         )
         self._get_name = get_name_fn
         self._role = role
-        self._task_card_id = task_card_id
-        self._feedback_condition_id = feedback_condition_id
-        self._opening_sentence = get_realtime_opening_sentence(
-            task_card_id,
-            feedback_condition_id,
-        )
+        self._prompt_source = prompt_source
+        self._task_card_id = prompt_source.task_card_id
+        self._feedback_condition_id = prompt_source.feedback_condition
+        self._prompt_version_id = prompt_source.prompt_version_id
+        self._opening_sentence = get_realtime_opening_sentence_from_source(prompt_source)
 
     async def on_enter(self) -> None:
         """1:1 realtime 세션 입장 직후 참가자 이름을 반영하고 첫 턴을 생성."""
@@ -405,18 +432,19 @@ class RealtimeAssistant(Agent):
         name = self._get_name()
         log.info(
             "Realtime assistant entering session: role=%s feedback_condition_id=%s "
-            "task_card_id=%s participant_name=%s",
+            "task_card_id=%s prompt_source=%s prompt_version_id=%s participant_name=%s",
             self._role,
             self._feedback_condition_id,
             self._task_card_id,
+            self._prompt_source.source,
+            self._prompt_version_id,
             name,
         )
         await self.update_instructions(
-            build_realtime_prompt(
+            build_realtime_prompt_from_source(
+                self._prompt_source,
                 name,
                 role=self._role,
-                task_card_id=self._task_card_id,
-                feedback_condition_id=self._feedback_condition_id,
             )
         )
 
@@ -433,21 +461,35 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
     role = _resolve_realtime_job_role(ctx, fallback=role)
     task_card_id = _resolve_realtime_task_card_id(ctx)
     feedback_condition_id = _resolve_realtime_feedback_condition_id(ctx)
+    prompt_version_id = _resolve_realtime_prompt_version_id(ctx)
+    prompt_source = await asyncio.to_thread(
+        load_realtime_prompt_source,
+        task_card_id,
+        feedback_condition_id,
+        prompt_version_id,
+    )
+    resolved_task_card_id = prompt_source.task_card_id or task_card_id
+    resolved_feedback_condition_id = prompt_source.feedback_condition
     ctx.log_context_fields = {
         "room": ctx.room.name,
         "mode": "realtime",
         "role": role,
-        "feedback_condition_id": feedback_condition_id,
+        "feedback_condition_id": resolved_feedback_condition_id,
+        "prompt_source": prompt_source.source,
+        "prompt_version_id": prompt_source.prompt_version_id,
     }
     log.info(
         "Starting realtime job: room=%s room_sid=%s job_id=%s role=%s "
-        "feedback_condition_id=%s task_card_id=%s metadata=%s",
+        "feedback_condition_id=%s task_card_id=%s prompt_source=%s "
+        "prompt_version_id=%s metadata=%s",
         ctx.room.name,
         ctx.job.room.sid,
         getattr(ctx.job, "id", None),
         role,
-        feedback_condition_id,
-        task_card_id,
+        resolved_feedback_condition_id,
+        resolved_task_card_id,
+        prompt_source.source,
+        prompt_source.prompt_version_id,
         getattr(ctx.job, "metadata", None),
     )
     conv_logger = ConversationLogger(
@@ -456,8 +498,12 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
         metadata={
             "agent_mode": "realtime",
             "agent_role": role,
-            "feedback_condition_id": feedback_condition_id,
-            "task_card_id": task_card_id,
+            "feedback_condition_id": resolved_feedback_condition_id,
+            "task_card_id": resolved_task_card_id,
+            "prompt_source": prompt_source.source,
+            "prompt_id": prompt_source.prompt_version_id or "default",
+            "prompt_version_id": prompt_source.prompt_version_id,
+            "prompt_saved_at": prompt_source.saved_at,
         },
     )
     egress = EgressRecorder(ctx.room.name, conv_logger.session_id)
@@ -479,8 +525,7 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
     assistant = RealtimeAssistant(
         get_name_fn=lambda: participant["name"],
         role=role,
-        task_card_id=task_card_id,
-        feedback_condition_id=feedback_condition_id,
+        prompt_source=prompt_source,
     )
 
     session = AgentSession(
@@ -553,11 +598,10 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
         if participant["identity"] is None:
             _register_participant(p)
             await assistant.update_instructions(
-                build_realtime_prompt(
+                build_realtime_prompt_from_source(
+                    prompt_source,
                     participant["name"],
                     role=role,
-                    task_card_id=task_card_id,
-                    feedback_condition_id=feedback_condition_id,
                 )
             )
         else:

@@ -1,0 +1,109 @@
+import json
+import sys
+import types
+
+
+class _FakeAgent:
+    def __init__(self, *args, **kwargs):
+        pass
+
+
+class _FakeAgentServer:
+    def rtc_session(self, *args, **kwargs):
+        def decorator(fn):
+            return fn
+
+        return decorator
+
+
+class _FakeTurnDetection:
+    def __init__(self, *args, **kwargs):
+        pass
+
+
+def _install_livekit_mocks() -> None:
+    livekit = types.ModuleType("livekit")
+    api = types.ModuleType("livekit.api")
+    api.LiveKitAPI = lambda *args, **kwargs: types.SimpleNamespace(
+        egress=types.SimpleNamespace(),
+        aclose=lambda: None,
+    )
+    api.S3Upload = lambda *args, **kwargs: types.SimpleNamespace()
+    api.RoomCompositeEgressRequest = lambda *args, **kwargs: types.SimpleNamespace()
+    api.EncodedFileOutput = lambda *args, **kwargs: types.SimpleNamespace()
+    api.EncodedFileType = types.SimpleNamespace(MP3="MP3")
+    api.StopEgressRequest = lambda *args, **kwargs: types.SimpleNamespace()
+    livekit.api = api
+
+    agents = types.ModuleType("livekit.agents")
+    agents.Agent = _FakeAgent
+    agents.AgentServer = _FakeAgentServer
+    agents.AgentSession = object
+    agents.JobContext = object
+    agents.JobProcess = object
+    agents.cli = types.SimpleNamespace(run_app=lambda server: None)
+    agents.room_io = types.SimpleNamespace()
+    agents.llm = types.SimpleNamespace(ChatContext=object, ChatMessage=object)
+    agents.inference = types.SimpleNamespace()
+
+    plugins = types.ModuleType("livekit.plugins")
+    plugins.openai = types.SimpleNamespace()
+
+    openai_module = types.ModuleType("openai")
+    openai_types = types.ModuleType("openai.types")
+    openai_beta = types.ModuleType("openai.types.beta")
+    openai_realtime = types.ModuleType("openai.types.beta.realtime")
+    openai_session = types.ModuleType("openai.types.beta.realtime.session")
+    openai_session.TurnDetection = _FakeTurnDetection
+
+    sys.modules.setdefault("livekit", livekit)
+    sys.modules.setdefault("livekit.api", api)
+    sys.modules.setdefault("livekit.agents", agents)
+    sys.modules.setdefault("livekit.plugins", plugins)
+    sys.modules.setdefault("openai", openai_module)
+    sys.modules.setdefault("openai.types", openai_types)
+    sys.modules.setdefault("openai.types.beta", openai_beta)
+    sys.modules.setdefault("openai.types.beta.realtime", openai_realtime)
+    sys.modules.setdefault("openai.types.beta.realtime.session", openai_session)
+
+
+_install_livekit_mocks()
+
+from main import _metadata_prompt_version_id  # noqa: E402
+
+
+def test_metadata_prompt_version_id_prefers_explicit_version_id() -> None:
+    metadata = json.dumps(
+        {
+            "agentMode": "realtime",
+            "promptId": "legacy-custom-id",
+            "promptVersionId": "active-version-id",
+            "promptSource": "custom",
+        }
+    )
+
+    assert _metadata_prompt_version_id(metadata) == "active-version-id"
+
+
+def test_metadata_prompt_version_id_falls_back_to_custom_prompt_id() -> None:
+    metadata = json.dumps(
+        {
+            "agentMode": "realtime",
+            "promptId": "custom-prompt-id",
+            "promptSource": "custom",
+        }
+    )
+
+    assert _metadata_prompt_version_id(metadata) == "custom-prompt-id"
+
+
+def test_metadata_prompt_version_id_ignores_default_prompt_id() -> None:
+    metadata = json.dumps(
+        {
+            "agentMode": "realtime",
+            "promptId": "default",
+            "promptSource": "default",
+        }
+    )
+
+    assert _metadata_prompt_version_id(metadata) is None

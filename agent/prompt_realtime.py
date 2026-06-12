@@ -1,20 +1,76 @@
 import json
+import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 
 AgentRole = Literal["dominant", "collaborative"]
 FeedbackCondition = Literal["no_corrective", "explicit_correction"]
 ConversationExamples = dict[str, str]
+PromptSource = Literal["default", "custom"]
 DEFAULT_FEEDBACK_CONDITION_ID: FeedbackCondition = "no_corrective"
 DEFAULT_OPENING_SENTENCE = (
     "Hi, I'm Daisy. Let's talk about today's task together. What is your name?"
 )
-PROMPT_CONFIG_PATH = Path(__file__).parent.parent / "prompt_config.json"
 DEFAULT_PROMPT_SOURCE_DIR = Path(__file__).parent.parent / "prompts" / "realtime"
 PROMPT_SOURCE_MANIFEST_PATH = DEFAULT_PROMPT_SOURCE_DIR / "manifest.json"
 PROMPT_FIELDS = ("basePrompt", "dominantPrompt", "collaborativePrompt")
-LEGACY_PROMPT_FIELDS = (*PROMPT_FIELDS, "taskCardPrompt")
+PROMPT_VERSION_COLUMNS = ",".join(
+    (
+        "id",
+        "base_prompt",
+        "dominant_prompt",
+        "collaborative_prompt",
+        "feedback_condition_id",
+        "feedback_prompt",
+        "task_card_id",
+        "task_card_prompt",
+        "source",
+        "is_active",
+        "created_at",
+    )
+)
+
+
+class PromptVersionFetchError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class ResolvedRealtimePrompt:
+    base_prompt: str
+    role_prompts: dict[AgentRole, str]
+    feedback_condition: FeedbackCondition
+    feedback_prompt: str
+    task_card_prompt: str
+    conversation_examples: ConversationExamples
+    source: PromptSource
+    prompt_version_id: str | None = None
+    saved_at: str | None = None
+    task_card_id: str | None = None
+
+    def as_tuple(
+        self,
+    ) -> tuple[
+        str,
+        dict[AgentRole, str],
+        FeedbackCondition,
+        str,
+        str,
+        ConversationExamples,
+    ]:
+        return (
+            self.base_prompt,
+            self.role_prompts,
+            self.feedback_condition,
+            self.feedback_prompt,
+            self.task_card_prompt,
+            self.conversation_examples,
+        )
 
 
 def normalize_role(role: str | None = None) -> AgentRole:
@@ -196,103 +252,150 @@ def _load_task_card_source(
     return value, examples
 
 
-def _load_prompt_config_file(
-    path: Path,
-    task_card_id: str | None = None,
-    feedback_condition_id: str | None = None,
-) -> tuple[
-    str,
-    dict[AgentRole, str],
-    FeedbackCondition,
-    str,
-    str,
-    ConversationExamples,
-] | None:
+def _load_task_card_examples_for_id(task_card_id: str | None) -> ConversationExamples:
+    if not task_card_id:
+        return {}
     try:
-        with open(path, encoding="utf-8") as f:
-            raw = json.load(f)
+        manifest = json.loads(PROMPT_SOURCE_MANIFEST_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(manifest, dict):
+        return {}
+    task_card_source = _load_task_card_source(
+        DEFAULT_PROMPT_SOURCE_DIR,
+        manifest,
+        task_card_id,
+    )
+    if not task_card_source:
+        return {}
+    _, conversation_examples = task_card_source
+    return conversation_examples
+
+
+def _read_default_task_card_id() -> str | None:
+    try:
+        manifest = json.loads(PROMPT_SOURCE_MANIFEST_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-
-    realtime = raw.get("realtime") if isinstance(raw, dict) else None
-    if not isinstance(realtime, dict):
+    if not isinstance(manifest, dict):
         return None
+    task_card_id = manifest.get("defaultTaskCardId")
+    return task_card_id.strip() if isinstance(task_card_id, str) and task_card_id.strip() else None
 
-    base_prompt = _valid_prompt_text(realtime.get("basePrompt"))
-    dominant_prompt = _valid_prompt_text(realtime.get("dominantPrompt"))
-    collaborative_prompt = _valid_prompt_text(
-        realtime.get("collaborativePrompt", realtime.get("passivePrompt"))
+
+def _get_supabase_prompt_env() -> tuple[str, str]:
+    url = (
+        os.environ.get("SUPABASE_URL")
+        or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
+        or ""
+    ).strip()
+    key = (
+        os.environ.get("SUPABASE_SECRET_KEY")
+        or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        or ""
+    ).strip()
+    if not url or not key:
+        raise PromptVersionFetchError(
+            "Supabase prompt version fetch is not configured."
+        )
+    return url.rstrip("/"), key
+
+
+def _fetch_prompt_version_row(prompt_version_id: str) -> dict:
+    version_id = prompt_version_id.strip()
+    if not version_id:
+        raise PromptVersionFetchError("Prompt version id is empty.")
+    url, key = _get_supabase_prompt_env()
+    endpoint = (
+        f"{url}/rest/v1/realtime_prompt_versions"
+        f"?id=eq.{quote(version_id, safe='')}&select={PROMPT_VERSION_COLUMNS}"
     )
-    configured_task_card_id = realtime.get("taskCardId")
-    selected_task_card_id = task_card_id or (
-        configured_task_card_id if isinstance(configured_task_card_id, str) else None
+    request = Request(
+        endpoint,
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {key}",
+            "apikey": key,
+        },
     )
-    configured_feedback_condition_id = realtime.get("feedbackConditionId")
-    selected_feedback_condition_id = feedback_condition_id or (
-        configured_feedback_condition_id
-        if isinstance(configured_feedback_condition_id, str)
+    try:
+        with urlopen(request, timeout=5) as response:
+            payload = response.read().decode("utf-8")
+    except (HTTPError, URLError, TimeoutError, OSError) as exc:
+        raise PromptVersionFetchError(
+            f"Prompt version fetch failed: {version_id}"
+        ) from exc
+
+    try:
+        rows = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise PromptVersionFetchError(
+            f"Prompt version response is invalid JSON: {version_id}"
+        ) from exc
+    if not isinstance(rows, list) or not rows:
+        raise PromptVersionFetchError(f"Prompt version was not found: {version_id}")
+    row = rows[0]
+    if not isinstance(row, dict):
+        raise PromptVersionFetchError(
+            f"Prompt version response has invalid shape: {version_id}"
+        )
+    return row
+
+
+def _load_prompt_version_source(prompt_version_id: str) -> ResolvedRealtimePrompt:
+    row = _fetch_prompt_version_row(prompt_version_id)
+    base_prompt = _valid_prompt_text(row.get("base_prompt"))
+    dominant_prompt = _valid_prompt_text(row.get("dominant_prompt"))
+    collaborative_prompt = _valid_prompt_text(row.get("collaborative_prompt"))
+    feedback_prompt = _valid_prompt_text(row.get("feedback_prompt"))
+    task_card_prompt = _valid_prompt_text(row.get("task_card_prompt"))
+    row_version_id = row.get("id")
+    resolved_version_id = (
+        row_version_id.strip()
+        if isinstance(row_version_id, str) and row_version_id.strip()
+        else prompt_version_id.strip()
+    )
+    task_card_id = row.get("task_card_id")
+    resolved_task_card_id = (
+        task_card_id.strip()
+        if isinstance(task_card_id, str) and task_card_id.strip()
         else None
     )
-    task_card_prompt = (
-        None
-        if selected_task_card_id
-        else _valid_prompt_text(realtime.get("taskCardPrompt"))
+    feedback_condition_id = row.get("feedback_condition_id")
+    selected_feedback = normalize_feedback_condition(
+        feedback_condition_id
+        if isinstance(feedback_condition_id, str) and feedback_condition_id.strip()
+        else None
     )
-    feedback_prompt = (
-        None
-        if selected_feedback_condition_id
-        else _valid_prompt_text(realtime.get("feedbackPrompt"))
-    )
-    selected_feedback = normalize_feedback_condition(selected_feedback_condition_id)
-    conversation_examples: ConversationExamples = {}
+    saved_at = row.get("created_at")
 
-    if not task_card_prompt or not feedback_prompt:
-        try:
-            manifest = json.loads(PROMPT_SOURCE_MANIFEST_PATH.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return None
-        if isinstance(manifest, dict) and not task_card_prompt:
-            task_card_source = _load_task_card_source(
-                DEFAULT_PROMPT_SOURCE_DIR,
-                manifest,
-                selected_task_card_id.strip()
-                if isinstance(selected_task_card_id, str) and selected_task_card_id.strip()
-                else None,
-            )
-            if task_card_source:
-                task_card_prompt, conversation_examples = task_card_source
-            else:
-                conversation_examples = {}
-        elif not task_card_prompt:
-            conversation_examples = {}
+    if not all(
+        (
+            base_prompt,
+            dominant_prompt,
+            collaborative_prompt,
+            feedback_prompt,
+            task_card_prompt,
+        )
+    ):
+        raise PromptVersionFetchError(
+            f"Prompt version row is missing required prompt fields: {resolved_version_id}"
+        )
 
-        if isinstance(manifest, dict) and not feedback_prompt:
-            feedback_source = _load_feedback_source(
-                DEFAULT_PROMPT_SOURCE_DIR,
-                manifest,
-                selected_feedback_condition_id.strip()
-                if isinstance(selected_feedback_condition_id, str)
-                and selected_feedback_condition_id.strip()
-                else None,
-            )
-            if feedback_source:
-                selected_feedback, feedback_prompt = feedback_source
-    else:
-        conversation_examples = {}
-
-    if not all((base_prompt, dominant_prompt, collaborative_prompt, feedback_prompt, task_card_prompt)):
-        return None
-
-    return (
-        base_prompt,
-        {
+    return ResolvedRealtimePrompt(
+        base_prompt=base_prompt,
+        role_prompts={
             "dominant": dominant_prompt,
             "collaborative": collaborative_prompt,
         },
-        selected_feedback,
-        feedback_prompt,
-        task_card_prompt,
-        conversation_examples,
+        feedback_condition=selected_feedback,
+        feedback_prompt=feedback_prompt,
+        task_card_prompt=task_card_prompt,
+        conversation_examples=_load_task_card_examples_for_id(resolved_task_card_id),
+        source="custom",
+        prompt_version_id=resolved_version_id,
+        saved_at=saved_at if isinstance(saved_at, str) and saved_at.strip() else None,
+        task_card_id=resolved_task_card_id,
     )
 
 
@@ -373,9 +476,64 @@ def load_default_prompt_config(
     return config
 
 
+def _resolved_prompt_from_tuple(
+    config: tuple[
+        str,
+        dict[AgentRole, str],
+        FeedbackCondition,
+        str,
+        str,
+        ConversationExamples,
+    ],
+    *,
+    source: PromptSource,
+    prompt_version_id: str | None = None,
+    saved_at: str | None = None,
+    task_card_id: str | None = None,
+) -> ResolvedRealtimePrompt:
+    (
+        base_prompt,
+        role_prompts,
+        selected_feedback,
+        feedback_prompt,
+        task_card_prompt,
+        conversation_examples,
+    ) = config
+    return ResolvedRealtimePrompt(
+        base_prompt=base_prompt,
+        role_prompts=role_prompts,
+        feedback_condition=selected_feedback,
+        feedback_prompt=feedback_prompt,
+        task_card_prompt=task_card_prompt,
+        conversation_examples=conversation_examples,
+        source=source,
+        prompt_version_id=prompt_version_id,
+        saved_at=saved_at,
+        task_card_id=task_card_id,
+    )
+
+
+def load_prompt_source(
+    task_card_id: str | None = None,
+    feedback_condition_id: str | None = None,
+    prompt_version_id: str | None = None,
+) -> ResolvedRealtimePrompt:
+    if isinstance(prompt_version_id, str) and prompt_version_id.strip():
+        return _load_prompt_version_source(prompt_version_id)
+
+    return _resolved_prompt_from_tuple(
+        load_default_prompt_config(task_card_id, feedback_condition_id),
+        source="default",
+        task_card_id=task_card_id.strip()
+        if isinstance(task_card_id, str) and task_card_id.strip()
+        else _read_default_task_card_id(),
+    )
+
+
 def load_prompt_config(
     task_card_id: str | None = None,
     feedback_condition_id: str | None = None,
+    prompt_version_id: str | None = None,
 ) -> tuple[
     str,
     dict[AgentRole, str],
@@ -384,40 +542,39 @@ def load_prompt_config(
     str,
     ConversationExamples,
 ]:
-    default_config = load_default_prompt_config(task_card_id, feedback_condition_id)
-    return _load_prompt_config_file(PROMPT_CONFIG_PATH, task_card_id, feedback_condition_id) or default_config
+    return load_prompt_source(
+        task_card_id,
+        feedback_condition_id,
+        prompt_version_id,
+    ).as_tuple()
+
+
+def get_opening_sentence_from_source(source: ResolvedRealtimePrompt) -> str:
+    return _extract_task_card_opening(source.task_card_prompt) or DEFAULT_OPENING_SENTENCE
 
 
 def get_opening_sentence(
     task_card_id: str | None = None,
     feedback_condition_id: str | None = None,
+    prompt_version_id: str | None = None,
 ) -> str:
-    _, _, _, _, task_card_prompt, _ = load_prompt_config(task_card_id, feedback_condition_id)
-    return _extract_task_card_opening(task_card_prompt) or DEFAULT_OPENING_SENTENCE
+    source = load_prompt_source(task_card_id, feedback_condition_id, prompt_version_id)
+    return get_opening_sentence_from_source(source)
 
 
-def build_prompt(
+def build_prompt_from_source(
+    source: ResolvedRealtimePrompt,
     participant_name: str | None = None,
     role: str | None = "dominant",
-    task_card_id: str | None = None,
-    feedback_condition_id: str | None = None,
 ) -> str:
-    (
-        base_prompt,
-        role_prompts,
-        selected_feedback,
-        feedback_prompt,
-        task_card_prompt,
-        conversation_examples,
-    ) = load_prompt_config(task_card_id, feedback_condition_id)
     agent_role = normalize_role(role)
     prompt = (
-        f"{base_prompt}\n\n{role_prompts[agent_role]}\n\n"
-        f"{feedback_prompt}\n\n{task_card_prompt}"
+        f"{source.base_prompt}\n\n{source.role_prompts[agent_role]}\n\n"
+        f"{source.feedback_prompt}\n\n{source.task_card_prompt}"
     )
-    conversation_example = conversation_examples.get(
-        _example_key(agent_role, selected_feedback)
-    ) or conversation_examples.get(agent_role)
+    conversation_example = source.conversation_examples.get(
+        _example_key(agent_role, source.feedback_condition)
+    ) or source.conversation_examples.get(agent_role)
     if conversation_example:
         prompt += f"\n\n{conversation_example}"
     name = participant_name.strip() if participant_name else ""
@@ -433,3 +590,14 @@ def build_prompt(
         )
 
     return prompt
+
+
+def build_prompt(
+    participant_name: str | None = None,
+    role: str | None = "dominant",
+    task_card_id: str | None = None,
+    feedback_condition_id: str | None = None,
+    prompt_version_id: str | None = None,
+) -> str:
+    source = load_prompt_source(task_card_id, feedback_condition_id, prompt_version_id)
+    return build_prompt_from_source(source, participant_name, role)

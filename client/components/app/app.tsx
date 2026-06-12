@@ -44,13 +44,16 @@ export function App({ appConfig }: AppProps) {
     }
     return TokenSource.custom(async () => {
       const info = sessionInfoRef.current;
+      if (!info?.participantName || !info.roomName) {
+        throw new Error('세션 정보가 준비되지 않았습니다.');
+      }
       const res = await fetch('/api/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          participant_name: info?.participantName,
-          room_name: info?.roomName,
-          agent_mode: info?.agentMode,
+          participant_name: info.participantName,
+          room_name: info.roomName,
+          agent_mode: info.agentMode,
         }),
       });
       if (!res.ok) {
