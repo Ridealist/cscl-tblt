@@ -10,7 +10,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
-from uuid import UUID
+from uuid import UUID, uuid4
 
 LOGS_DIR = Path(__file__).parent.parent / "logs"
 
@@ -72,6 +72,7 @@ class SupabaseConversationWriter:
         metadata: dict,
         config: SupabaseConversationConfig,
         opener=urlopen,
+        class_session_id: str | None = None,
     ) -> None:
         self.livekit_session_id = livekit_session_id
         self.room_name = room_name
@@ -79,7 +80,8 @@ class SupabaseConversationWriter:
         self.config = config
         self._opener = opener
         self._lock = threading.Lock()
-        self._class_session_id: str | None = None
+        self._class_session_id = class_session_id or str(uuid4())
+        self._session_ready = False
         self._last_metadata_json: str | None = None
 
     @classmethod
@@ -114,7 +116,7 @@ class SupabaseConversationWriter:
 
     def sync_session_metadata(self, metadata: dict) -> None:
         metadata_json = json.dumps(metadata, sort_keys=True, ensure_ascii=False)
-        if metadata_json == self._last_metadata_json and self._class_session_id:
+        if metadata_json == self._last_metadata_json and self._session_ready:
             return
 
         with self._lock:
@@ -186,12 +188,12 @@ class SupabaseConversationWriter:
             self._ensure_session_locked()
 
     def _ensure_session_locked(self) -> None:
-        if self._class_session_id:
+        if self._session_ready:
             return
 
         rows = self._request(
             "POST",
-            "class_sessions?on_conflict=livekit_session_id&select=id",
+            "class_sessions?on_conflict=id&select=id",
             self._session_payload(self.metadata),
             prefer="resolution=merge-duplicates,return=representation",
         )
@@ -201,6 +203,7 @@ class SupabaseConversationWriter:
         if not isinstance(class_session_id, str) or not class_session_id:
             raise RuntimeError("Supabase class_sessions insert returned no id.")
         self._class_session_id = class_session_id
+        self._session_ready = True
         self._last_metadata_json = json.dumps(
             self.metadata,
             sort_keys=True,
@@ -216,6 +219,7 @@ class SupabaseConversationWriter:
     def _session_payload(self, metadata: dict) -> dict:
         agent_mode = _agent_mode(metadata.get("agent_mode"))
         return {
+            "id": self._class_session_id,
             "livekit_session_id": self.livekit_session_id,
             "room_name": self.room_name,
             "agent_mode": agent_mode,
@@ -283,7 +287,7 @@ class ConversationLogger:
     ) -> None:
         logs_dir = logs_dir or LOGS_DIR
         logs_dir.mkdir(exist_ok=True)
-        ts = datetime.now().strftime("%y%m%d_%H:%M")
+        ts = datetime.now().strftime("%y%m%d_%H%M%S_%f")
         self.path = logs_dir / f"{session_id}--{ts}.json"
         self.room = room_name
         self.session_id = session_id

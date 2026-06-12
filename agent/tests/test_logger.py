@@ -200,16 +200,17 @@ def test_supabase_writer_posts_session_and_events_payloads() -> None:
 
     def opener(request, timeout):
         body = request.data.decode("utf-8") if request.data else ""
+        payload = json.loads(body) if body else None
         calls.append(
             {
                 "method": request.get_method(),
                 "url": request.full_url,
-                "body": json.loads(body) if body else None,
+                "body": payload,
                 "timeout": timeout,
             }
         )
         if "class_sessions" in request.full_url and request.get_method() == "POST":
-            return FakeResponse('[{"id":"11111111-1111-4111-8111-111111111111"}]')
+            return FakeResponse(f'[{{"id":"{payload["id"]}"}}]')
         return FakeResponse()
 
     writer = SupabaseConversationWriter(
@@ -224,6 +225,7 @@ def test_supabase_writer_posts_session_and_events_payloads() -> None:
         },
         SupabaseConversationConfig(url="http://supabase.test", key="secret", timeout=7),
         opener=opener,
+        class_session_id="11111111-1111-4111-8111-111111111111",
     )
 
     writer.start()
@@ -241,7 +243,8 @@ def test_supabase_writer_posts_session_and_events_payloads() -> None:
     )
 
     assert calls[0]["method"] == "POST"
-    assert "class_sessions?on_conflict=livekit_session_id&select=id" in calls[0]["url"]
+    assert "class_sessions?on_conflict=id&select=id" in calls[0]["url"]
+    assert calls[0]["body"]["id"] == "11111111-1111-4111-8111-111111111111"
     assert calls[0]["body"]["livekit_session_id"] == "livekit-room-sid"
     assert calls[0]["body"]["agent_mode"] == "realtime"
     assert calls[0]["body"]["agent_role"] == "collaborative"
@@ -255,21 +258,70 @@ def test_supabase_writer_posts_session_and_events_payloads() -> None:
     assert calls[1]["timeout"] == 7
 
 
+def test_supabase_writer_creates_distinct_class_sessions_for_reused_livekit_sid() -> None:
+    calls: list[dict] = []
+
+    def opener(request, timeout):
+        body = request.data.decode("utf-8") if request.data else ""
+        payload = json.loads(body) if body else None
+        calls.append(
+            {
+                "method": request.get_method(),
+                "url": request.full_url,
+                "body": payload,
+            }
+        )
+        if "class_sessions" in request.full_url and request.get_method() == "POST":
+            return FakeResponse(f'[{{"id":"{payload["id"]}"}}]')
+        return FakeResponse()
+
+    first = SupabaseConversationWriter(
+        "reused-livekit-room-sid",
+        "1-1",
+        {"agent_mode": "pipeline"},
+        SupabaseConversationConfig(url="http://supabase.test", key="secret"),
+        opener=opener,
+        class_session_id="11111111-1111-4111-8111-111111111111",
+    )
+    second = SupabaseConversationWriter(
+        "reused-livekit-room-sid",
+        "1-1",
+        {"agent_mode": "pipeline"},
+        SupabaseConversationConfig(url="http://supabase.test", key="secret"),
+        opener=opener,
+        class_session_id="22222222-2222-4222-8222-222222222222",
+    )
+
+    first.start()
+    second.start()
+
+    assert [call["body"]["livekit_session_id"] for call in calls] == [
+        "reused-livekit-room-sid",
+        "reused-livekit-room-sid",
+    ]
+    assert [call["body"]["id"] for call in calls] == [
+        "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222",
+    ]
+    assert all("class_sessions?on_conflict=id&select=id" in call["url"] for call in calls)
+
+
 def test_supabase_writer_patches_recording_metadata_and_session_end() -> None:
     calls: list[dict] = []
 
     def opener(request, timeout):
         body = request.data.decode("utf-8") if request.data else ""
+        payload = json.loads(body) if body else None
         calls.append(
             {
                 "method": request.get_method(),
                 "url": request.full_url,
-                "body": json.loads(body) if body else None,
+                "body": payload,
                 "prefer": request.headers.get("Prefer"),
             }
         )
         if "class_sessions" in request.full_url and request.get_method() == "POST":
-            return FakeResponse('[{"id":"22222222-2222-4222-8222-222222222222"}]')
+            return FakeResponse(f'[{{"id":"{payload["id"]}"}}]')
         return FakeResponse()
 
     writer = SupabaseConversationWriter(
@@ -278,6 +330,7 @@ def test_supabase_writer_patches_recording_metadata_and_session_end() -> None:
         {"agent_mode": "pipeline"},
         SupabaseConversationConfig(url="http://supabase.test", key="secret"),
         opener=opener,
+        class_session_id="22222222-2222-4222-8222-222222222222",
     )
 
     metadata = {
