@@ -147,9 +147,7 @@ export async function POST(req: Request) {
       roomName,
       roomConfig
     );
-    if (agentMode === 'realtime') {
-      await ensureRealtimeAgentDispatchRoom(roomName, agentName, roomConfig);
-    }
+    await ensureAgentDispatchRoom(roomName, agentName, roomConfig);
 
     // Return connection details
     const data: ConnectionDetails = {
@@ -286,41 +284,34 @@ function buildRoomConfig(
   });
 }
 
-type RoomCreateOptionsWithAgents = Parameters<RoomServiceClient['createRoom']>[0] & {
-  agents?: RoomConfiguration['agents'];
-};
-
 function isAlreadyExistsError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const code = 'code' in error ? String(error.code) : '';
   return code === 'already_exists' || /already exists|already_exists|exists/i.test(error.message);
 }
 
-async function ensureRealtimeAgentDispatchRoom(
+async function ensureAgentDispatchRoom(
   roomName: string,
   agentName: string,
   roomConfig: RoomConfiguration
 ): Promise<void> {
   const roomSvc = new RoomServiceClient(LIVEKIT_URL, API_KEY, API_SECRET);
-  const roomOptions: RoomCreateOptionsWithAgents = {
+  const roomOptions: Parameters<RoomServiceClient['createRoom']>[0] = {
     name: roomName,
     metadata: roomConfig.metadata,
-    agents: roomConfig.agents,
   };
 
   try {
     await roomSvc.createRoom(roomOptions);
-    logTokenEvent('created realtime room with agent dispatch', {
+    logTokenEvent('created room before agent dispatch', {
       roomName,
       agentName,
-      requestedAgents: roomConfig.agents.map((agent) => ({ agentName: agent.agentName })),
     });
-    return;
   } catch (error) {
     if (!isAlreadyExistsError(error)) {
       throw error;
     }
-    logTokenEvent('realtime room already exists before token join', {
+    logTokenEvent('room already exists before agent dispatch', {
       roomName,
       agentName,
     });
@@ -330,14 +321,22 @@ async function ensureRealtimeAgentDispatchRoom(
   const dispatches = await dispatchClient.listDispatch(roomName).catch(() => []);
   const hasDispatch = dispatches.some((dispatch) => dispatch.agentName === agentName);
   if (hasDispatch) {
-    logTokenEvent('realtime agent dispatch already exists', { roomName, agentName });
+    logTokenEvent('agent dispatch already exists', { roomName, agentName });
     return;
   }
 
-  await dispatchClient.createDispatch(roomName, agentName, {
-    metadata: roomConfig.agents[0]?.metadata || roomConfig.metadata,
-  });
-  logTokenEvent('created explicit realtime agent dispatch', { roomName, agentName });
+  try {
+    await dispatchClient.createDispatch(roomName, agentName, {
+      metadata: roomConfig.agents[0]?.metadata || roomConfig.metadata,
+    });
+    logTokenEvent('created explicit agent dispatch', { roomName, agentName });
+  } catch (error) {
+    if (isAlreadyExistsError(error)) {
+      logTokenEvent('agent dispatch already exists after create attempt', { roomName, agentName });
+      return;
+    }
+    throw error;
+  }
 }
 
 function createParticipantToken(

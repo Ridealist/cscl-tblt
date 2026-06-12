@@ -278,12 +278,15 @@ test('token route creates a named LiveKit room config with agent dispatch', asyn
 
   assert.equal(createdRooms.length, 1);
   assert.equal(createdRooms[0].name, 'realtime-debug-room');
-  assert.equal(createdRooms[0].agents[0].agentName, 'realtime-agent');
-  assert.equal(createdDispatches.length, 0);
+  assert.equal(createdRooms[0].metadata, token.assignedRoomConfig.metadata);
+  assert.equal(createdDispatches.length, 1);
+  assert.equal(createdDispatches[0].roomName, 'realtime-debug-room');
+  assert.equal(createdDispatches[0].agentName, 'realtime-agent');
+  assert.deepEqual(JSON.parse(createdDispatches[0].options.metadata), metadata);
 });
 
-test('token route includes student metadata for pipeline rooms', async () => {
-  const { exports, accessTokens, createdRooms } = loadTokenRoute();
+test('token route explicitly dispatches the pipeline agent for pipeline rooms', async () => {
+  const { exports, accessTokens, createdDispatches, createdRooms } = loadTokenRoute();
 
   const response = await exports.POST({
     json: async () => ({
@@ -306,7 +309,12 @@ test('token route includes student metadata for pipeline rooms', async () => {
   assert.equal(metadata.studentDisplayName, 'Debug User');
   assert.equal(metadata.studentClassNumber, 9);
   assert.equal(metadata.studentRollNumber, 2);
-  assert.equal(createdRooms.length, 0);
+  assert.equal(createdRooms.length, 1);
+  assert.equal(createdRooms[0].name, '1반-1그룹');
+  assert.equal(createdDispatches.length, 1);
+  assert.equal(createdDispatches[0].roomName, '1반-1그룹');
+  assert.equal(createdDispatches[0].agentName, 'pipeline-agent');
+  assert.deepEqual(JSON.parse(createdDispatches[0].options.metadata), metadata);
 });
 
 test('token route rejects requests without a student session', async () => {
