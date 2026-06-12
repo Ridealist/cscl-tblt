@@ -230,6 +230,7 @@ function AgentDispatchSection({
 interface RealtimeRoomStatus {
   name: string;
   agentRole?: AgentRole;
+  feedbackConditionId?: string;
   promptId?: string;
   promptVersionId?: string;
   promptSavedAt?: string | null;
@@ -254,7 +255,11 @@ function getFeedbackConditionDescription(id: string) {
   return 'Realtime feedback condition';
 }
 
-function RealtimeSessionSection() {
+function RealtimeSessionSection({
+  feedbackConditions,
+}: {
+  feedbackConditions: FeedbackConditionOption[];
+}) {
   const [rooms, setRooms] = useState<RealtimeRoomStatus[]>([]);
   const [loading, setLoading] = useState(false);
   const [terminating, setTerminating] = useState<string | null>(null);
@@ -310,6 +315,14 @@ function RealtimeSessionSection() {
     return `수정 프롬프트 · ${room.promptId ?? 'ID 미기록'} · ${savedAt}`;
   }
 
+  function formatFeedbackCondition(room: RealtimeRoomStatus) {
+    if (!room.feedbackConditionId) return '미기록';
+    return (
+      feedbackConditions.find((condition) => condition.id === room.feedbackConditionId)?.title ??
+      room.feedbackConditionId
+    );
+  }
+
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
@@ -342,14 +355,20 @@ function RealtimeSessionSection() {
             <div className="flex min-w-0 flex-col">
               <span className="text-foreground truncate text-sm font-medium">{room.name}</span>
               <span className="text-muted-foreground text-xs">
-                상호작용 방식:{' '}
+                적용 프롬프트:{' '}
+                <span className="text-foreground font-semibold">{formatPromptApplied(room)}</span>
+              </span>
+              <span className="text-muted-foreground text-xs">
+                Agent Role:{' '}
                 <span className="text-foreground font-semibold">
                   {room.agentRole ? `${getAgentRoleLabel(room.agentRole)} 에이전트` : '미기록'}
                 </span>
               </span>
               <span className="text-muted-foreground text-xs">
-                적용 프롬프트:{' '}
-                <span className="text-foreground font-semibold">{formatPromptApplied(room)}</span>
+                Feedback Condition:{' '}
+                <span className="text-foreground font-semibold">
+                  {formatFeedbackCondition(room)}
+                </span>
               </span>
               <span className="text-muted-foreground text-xs">
                 참가자 {room.numParticipants}명
@@ -898,7 +917,10 @@ export default function AdminPage() {
               numGroupsPerClass={settings.numGroupsPerClass}
             />
           ) : (
-            <RealtimeSessionSection key={realtimeSessionKey} />
+            <RealtimeSessionSection
+              key={realtimeSessionKey}
+              feedbackConditions={feedbackConditions}
+            />
           )}
 
           <hr className="border-border" />
