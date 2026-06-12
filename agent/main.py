@@ -73,6 +73,10 @@ REALTIME_AGENT_NAMES = {
     "collaborative": "realtime-agent",
 }
 REALTIME_AGENT_NAME = "realtime-agent"
+REALTIME_TTS_VOICE_BY_SESSION_PURPOSE = {
+    "evaluation": "cccc21e8-5bcf-4ff0-bc7f-be4e40afc544",  # Kate
+    "practice": "32b3f3c5-7171-46aa-abe7-b598964aa793",  # Daisy
+}
 
 log.info(
     "Agent worker configuration: worker_mode=%s role=%s default_mode=%s default_role=%s "
@@ -190,6 +194,13 @@ def _normalize_activity_context(activity_context: dict) -> dict:
         for key, value in normalized.items()
         if isinstance(value, str) and value.strip()
     }
+
+
+def _realtime_tts_voice_for_session_purpose(session_purpose: str | None) -> str:
+    return REALTIME_TTS_VOICE_BY_SESSION_PURPOSE.get(
+        session_purpose or "practice",
+        REALTIME_TTS_VOICE_BY_SESSION_PURPOSE["practice"],
+    )
 
 
 def _resolve_realtime_job_role(ctx: JobContext, fallback: str) -> str:
@@ -558,6 +569,7 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
         prompt_version_id = None
         resolved_task_card_id = task_card_id
         resolved_feedback_condition_id = feedback_condition_id
+    tts_voice = _realtime_tts_voice_for_session_purpose(activity_context.get("session_purpose"))
     ctx.log_context_fields = {
         "room": ctx.room.name,
         "mode": "realtime",
@@ -567,11 +579,12 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
         "feedback_condition_id": resolved_feedback_condition_id,
         "prompt_source": prompt_source,
         "prompt_version_id": prompt_version_id,
+        "tts_voice_id": tts_voice,
     }
     log.info(
         "Starting realtime job: room=%s room_sid=%s job_id=%s role=%s "
         "session_purpose=%s activity_type=%s feedback_condition_id=%s "
-        "task_card_id=%s prompt_source=%s prompt_version_id=%s metadata=%s",
+        "task_card_id=%s prompt_source=%s prompt_version_id=%s tts_voice_id=%s metadata=%s",
         ctx.room.name,
         ctx.job.room.sid,
         getattr(ctx.job, "id", None),
@@ -582,6 +595,7 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
         resolved_task_card_id,
         prompt_source,
         prompt_version_id,
+        tts_voice,
         getattr(ctx.job, "metadata", None),
     )
     prompt_metadata = (
@@ -608,6 +622,7 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
             "agent_mode": "realtime",
             "activity_type": activity_context.get("activity_type"),
             "session_purpose": activity_context.get("session_purpose"),
+            "tts_voice_id": tts_voice,
             **prompt_metadata,
         },
     )
@@ -652,7 +667,7 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
         tts=inference.TTS(
             model="cartesia/sonic-3",
             # voice="e3827ec5-697a-4b7c-9704-1a23041bbc51", # Dottie
-            voice="32b3f3c5-7171-46aa-abe7-b598964aa793", # Daisy
+            voice=tts_voice,
             # voice="df872fcd-da17-4b01-a49f-a80d7aaee95e", # Cameron
             # voice="c58bda25-abd5-4c72-97a2-4dbe049b368d", # Garrett
             # voice="f4a3a8e4-694c-4c45-9ca0-27caf97901b5", # Gavin

@@ -69,7 +69,11 @@ def _install_livekit_mocks() -> None:
 
 _install_livekit_mocks()
 
-from main import _metadata_activity_context, _normalize_activity_context  # noqa: E402
+from main import (  # noqa: E402
+    _metadata_activity_context,
+    _normalize_activity_context,
+    _realtime_tts_voice_for_session_purpose,
+)
 
 
 def test_metadata_activity_context_maps_evaluation_fields() -> None:
@@ -107,3 +111,18 @@ def test_normalize_activity_context_prioritizes_free_conversation() -> None:
         "activity_type": "free_conversation",
         "session_purpose": "evaluation",
     }
+
+
+def test_realtime_tts_voice_changes_by_session_purpose() -> None:
+    assert (
+        _realtime_tts_voice_for_session_purpose("evaluation")
+        == "cccc21e8-5bcf-4ff0-bc7f-be4e40afc544"
+    )
+    assert (
+        _realtime_tts_voice_for_session_purpose("practice")
+        == "32b3f3c5-7171-46aa-abe7-b598964aa793"
+    )
+    assert (
+        _realtime_tts_voice_for_session_purpose(None)
+        == "32b3f3c5-7171-46aa-abe7-b598964aa793"
+    )
