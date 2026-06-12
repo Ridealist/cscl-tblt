@@ -29,6 +29,10 @@ export interface AgentChatTranscriptProps extends ComponentProps<'div'> {
    * Additional CSS class names to apply to the conversation container.
    */
   className?: string;
+  /** Display name used for assistant transcript avatars. */
+  agentDisplayName?: string;
+  /** Public image path used for assistant transcript avatars. */
+  agentAvatarSrc?: string;
 }
 
 /**
@@ -50,6 +54,8 @@ export function AgentChatTranscript({
   agentState,
   messages = [],
   className,
+  agentDisplayName = 'Daisy',
+  agentAvatarSrc = '/agents/daisy_photo.png',
   ...props
 }: AgentChatTranscriptProps) {
   return (
@@ -67,8 +73,8 @@ export function AgentChatTranscript({
               {messageOrigin === 'assistant' ? (
                 <div className="flex max-w-full items-start gap-3">
                   <Image
-                    src="/agents/daisy_photo.png"
-                    alt="Daisy"
+                    src={agentAvatarSrc}
+                    alt={agentDisplayName}
                     width={32}
                     height={32}
                     className="border-border mt-0.5 size-8 shrink-0 rounded-full border object-cover"
@@ -89,8 +95,8 @@ export function AgentChatTranscript({
           {agentState === 'thinking' && (
             <div className="flex items-start gap-3">
               <Image
-                src="/agents/daisy_photo.png"
-                alt="Daisy"
+                src={agentAvatarSrc}
+                alt={agentDisplayName}
                 width={32}
                 height={32}
                 className="border-border mt-0.5 size-8 shrink-0 rounded-full border object-cover"

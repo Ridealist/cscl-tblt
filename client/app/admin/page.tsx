@@ -5,6 +5,14 @@ import { PromptEditorView } from '@/components/admin/prompt-editor-view';
 import { type AgentMode, getAgentModeLabel } from '@/lib/agent-mode';
 import { type AgentRole, getAgentRoleLabel } from '@/lib/agent-role';
 import type { RealtimePromptSource } from '@/lib/realtime-prompt-config';
+import {
+  type ActivityType,
+  type SessionPurpose,
+  getActivityTypeForSessionPurpose,
+  getActivityTypeLabel,
+  getSessionPurposeLabel,
+  normalizeSessionPurpose,
+} from '@/lib/session-activity';
 
 type AdminTab = 'settings' | 'prompts';
 
@@ -24,6 +32,7 @@ interface Settings {
   agentMode: AgentMode;
   agentRole: AgentRole;
   feedbackConditionId: string;
+  sessionPurpose: SessionPurpose;
   realtimeResetting: boolean;
 }
 
@@ -228,10 +237,19 @@ function AgentDispatchSection({
 
 interface RealtimeRoomStatus {
   name: string;
+  activityType?: ActivityType;
   agentRole?: AgentRole;
+  evaluationCharacter?: string;
+  evaluationId?: string;
+  evaluationPromptId?: string;
+  evaluationPromptVersion?: string;
+  feedbackConditionId?: string;
   promptId?: string;
+  promptVersionId?: string;
   promptSavedAt?: string | null;
   promptSource?: RealtimePromptSource;
+  sessionPurpose?: SessionPurpose;
+  taskCardId?: string;
   numParticipants: number;
   totalParticipants?: number;
   numAgents?: number;
@@ -252,7 +270,28 @@ function getFeedbackConditionDescription(id: string) {
   return 'Realtime feedback condition';
 }
 
-function RealtimeSessionSection() {
+function inferRoomSessionPurpose(room: RealtimeRoomStatus): SessionPurpose | undefined {
+  if (room.sessionPurpose === 'evaluation' || room.sessionPurpose === 'practice') {
+    return room.sessionPurpose;
+  }
+  if (room.name.startsWith('eval-')) return 'evaluation';
+  if (room.name.startsWith('task-')) return 'practice';
+  return undefined;
+}
+
+function inferRoomActivityType(room: RealtimeRoomStatus): ActivityType | undefined {
+  if (room.activityType === 'free_conversation' || room.activityType === 'task_solution') {
+    return room.activityType;
+  }
+  const sessionPurpose = inferRoomSessionPurpose(room);
+  return sessionPurpose ? getActivityTypeForSessionPurpose(sessionPurpose) : undefined;
+}
+
+function RealtimeSessionSection({
+  feedbackConditions,
+}: {
+  feedbackConditions: FeedbackConditionOption[];
+}) {
   const [rooms, setRooms] = useState<RealtimeRoomStatus[]>([]);
   const [loading, setLoading] = useState(false);
   const [terminating, setTerminating] = useState<string | null>(null);
@@ -308,6 +347,14 @@ function RealtimeSessionSection() {
     return `수정 프롬프트 · ${room.promptId ?? 'ID 미기록'} · ${savedAt}`;
   }
 
+  function formatFeedbackCondition(room: RealtimeRoomStatus) {
+    if (!room.feedbackConditionId) return '미기록';
+    return (
+      feedbackConditions.find((condition) => condition.id === room.feedbackConditionId)?.title ??
+      room.feedbackConditionId
+    );
+  }
+
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
@@ -332,38 +379,100 @@ function RealtimeSessionSection() {
             진행 중인 개별 세션이 없습니다.
           </p>
         )}
-        {rooms.map((room) => (
-          <div
-            key={room.name}
-            className="border-border flex items-center justify-between rounded-lg border px-4 py-2.5"
-          >
-            <div className="flex min-w-0 flex-col">
-              <span className="text-foreground truncate text-sm font-medium">{room.name}</span>
-              <span className="text-muted-foreground text-xs">
-                상호작용 방식:{' '}
-                <span className="text-foreground font-semibold">
-                  {room.agentRole ? `${getAgentRoleLabel(room.agentRole)} 에이전트` : '미기록'}
-                </span>
-              </span>
-              <span className="text-muted-foreground text-xs">
-                적용 프롬프트:{' '}
-                <span className="text-foreground font-semibold">{formatPromptApplied(room)}</span>
-              </span>
-              <span className="text-muted-foreground text-xs">
-                참가자 {room.numParticipants}명
-                {(room.numAgents ?? 0) > 0 && ` · AI ${room.numAgents}명`}
-                {(room.numEgress ?? 0) > 0 && ` · 세션 녹음 연결 ${room.numEgress}개`}
-              </span>
-            </div>
-            <button
-              onClick={() => handleTerminate(room.name)}
-              disabled={terminating === room.name}
-              className="rounded-md border px-3 py-1 text-xs font-semibold transition-colors enabled:border-red-400 enabled:text-red-500 enabled:hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+        {rooms.map((room) => {
+          const sessionPurpose = inferRoomSessionPurpose(room);
+          const activityType = inferRoomActivityType(room);
+          return (
+            <div
+              key={room.name}
+              className="border-border flex items-center justify-between rounded-lg border px-4 py-2.5"
             >
-              {terminating === room.name ? '종료 중...' : '세션 종료'}
-            </button>
-          </div>
-        ))}
+              <div className="flex min-w-0 flex-col">
+                <span className="text-foreground truncate text-sm font-medium">{room.name}</span>
+                <span className="text-muted-foreground text-xs">
+                  Session Purpose:{' '}
+                  <span className="text-foreground font-semibold">
+                    {sessionPurpose ? getSessionPurposeLabel(sessionPurpose) : '미기록'}
+                  </span>
+                  {activityType && (
+                    <>
+                      {' '}
+                      · 활동:{' '}
+                      <span className="text-foreground font-semibold">
+                        {getActivityTypeLabel(activityType)}
+                      </span>
+                    </>
+                  )}
+                </span>
+                {sessionPurpose === 'evaluation' ? (
+                  <>
+                    <span className="text-muted-foreground text-xs">
+                      Evaluation:{' '}
+                      <span className="text-foreground font-semibold">
+                        {room.evaluationId ?? '미기록'}
+                      </span>
+                      {' · Prompt '}
+                      <span className="text-foreground font-semibold">
+                        {room.evaluationPromptId ?? '미기록'}
+                      </span>
+                    </span>
+                    <span className="text-muted-foreground text-xs">
+                      Version:{' '}
+                      <span className="text-foreground font-semibold">
+                        {room.evaluationPromptVersion ?? '미기록'}
+                      </span>
+                      {' · Character '}
+                      <span className="text-foreground font-semibold">
+                        {room.evaluationCharacter ?? '미기록'}
+                      </span>
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-muted-foreground text-xs">
+                      적용 프롬프트:{' '}
+                      <span className="text-foreground font-semibold">
+                        {formatPromptApplied(room)}
+                      </span>
+                    </span>
+                    {room.taskCardId && (
+                      <span className="text-muted-foreground text-xs">
+                        Task Card:{' '}
+                        <span className="text-foreground font-semibold">{room.taskCardId}</span>
+                      </span>
+                    )}
+                    <span className="text-muted-foreground text-xs">
+                      Agent Role:{' '}
+                      <span className="text-foreground font-semibold">
+                        {room.agentRole
+                          ? `${getAgentRoleLabel(room.agentRole)} 에이전트`
+                          : '미기록'}
+                      </span>
+                    </span>
+                    <span className="text-muted-foreground text-xs">
+                      Feedback Condition:{' '}
+                      <span className="text-foreground font-semibold">
+                        {formatFeedbackCondition(room)}
+                      </span>
+                    </span>
+                  </>
+                )}
+                <span className="text-muted-foreground text-xs">
+                  참가자 {room.numParticipants}명
+                  {(room.numAgents ?? 0) > 0 && ` · AI ${room.numAgents}명`}
+                  {(room.numEgress ?? 0) > 0 && ` · 세션 녹음 연결 ${room.numEgress}개`}
+                </span>
+              </div>
+              <button
+                onClick={() => handleTerminate(room.name)}
+                disabled={terminating === room.name}
+                className="rounded-md border px-3 py-1 text-xs font-semibold transition-colors enabled:border-red-400 enabled:text-red-500 enabled:hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {terminating === room.name ? '종료 중...' : '세션 종료'}
+              </button>
+            </div>
+          );
+        })}
       </div>
 
       {message && (
@@ -388,6 +497,8 @@ export default function AdminPage() {
   const [feedbackConditions, setFeedbackConditions] = useState<FeedbackConditionOption[]>([]);
   const [pendingFeedbackCondition, setPendingFeedbackCondition] = useState<string | null>(null);
   const [feedbackChangeStatus, setFeedbackChangeStatus] = useState<string | null>(null);
+  const [pendingSessionPurpose, setPendingSessionPurpose] = useState<SessionPurpose | null>(null);
+  const [sessionPurposeChangeStatus, setSessionPurposeChangeStatus] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/admin/config')
@@ -562,6 +673,50 @@ export default function AdminPage() {
     }
   }
 
+  async function handleSessionPurposeChange(sessionPurpose: SessionPurpose) {
+    if (!settings || settings.sessionPurpose === sessionPurpose) return;
+
+    const nextLabel = getSessionPurposeLabel(sessionPurpose);
+    const confirmed = window.confirm(
+      [
+        `Session Purpose를 [${nextLabel}]로 변경하면 현재 진행 중인 모든 개별 세션이 종료됩니다.`,
+        '',
+        `변경 후에는 [${nextLabel}] 기준으로 새 개별 세션과 프롬프트 편집 화면이 구성됩니다.`,
+        '',
+        '계속하시겠습니까?',
+      ].join('\n')
+    );
+    if (!confirmed) return;
+
+    setSaving(true);
+    setPendingSessionPurpose(sessionPurpose);
+    setSessionPurposeChangeStatus(null);
+    let resetLocked = false;
+    try {
+      setSessionPurposeChangeStatus('학생 재입장을 잠시 중지하는 중입니다...');
+      await saveSettings({ ...settings, realtimeResetting: true });
+      resetLocked = true;
+      await terminateRealtimeSessionsAndWait(setSessionPurposeChangeStatus);
+      setSessionPurposeChangeStatus(
+        '모든 개별 세션 종료를 확인했습니다. 설정을 저장하는 중입니다...'
+      );
+      await saveSettings({ ...settings, sessionPurpose, realtimeResetting: false });
+      resetLocked = false;
+      setRealtimeSessionKey((key) => key + 1);
+    } catch (error) {
+      if (resetLocked) {
+        await saveSettings({ ...settings, realtimeResetting: false }).catch(() => undefined);
+      }
+      const message =
+        error instanceof Error ? error.message : 'Session Purpose 변경에 실패했습니다.';
+      window.alert(message);
+    } finally {
+      setSaving(false);
+      setPendingSessionPurpose(null);
+      setSessionPurposeChangeStatus(null);
+    }
+  }
+
   function handleClassStartBlur() {
     const n = parseInt(classStartInput);
     if (!isNaN(n) && n >= 1 && n !== settings?.classStart) {
@@ -619,7 +774,7 @@ export default function AdminPage() {
       </div>
 
       {activeTab === 'prompts' ? (
-        <PromptEditorView />
+        <PromptEditorView sessionPurpose={settings.sessionPurpose} />
       ) : (
         <>
           {/* 반 번호 시작 */}
@@ -741,92 +896,48 @@ export default function AdminPage() {
 
           {settings.agentMode === 'realtime' && (
             <>
-              {/* 에이전트 상호작용 방식 */}
+              {/* 세션 목적 */}
               <section className="flex flex-col gap-3">
                 <div>
-                  <h2 className="text-foreground text-sm font-semibold">Agent Role</h2>
+                  <h2 className="text-foreground text-sm font-semibold">Session Purpose</h2>
                   <p className="text-muted-foreground text-xs">
-                    실험 조건(1) 입니다. 에이전트의 상호작용 방식을 정합니다.
+                    개별 세션을 practice 과제 해결용으로 운영할지 evaluation 자유 대화용으로
+                    운영할지 정합니다.
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  {(['dominant', 'collaborative'] as AgentRole[]).map((role) => (
+                  {(['practice', 'evaluation'] as SessionPurpose[]).map((purpose) => (
                     <button
-                      key={role}
-                      onClick={() => handleAgentRoleChange(role)}
+                      key={purpose}
+                      onClick={() => handleSessionPurposeChange(normalizeSessionPurpose(purpose))}
                       disabled={saving}
-                      aria-busy={pendingRole === role}
+                      aria-busy={pendingSessionPurpose === purpose}
                       className={`rounded-lg border px-4 py-3 text-left transition-colors disabled:opacity-50 ${
-                        settings.agentRole === role
+                        settings.sessionPurpose === purpose
                           ? 'bg-primary text-primary-foreground border-primary'
                           : 'border-border hover:bg-muted text-foreground'
                       }`}
                     >
                       <span className="block text-sm font-semibold">
-                        {pendingRole === role ? '변경 중...' : `${getAgentRoleLabel(role)} Agent`}
-                      </span>
-                      <span
-                        className={`mt-1 block text-xs ${settings.agentRole === role ? 'opacity-80' : 'text-muted-foreground'}`}
-                      >
-                        {role === 'dominant'
-                          ? '에이전트가 대화와 과제 진행을 주도'
-                          : '학생과 에이전트가 선택과 결정을 공유'}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                {pendingRole && roleChangeStatus && (
-                  <div
-                    role="status"
-                    aria-live="polite"
-                    className="border-border bg-muted/60 text-muted-foreground flex items-center gap-2 rounded-md border px-3 py-2 text-xs"
-                  >
-                    <span
-                      aria-hidden="true"
-                      className="border-muted-foreground/30 border-t-foreground size-4 shrink-0 animate-spin rounded-full border-2"
-                    />
-                    <span>{roleChangeStatus}</span>
-                  </div>
-                )}
-              </section>
-
-              {/* 피드백 조건 */}
-              <section className="flex flex-col gap-3">
-                <div>
-                  <h2 className="text-foreground text-sm font-semibold">Feedback Condition</h2>
-                  <p className="text-muted-foreground text-xs">
-                    실험 조건(2) 입니다. 학생 오류 피드백 방식을 정합니다.
-                  </p>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  {feedbackConditions.map((condition) => (
-                    <button
-                      key={condition.id}
-                      onClick={() => handleFeedbackConditionChange(condition.id)}
-                      disabled={saving}
-                      aria-busy={pendingFeedbackCondition === condition.id}
-                      className={`rounded-lg border px-4 py-3 text-left transition-colors disabled:opacity-50 ${
-                        settings.feedbackConditionId === condition.id
-                          ? 'bg-primary text-primary-foreground border-primary'
-                          : 'border-border hover:bg-muted text-foreground'
-                      }`}
-                    >
-                      <span className="block text-sm font-semibold">
-                        {pendingFeedbackCondition === condition.id ? '변경 중...' : condition.title}
+                        {pendingSessionPurpose === purpose
+                          ? '변경 중...'
+                          : getSessionPurposeLabel(purpose)}
                       </span>
                       <span
                         className={`mt-1 block text-xs ${
-                          settings.feedbackConditionId === condition.id
+                          settings.sessionPurpose === purpose
                             ? 'opacity-80'
                             : 'text-muted-foreground'
                         }`}
                       >
-                        {getFeedbackConditionDescription(condition.id)}
+                        {purpose === 'evaluation'
+                          ? '자유 대화 평가 데이터 수집'
+                          : 'TBLT 과제 해결 연습'}
                       </span>
                     </button>
                   ))}
                 </div>
-                {pendingFeedbackCondition && feedbackChangeStatus && (
+                {pendingSessionPurpose && sessionPurposeChangeStatus && (
                   <div
                     role="status"
                     aria-live="polite"
@@ -836,10 +947,116 @@ export default function AdminPage() {
                       aria-hidden="true"
                       className="border-muted-foreground/30 border-t-foreground size-4 shrink-0 animate-spin rounded-full border-2"
                     />
-                    <span>{feedbackChangeStatus}</span>
+                    <span>{sessionPurposeChangeStatus}</span>
                   </div>
                 )}
               </section>
+
+              {/* 에이전트 상호작용 방식 */}
+              {settings.sessionPurpose === 'practice' && (
+                <section className="flex flex-col gap-3">
+                  <div>
+                    <h2 className="text-foreground text-sm font-semibold">Agent Role</h2>
+                    <p className="text-muted-foreground text-xs">
+                      실험 조건(1) 입니다. 에이전트의 상호작용 방식을 정합니다.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(['dominant', 'collaborative'] as AgentRole[]).map((role) => (
+                      <button
+                        key={role}
+                        onClick={() => handleAgentRoleChange(role)}
+                        disabled={saving}
+                        aria-busy={pendingRole === role}
+                        className={`rounded-lg border px-4 py-3 text-left transition-colors disabled:opacity-50 ${
+                          settings.agentRole === role
+                            ? 'bg-primary text-primary-foreground border-primary'
+                            : 'border-border hover:bg-muted text-foreground'
+                        }`}
+                      >
+                        <span className="block text-sm font-semibold">
+                          {pendingRole === role ? '변경 중...' : `${getAgentRoleLabel(role)} Agent`}
+                        </span>
+                        <span
+                          className={`mt-1 block text-xs ${settings.agentRole === role ? 'opacity-80' : 'text-muted-foreground'}`}
+                        >
+                          {role === 'dominant'
+                            ? '에이전트가 대화와 과제 진행을 주도'
+                            : '학생과 에이전트가 선택과 결정을 공유'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  {pendingRole && roleChangeStatus && (
+                    <div
+                      role="status"
+                      aria-live="polite"
+                      className="border-border bg-muted/60 text-muted-foreground flex items-center gap-2 rounded-md border px-3 py-2 text-xs"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="border-muted-foreground/30 border-t-foreground size-4 shrink-0 animate-spin rounded-full border-2"
+                      />
+                      <span>{roleChangeStatus}</span>
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {/* 피드백 조건 */}
+              {settings.sessionPurpose === 'practice' && (
+                <section className="flex flex-col gap-3">
+                  <div>
+                    <h2 className="text-foreground text-sm font-semibold">Feedback Condition</h2>
+                    <p className="text-muted-foreground text-xs">
+                      실험 조건(2) 입니다. 학생 오류 피드백 방식을 정합니다.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {feedbackConditions.map((condition) => (
+                      <button
+                        key={condition.id}
+                        onClick={() => handleFeedbackConditionChange(condition.id)}
+                        disabled={saving}
+                        aria-busy={pendingFeedbackCondition === condition.id}
+                        className={`rounded-lg border px-4 py-3 text-left transition-colors disabled:opacity-50 ${
+                          settings.feedbackConditionId === condition.id
+                            ? 'bg-primary text-primary-foreground border-primary'
+                            : 'border-border hover:bg-muted text-foreground'
+                        }`}
+                      >
+                        <span className="block text-sm font-semibold">
+                          {pendingFeedbackCondition === condition.id
+                            ? '변경 중...'
+                            : condition.title}
+                        </span>
+                        <span
+                          className={`mt-1 block text-xs ${
+                            settings.feedbackConditionId === condition.id
+                              ? 'opacity-80'
+                              : 'text-muted-foreground'
+                          }`}
+                        >
+                          {getFeedbackConditionDescription(condition.id)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  {pendingFeedbackCondition && feedbackChangeStatus && (
+                    <div
+                      role="status"
+                      aria-live="polite"
+                      className="border-border bg-muted/60 text-muted-foreground flex items-center gap-2 rounded-md border px-3 py-2 text-xs"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="border-muted-foreground/30 border-t-foreground size-4 shrink-0 animate-spin rounded-full border-2"
+                      />
+                      <span>{feedbackChangeStatus}</span>
+                    </div>
+                  )}
+                </section>
+              )}
 
               <hr className="border-border" />
             </>
@@ -893,7 +1110,10 @@ export default function AdminPage() {
               numGroupsPerClass={settings.numGroupsPerClass}
             />
           ) : (
-            <RealtimeSessionSection key={realtimeSessionKey} />
+            <RealtimeSessionSection
+              key={realtimeSessionKey}
+              feedbackConditions={feedbackConditions}
+            />
           )}
 
           <hr className="border-border" />
@@ -915,19 +1135,29 @@ export default function AdminPage() {
               {settings.agentMode === 'realtime' && (
                 <>
                   <li>
-                    상호작용 방식:{' '}
+                    Session Purpose:{' '}
                     <span className="text-foreground font-semibold">
-                      {getAgentRoleLabel(settings.agentRole)} 에이전트
+                      {getSessionPurposeLabel(settings.sessionPurpose)}
                     </span>
                   </li>
-                  <li>
-                    Feedback Condition:{' '}
-                    <span className="text-foreground font-semibold">
-                      {feedbackConditions.find(
-                        (condition) => condition.id === settings.feedbackConditionId
-                      )?.title ?? settings.feedbackConditionId}
-                    </span>
-                  </li>
+                  {settings.sessionPurpose === 'practice' && (
+                    <>
+                      <li>
+                        상호작용 방식:{' '}
+                        <span className="text-foreground font-semibold">
+                          {getAgentRoleLabel(settings.agentRole)} 에이전트
+                        </span>
+                      </li>
+                      <li>
+                        Feedback Condition:{' '}
+                        <span className="text-foreground font-semibold">
+                          {feedbackConditions.find(
+                            (condition) => condition.id === settings.feedbackConditionId
+                          )?.title ?? settings.feedbackConditionId}
+                        </span>
+                      </li>
+                    </>
+                  )}
                 </>
               )}
               <li>

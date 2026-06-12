@@ -81,6 +81,8 @@ interface TileLayoutProps {
   audioVisualizerRadialRadius?: number;
   audioVisualizerBarCount?: number;
   agentState?: AgentState;
+  agentDisplayName?: string;
+  agentAvatarSrc?: string;
 }
 
 export function TileLayout({
@@ -95,6 +97,8 @@ export function TileLayout({
   audioVisualizerGridColumnCount,
   audioVisualizerWaveLineWidth,
   agentState,
+  agentDisplayName = 'Daisy',
+  agentAvatarSrc = '/agents/daisy_photo.png',
 }: TileLayoutProps) {
   const { videoTrack: agentVideoTrack } = useVoiceAssistant();
   const [screenShareTrack] = useTracks([Track.Source.ScreenShare]);
@@ -165,8 +169,8 @@ export function TileLayout({
                     )}
                   >
                     <Image
-                      src="/agents/daisy_photo.png"
-                      alt="Daisy"
+                      src={agentAvatarSrc}
+                      alt={agentDisplayName}
                       fill
                       sizes="(max-width: 768px) 90vw, 380px"
                       className="object-cover"
