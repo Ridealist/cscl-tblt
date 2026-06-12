@@ -59,10 +59,15 @@ function parseRealtimeRoomMetadata(metadata?: string): {
   agentRole?: AgentRole;
   evaluationCharacter?: string;
   evaluationId?: string;
+  evaluationPromptId?: string;
+  evaluationPromptVersion?: string;
+  feedbackConditionId?: string;
   promptId?: string;
+  promptVersionId?: string;
   promptSavedAt?: string | null;
   promptSource?: RealtimePromptSource;
   sessionPurpose?: SessionPurpose;
+  taskCardId?: string;
 } {
   if (!metadata) return {};
   try {
@@ -73,10 +78,15 @@ function parseRealtimeRoomMetadata(metadata?: string): {
       agentStance?: unknown;
       evaluationCharacter?: unknown;
       evaluationId?: unknown;
+      evaluationPromptId?: unknown;
+      evaluationPromptVersion?: unknown;
+      feedbackConditionId?: unknown;
       promptId?: unknown;
+      promptVersionId?: unknown;
       promptSavedAt?: unknown;
       promptSource?: unknown;
       sessionPurpose?: unknown;
+      taskCardId?: unknown;
     };
     if (parsed.agentMode !== 'realtime') return {};
     const sessionPurpose = normalizeSessionPurpose(
@@ -91,7 +101,17 @@ function parseRealtimeRoomMetadata(metadata?: string): {
       evaluationCharacter:
         typeof parsed.evaluationCharacter === 'string' ? parsed.evaluationCharacter : undefined,
       evaluationId: typeof parsed.evaluationId === 'string' ? parsed.evaluationId : undefined,
+      evaluationPromptId:
+        typeof parsed.evaluationPromptId === 'string' ? parsed.evaluationPromptId : undefined,
+      evaluationPromptVersion:
+        typeof parsed.evaluationPromptVersion === 'string'
+          ? parsed.evaluationPromptVersion
+          : undefined,
+      feedbackConditionId:
+        typeof parsed.feedbackConditionId === 'string' ? parsed.feedbackConditionId : undefined,
       promptId: typeof parsed.promptId === 'string' ? parsed.promptId : undefined,
+      promptVersionId:
+        typeof parsed.promptVersionId === 'string' ? parsed.promptVersionId : undefined,
       promptSavedAt:
         typeof parsed.promptSavedAt === 'string' || parsed.promptSavedAt === null
           ? parsed.promptSavedAt
@@ -101,6 +121,7 @@ function parseRealtimeRoomMetadata(metadata?: string): {
           ? parsed.promptSource
           : undefined,
       sessionPurpose,
+      taskCardId: typeof parsed.taskCardId === 'string' ? parsed.taskCardId : undefined,
     };
   } catch {
     return {};
