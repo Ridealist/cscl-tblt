@@ -50,7 +50,9 @@ Local development may run without Supabase for the settings store. When the Supa
 
 Prompt editing requires Supabase when saving a custom prompt version. Without an active prompt row, the admin prompt API, token route, and Python realtime agent use the tracked markdown defaults under `prompts/realtime/`. With an active prompt row, `/api/token` records its `promptVersionId` in LiveKit metadata and the agent fetches that exact row from Supabase.
 
-Conversation logging keeps the existing `logs/*.json` file write and adds Supabase dual-write when the Python agent has `NEXT_PUBLIC_SUPABASE_URL` or `SUPABASE_URL` plus `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY`. Missing or failing Supabase writes are logged by the agent and do not stop the session.
+Conversation logging keeps the existing `logs/*.json` file write and adds Supabase dual-write when the Python agent has `NEXT_PUBLIC_SUPABASE_URL` or `SUPABASE_URL` plus `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY`. Each `ConversationLogger` instance creates a new `class_sessions.id`; `livekit_session_id` is retained as LiveKit room metadata and is not unique because named rooms can be reused across conversations. Missing or failing Supabase writes are logged by the agent and do not stop the session.
+
+Admin dashboard log APIs read `class_sessions` and `conversation_events` through the server-only Supabase secret key. The old `logs/*.json` reader is fallback-only for local development when Supabase admin environment variables are missing and `NODE_ENV !== 'production'`; configured Supabase read failures are surfaced instead of being hidden by file fallback. Production dashboard log reads are Supabase-backed and remain behind the admin guard. Set `CONVERSATION_LOG_FILE_FALLBACK=false` to disable the local file fallback during development.
 
 `supabase/config.toml` pins this repo to the `5532x` local port range so it can run alongside another Supabase project using the CLI defaults.
 

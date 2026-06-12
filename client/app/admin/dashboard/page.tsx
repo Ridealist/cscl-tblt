@@ -25,31 +25,49 @@ const AGENT_PALETTE = { bg: '#f1f5f9', text: '#475569', border: '#94a3b8' };
 // ─── 타입 ────────────────────────────────────────────────────────────────────
 
 interface SessionMeta {
-  filename: string;
+  id: string;
+  source: 'supabase' | 'file';
+  filename?: string;
   room: string;
   session_id: string;
   entry_count: number;
   last_modified: number;
+  started_at?: string;
+  ended_at?: string | null;
+  metadata?: SessionMetadata;
 }
 
 interface LogEntry {
   timestamp: string;
+  sequence?: number;
   role: 'user' | 'agent';
   text: string;
   participant_identity?: string;
   participant_name?: string;
 }
 
+interface SessionMetadata {
+  agent_mode?: string;
+  agent_role?: AgentRole;
+  agent_stance?: AgentRole;
+  feedback_condition_id?: string;
+  task_card_id?: string;
+  prompt_id?: string;
+  prompt_source?: string;
+  prompt_version_id?: string;
+  prompt_saved_at?: string;
+  egress_id?: string;
+  recording_path?: string;
+}
+
 interface LogData {
+  id: string;
+  source: 'supabase' | 'file';
   session_id: string;
   room: string;
-  metadata?: {
-    agent_mode?: string;
-    agent_role?: AgentRole;
-    agent_stance?: AgentRole;
-  };
+  metadata?: SessionMetadata;
   entries: LogEntry[];
-  _filename?: string;
+  filename?: string;
 }
 
 // ─── 유틸 ────────────────────────────────────────────────────────────────────
@@ -69,7 +87,26 @@ function formatDate(ms: number) {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    second: '2-digit',
   });
+}
+
+function formatAgentMode(mode?: string) {
+  return mode === 'realtime' ? 'Realtime' : 'Pipeline';
+}
+
+function shortId(value?: string) {
+  if (!value) return null;
+  return value.length > 12 ? `${value.slice(0, 8)}...` : value;
+}
+
+function promptLabel(metadata?: SessionMetadata) {
+  if (!metadata) return null;
+  const promptId = metadata.prompt_version_id ?? metadata.prompt_id;
+  if (promptId && promptId !== 'default') return `Prompt ${shortId(promptId)}`;
+  if (metadata.prompt_source === 'default' || metadata.prompt_id === 'default')
+    return 'Default prompt';
+  return null;
 }
 
 function useParticipantColors() {
@@ -91,15 +128,22 @@ function useParticipantColors() {
 
 function SessionList({ onSelect }: { onSelect: (s: SessionMeta) => void }) {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchSessions = async () => {
     try {
-      const res = await fetch('/api/logs');
+      const res = await fetch('/api/logs', { cache: 'no-store' });
       const data = await res.json();
+      if (!res.ok) {
+        const message = typeof data.error === 'string' ? data.error : '대화 기록 불러오기 실패';
+        throw new Error(message);
+      }
       setSessions(data.sessions ?? []);
-    } catch {
+      setError(null);
+    } catch (err) {
       setSessions([]);
+      setError(err instanceof Error ? err.message : '대화 기록 불러오기 실패');
     } finally {
       setLoading(false);
     }
@@ -130,6 +174,7 @@ function SessionList({ onSelect }: { onSelect: (s: SessionMeta) => void }) {
   const sortedClasses = Object.keys(byClass).sort((a, b) => parseInt(a) - parseInt(b));
 
   if (loading) return <p className="text-muted-foreground text-sm">불러오는 중...</p>;
+  if (error) return <p className="text-destructive text-sm">{error}</p>;
   if (sessions.length === 0)
     return <p className="text-muted-foreground text-sm">저장된 세션이 없습니다.</p>;
 
@@ -160,13 +205,33 @@ function SessionList({ onSelect }: { onSelect: (s: SessionMeta) => void }) {
                   </div>
                   <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
                     {groups[grp].map((s) => (
-                      <li key={s.filename}>
+                      <li key={s.id}>
                         <button
                           onClick={() => onSelect(s)}
                           className="border-border hover:bg-muted flex h-full w-full flex-col rounded-lg border bg-white p-3 text-left transition-colors dark:bg-neutral-900"
                         >
                           <span className="text-muted-foreground mb-2 block truncate font-mono text-xs">
                             {s.session_id}
+                          </span>
+                          <span className="text-muted-foreground mb-2 block truncate font-mono text-[11px]">
+                            {s.source === 'supabase' ? s.id : `file:${s.filename}`}
+                          </span>
+                          <span className="text-muted-foreground mb-2 flex flex-wrap gap-1 text-xs">
+                            <span>{s.source === 'supabase' ? 'DB' : 'File'}</span>
+                            <span>·</span>
+                            <span>{formatAgentMode(s.metadata?.agent_mode)}</span>
+                            {s.metadata?.agent_mode === 'realtime' &&
+                              (s.metadata.agent_role || s.metadata.agent_stance) && (
+                                <span>
+                                  ·{' '}
+                                  {getAgentRoleLabel(
+                                    normalizeAgentRole(
+                                      s.metadata.agent_role ?? s.metadata.agent_stance
+                                    )
+                                  )}
+                                </span>
+                              )}
+                            {promptLabel(s.metadata) && <span>· {promptLabel(s.metadata)}</span>}
                           </span>
                           <span className="text-foreground mt-auto text-sm font-semibold">
                             대화 {s.entry_count}개
@@ -196,7 +261,13 @@ function ConversationView({ session, onBack }: { session: SessionMeta; onBack: (
   const getColor = useParticipantColors();
 
   useEffect(() => {
-    const es = new EventSource(`/api/logs/stream?filename=${encodeURIComponent(session.filename)}`);
+    const params = new URLSearchParams();
+    if (session.source === 'file' && session.filename) {
+      params.set('filename', session.filename);
+    } else {
+      params.set('sessionId', session.id);
+    }
+    const es = new EventSource(`/api/logs/stream?${params.toString()}`);
     es.onopen = () => setConnected(true);
     es.onerror = () => setConnected(false);
     es.onmessage = (e) => {
@@ -207,7 +278,10 @@ function ConversationView({ session, onBack }: { session: SessionMeta; onBack: (
       }
     };
     return () => es.close();
-  }, [session.filename]);
+  }, [session.filename, session.id, session.source]);
+
+  const metadata = log?.metadata ?? session.metadata;
+  const role = metadata?.agent_role ?? metadata?.agent_stance;
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -223,15 +297,24 @@ function ConversationView({ session, onBack }: { session: SessionMeta; onBack: (
           {session.room}
         </span>
         <span className="text-muted-foreground font-mono text-xs">{session.session_id}</span>
-        {log?.metadata?.agent_mode === 'realtime' &&
-          (log.metadata.agent_role || log.metadata.agent_stance) && (
-            <span className="bg-muted rounded px-2 py-0.5 text-xs font-semibold">
-              {getAgentRoleLabel(
-                normalizeAgentRole(log.metadata.agent_role ?? log.metadata.agent_stance)
-              )}{' '}
-              에이전트
-            </span>
-          )}
+        <span className="bg-muted rounded px-2 py-0.5 text-xs font-semibold">
+          {formatAgentMode(metadata?.agent_mode)}
+        </span>
+        {metadata?.agent_mode === 'realtime' && role && (
+          <span className="bg-muted rounded px-2 py-0.5 text-xs font-semibold">
+            {getAgentRoleLabel(normalizeAgentRole(role))} 에이전트
+          </span>
+        )}
+        {metadata?.feedback_condition_id && (
+          <span className="bg-muted rounded px-2 py-0.5 text-xs font-semibold">
+            {metadata.feedback_condition_id}
+          </span>
+        )}
+        {promptLabel(metadata) && (
+          <span className="bg-muted rounded px-2 py-0.5 text-xs font-semibold">
+            {promptLabel(metadata)}
+          </span>
+        )}
         <span className="ml-auto flex items-center gap-1.5 text-xs">
           <span
             className={`inline-block size-2 rounded-full ${connected ? 'bg-green-500' : 'bg-gray-400'}`}
@@ -256,7 +339,7 @@ function ConversationView({ session, onBack }: { session: SessionMeta; onBack: (
                 const palette = isAgent ? AGENT_PALETTE : getColor(speakerName);
                 return (
                   <div
-                    key={i}
+                    key={entry.sequence ?? `${entry.timestamp}-${i}`}
                     className={`flex items-start gap-3 px-2 py-1 ${isAgent ? 'flex-row' : 'flex-row-reverse'}`}
                   >
                     <div
