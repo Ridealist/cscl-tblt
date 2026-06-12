@@ -74,18 +74,18 @@ REALTIME_AGENT_NAMES = {
 }
 REALTIME_AGENT_NAME = "realtime-agent"
 REALTIME_TTS_VOICE_BY_SESSION_PURPOSE = {
-    "evaluation": "cccc21e8-5bcf-4ff0-bc7f-be4e40afc544",  # Kate
-    "practice": "32b3f3c5-7171-46aa-abe7-b598964aa793",  # Daisy
+    "evaluation": "b7d50908-b17c-442d-ad8d-810c63997ed9",  # Kate / Sierra - California Girl
+    "practice": "32b3f3c5-7171-46aa-abe7-b598964aa793",  # Daisy / Reading Girl
 }
 REALTIME_TTS_EXTRA_KWARGS_BY_SESSION_PURPOSE = {
     "evaluation": {
-        "speed": 0.7,
+        "speed": 0.8,
         "volume": 1.0,
         # "emotion": "excited",
     },
     "practice": {
         "speed": 0.8,
-        "volume": 1.2,
+        "volume": 1.1,
         # "emotion": "excited",
     },
 }

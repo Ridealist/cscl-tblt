@@ -117,7 +117,7 @@ def test_normalize_activity_context_prioritizes_free_conversation() -> None:
 def test_realtime_tts_voice_changes_by_session_purpose() -> None:
     assert (
         _realtime_tts_voice_for_session_purpose("evaluation")
-        == "cccc21e8-5bcf-4ff0-bc7f-be4e40afc544"
+        == "b7d50908-b17c-442d-ad8d-810c63997ed9"
     )
     assert (
         _realtime_tts_voice_for_session_purpose("practice")
@@ -131,14 +131,14 @@ def test_realtime_tts_voice_changes_by_session_purpose() -> None:
 
 def test_realtime_tts_extra_kwargs_change_by_session_purpose() -> None:
     assert _realtime_tts_extra_kwargs_for_session_purpose("evaluation") == {
-        "speed": 0.7,
+        "speed": 0.8,
         "volume": 1.0,
     }
     assert _realtime_tts_extra_kwargs_for_session_purpose("practice") == {
         "speed": 0.8,
-        "volume": 1.2,
+        "volume": 1.1,
     }
     assert _realtime_tts_extra_kwargs_for_session_purpose(None) == {
         "speed": 0.8,
-        "volume": 1.2,
+        "volume": 1.1,
     }
