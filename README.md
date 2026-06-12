@@ -305,7 +305,7 @@ set role = 'admin',
     display_name = excluded.display_name;
 ```
 
-`SUPABASE_SECRET_KEY`는 RLS를 우회할 수 있으므로 server-only 코드에서만 사용한다.
+`SUPABASE_SECRET_KEY`는 RLS를 우회할 수 있으므로 server-only 코드에서만 사용한다. Next.js API routes는 `client/.env.local`에서 이 값을 읽고, Python realtime agent는 root `.env`에서 같은 URL/secret을 읽어 `promptVersionId`에 해당하는 `realtime_prompt_versions` row를 가져온다.
 
 관리자 로그인 화면은 `/admin/login`이다. 로그인은 Supabase email/password 계정을 사용하며, 계정의 `profiles.role`이 `admin`이어야 `/admin` 및 관리자성 API를 사용할 수 있다.
 
@@ -345,9 +345,9 @@ set num_classes = excluded.num_classes,
     realtime_resetting = excluded.realtime_resetting;
 ```
 
-Production에서는 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`가 모두 필요하다. Supabase가 미설정이거나 DB 장애가 있으면 운영 설정 route는 setup/runtime error를 반환한다. 로컬 개발에서는 Supabase가 없거나 일시적으로 실패할 때 `config.json` fallback을 사용한다.
+Production에서는 `client/.env.local`과 root `.env`에 Supabase 연결값이 필요하다. Next.js에는 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`가 필요하고, Python realtime agent에는 `NEXT_PUBLIC_SUPABASE_URL` 또는 `SUPABASE_URL`과 `SUPABASE_SECRET_KEY` 또는 `SUPABASE_SERVICE_ROLE_KEY`가 필요하다. Supabase가 미설정이거나 DB 장애가 있으면 운영 설정 route는 setup/runtime error를 반환한다. 로컬 개발에서는 Supabase가 없거나 일시적으로 실패할 때 `config.json` fallback을 사용한다.
 
-기존 `prompt_config.json` override는 `supabase/README.md`의 `realtime_prompt_versions Migration` 절차로 한 번만 active version row로 이관한다. 이관 후 Next.js admin/token 경로의 custom prompt source of truth는 Supabase active row다.
+기존 `prompt_config.json` override는 `supabase/README.md`의 `realtime_prompt_versions Migration` 절차로 한 번만 active version row로 이관한다. 이관 후 Realtime custom prompt source of truth는 Supabase prompt version row다. `/api/token`은 active row의 `promptVersionId`를 LiveKit metadata에 넣고, Python realtime agent는 그 id로 같은 row를 fetch한다. `promptVersionId`가 없는 default session은 tracked markdown prompt를 사용한다.
 
 로컬 Supabase CLI는 기존 프로젝트와 기본 포트가 충돌하지 않도록 `5532x` 대역을 사용한다.
 
@@ -523,7 +523,7 @@ pnpm prompts:check
     └── .env.local        # Next.js 환경변수
 ```
 
-> `logs/`는 agent 로컬 파일 출력이다. Realtime custom prompt는 Next.js admin/token 경로에서 Supabase `realtime_prompt_versions`를 사용하며, legacy `prompt_config.json`은 #35에서 agent runtime source가 정리되기 전까지 migration/호환 확인용으로만 남긴다.
+> `logs/`는 agent 로컬 파일 출력이다. Realtime custom prompt는 Next.js admin/token 경로와 Python realtime agent 모두 Supabase `realtime_prompt_versions`를 사용한다. legacy `prompt_config.json`은 migration 참고용이며 runtime source로 사용하지 않는다.
 > 운영 설정은 Supabase `app_settings`를 사용하며, Supabase가 없는 로컬 개발 환경에서만 `config.json` fallback을 사용한다.
 
 ---
@@ -584,6 +584,8 @@ NEXT_PUBLIC_SUPABASE_URL=<Supabase Project URL>
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<Supabase publishable key>
 SUPABASE_SECRET_KEY=<Supabase secret key>
 ```
+
+Python realtime agent도 custom prompt version fetch를 위해 root **`/opt/cscl-tblt/.env`**에 Supabase URL과 secret을 읽을 수 있어야 한다. `NEXT_PUBLIC_SUPABASE_URL`/`SUPABASE_SECRET_KEY`를 같은 값으로 두거나, agent 전용으로 `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`를 둘 수 있다.
 
 > `S3_ENDPOINT`는 AWS S3 사용 시 반드시 비워두어야 합니다. 값을 넣으면 Egress 업로드 실패.
 > Cloudflare R2 등 S3 호환 스토리지 사용 시에만 `https://...` 형식으로 입력.
@@ -782,7 +784,7 @@ Production 배포는 GitHub Actions가 SSH로 EC2에 접속해 `scripts/deploy-p
 - `pnpm`, `uv`, `pm2`, `curl`이 설치되어 있어야 한다.
 - 서버의 `.env`, `client/.env.local`, `config.json`, `prompt_config.json`은 배포 중 백업 후 복원된다.
 - `config.json`은 git 추적 대상이 아니며, Supabase가 없는 로컬 fallback/import 용도로만 사용한다.
-- Production에서는 `client/.env.local`에 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`가 있어야 한다.
+- Production에서는 `client/.env.local`에 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`가 있어야 한다. Realtime custom prompt를 쓰는 agent host의 root `.env`에도 Supabase URL과 server-only secret이 있어야 한다.
 - Production 운영 설정은 Supabase `app_settings(id = 'default')` row에 저장된다.
 - 최초 admin 계정은 Supabase Auth 사용자 생성 후 `profiles.role = 'admin'`으로 bootstrap해야 한다.
 

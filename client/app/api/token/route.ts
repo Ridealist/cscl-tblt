@@ -1,5 +1,11 @@
 import { NextResponse } from 'next/server';
-import { AccessToken, type AccessTokenOptions, type VideoGrant } from 'livekit-server-sdk';
+import {
+  AccessToken,
+  type AccessTokenOptions,
+  AgentDispatchClient,
+  RoomServiceClient,
+  type VideoGrant,
+} from 'livekit-server-sdk';
 import { RoomConfiguration } from '@livekit/protocol';
 import { type AgentMode, normalizeAgentMode } from '@/lib/agent-mode';
 import { type AgentRole, getAgentNameForConfig } from '@/lib/agent-role';
@@ -59,10 +65,16 @@ export async function POST(req: Request) {
 
     const body = await req.json();
 
-    // Use provided name/room or fall back to random values
-    const participantName = body?.participant_name?.trim() || 'user';
+    const participantName =
+      typeof body?.participant_name === 'string' ? body.participant_name.trim() : '';
+    const roomName = typeof body?.room_name === 'string' ? body.room_name.trim() : '';
+    if (!participantName || !roomName) {
+      return NextResponse.json(
+        { error: 'participant_name and room_name are required.' },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
     const participantIdentity = `${participantName}_${Math.floor(Math.random() * 10_000)}`;
-    const roomName = body?.room_name?.trim() || `room_${Math.floor(Math.random() * 10_000)}`;
     const config = await readRuntimeConfig();
     const agentMode = inferAgentMode(body?.agent_mode, roomName, config.agentMode);
     if (agentMode === 'realtime' && config.realtimeResetting) {
@@ -81,6 +93,7 @@ export async function POST(req: Request) {
     const promptSnapshot =
       agentMode === 'realtime' ? await readRealtimePromptSnapshot() : undefined;
     const roomConfig = buildRoomConfig(
+      roomName,
       agentName,
       agentMode,
       config.agentRole,
@@ -114,6 +127,9 @@ export async function POST(req: Request) {
       roomName,
       roomConfig
     );
+    if (agentMode === 'realtime') {
+      await ensureRealtimeAgentDispatchRoom(roomName, agentName, roomConfig);
+    }
 
     // Return connection details
     const data: ConnectionDetails = {
@@ -189,6 +205,7 @@ async function readRealtimePromptSnapshot(): Promise<RealtimePromptSnapshot> {
 }
 
 function buildRoomConfig(
+  roomName: string,
   agentName: string,
   agentMode: AgentMode,
   agentRole: AgentRole,
@@ -213,6 +230,7 @@ function buildRoomConfig(
   });
 
   return new RoomConfiguration({
+    name: roomName,
     metadata,
     agents: [
       {
@@ -221,6 +239,60 @@ function buildRoomConfig(
       },
     ],
   });
+}
+
+type RoomCreateOptionsWithAgents = Parameters<RoomServiceClient['createRoom']>[0] & {
+  agents?: RoomConfiguration['agents'];
+};
+
+function isAlreadyExistsError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = 'code' in error ? String(error.code) : '';
+  return code === 'already_exists' || /already exists|already_exists|exists/i.test(error.message);
+}
+
+async function ensureRealtimeAgentDispatchRoom(
+  roomName: string,
+  agentName: string,
+  roomConfig: RoomConfiguration
+): Promise<void> {
+  const roomSvc = new RoomServiceClient(LIVEKIT_URL, API_KEY, API_SECRET);
+  const roomOptions: RoomCreateOptionsWithAgents = {
+    name: roomName,
+    metadata: roomConfig.metadata,
+    agents: roomConfig.agents,
+  };
+
+  try {
+    await roomSvc.createRoom(roomOptions);
+    logTokenEvent('created realtime room with agent dispatch', {
+      roomName,
+      agentName,
+      requestedAgents: roomConfig.agents.map((agent) => ({ agentName: agent.agentName })),
+    });
+    return;
+  } catch (error) {
+    if (!isAlreadyExistsError(error)) {
+      throw error;
+    }
+    logTokenEvent('realtime room already exists before token join', {
+      roomName,
+      agentName,
+    });
+  }
+
+  const dispatchClient = new AgentDispatchClient(LIVEKIT_URL, API_KEY, API_SECRET);
+  const dispatches = await dispatchClient.listDispatch(roomName).catch(() => []);
+  const hasDispatch = dispatches.some((dispatch) => dispatch.agentName === agentName);
+  if (hasDispatch) {
+    logTokenEvent('realtime agent dispatch already exists', { roomName, agentName });
+    return;
+  }
+
+  await dispatchClient.createDispatch(roomName, agentName, {
+    metadata: roomConfig.agents[0]?.metadata || roomConfig.metadata,
+  });
+  logTokenEvent('created explicit realtime agent dispatch', { roomName, agentName });
 }
 
 function createParticipantToken(
@@ -234,6 +306,7 @@ function createParticipantToken(
   });
   const grant: VideoGrant = {
     room: roomName,
+    roomCreate: true,
     roomJoin: true,
     canPublish: true,
     canPublishData: true,

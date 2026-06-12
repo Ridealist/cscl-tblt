@@ -15,7 +15,7 @@ Conversation log tables are intentionally deferred to #36, where `ConversationLo
 
 ## Environment Variables
 
-The Next.js client uses these values:
+The Next.js API routes and Python realtime agent use these values:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
@@ -23,7 +23,7 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 SUPABASE_SECRET_KEY=sb_secret_...
 ```
 
-Only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` may be exposed to browser code. `SUPABASE_SECRET_KEY` must stay server-only because it bypasses Row Level Security.
+Only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` may be exposed to browser code. `SUPABASE_SECRET_KEY` must stay server-only because it bypasses Row Level Security. The Python realtime agent reads the same URL and secret from root `.env` when resolving a custom `promptVersionId`.
 
 ## Bootstrap
 
@@ -48,7 +48,7 @@ Production uses Supabase `app_settings(id = 'default')` as the source of truth f
 
 Local development may run without Supabase for the settings store. When the Supabase admin environment variables are missing, or a local Supabase read/write fails, the Next.js settings store falls back to root `config.json`. This fallback is for local development and migration only; production returns a setup/runtime error instead.
 
-Prompt editing requires Supabase when saving a custom prompt version. Without an active prompt row, the admin prompt API and token route use the tracked markdown defaults under `prompts/realtime/`.
+Prompt editing requires Supabase when saving a custom prompt version. Without an active prompt row, the admin prompt API, token route, and Python realtime agent use the tracked markdown defaults under `prompts/realtime/`. With an active prompt row, `/api/token` records its `promptVersionId` in LiveKit metadata and the agent fetches that exact row from Supabase.
 
 `supabase/config.toml` pins this repo to the `5532x` local port range so it can run alongside another Supabase project using the CLI defaults.
 
@@ -58,7 +58,7 @@ supabase db reset --no-seed
 supabase status
 ```
 
-Use the `supabase status` output in `client/.env.local`:
+Use the `supabase status` output in `client/.env.local`, and provide the URL plus server-only secret to root `.env` for the Python agent:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:55321
@@ -123,4 +123,4 @@ select public.activate_realtime_prompt_version(
 );
 ```
 
-After verifying `/admin` shows the migrated prompt as the active custom version, remove the old `prompt_config.json` from the runtime host so it is not mistaken for the source of truth. The Python agent still reads local prompt files until issue #35 wires the agent runtime to the Supabase prompt version referenced in LiveKit metadata.
+After verifying `/admin` shows the migrated prompt as the active custom version, remove the old `prompt_config.json` from the runtime host so it is not mistaken for the source of truth. Runtime Realtime sessions use LiveKit metadata `promptVersionId` plus Supabase `realtime_prompt_versions`; sessions without a custom version use tracked markdown defaults.
