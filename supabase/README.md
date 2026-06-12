@@ -12,6 +12,7 @@ The migrations add the shared foundation used by the staged Supabase rollout:
   `prompt_config.json`.
 - `class_sessions`: LiveKit class session metadata written by `ConversationLogger`.
 - `conversation_events`: ordered user/agent utterance events for each class session.
+- `students`: student records and plain per-student access codes used by the main login flow.
 
 ## Environment Variables
 
@@ -21,9 +22,10 @@ The Next.js API routes and Python realtime agent use these values:
 NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 SUPABASE_SECRET_KEY=sb_secret_...
+STUDENT_SESSION_SECRET=<long-random-server-only-secret>
 ```
 
-Only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` may be exposed to browser code. `SUPABASE_SECRET_KEY` must stay server-only because it bypasses Row Level Security. The Python realtime agent reads the same URL and secret from root `.env` when resolving a custom `promptVersionId` and dual-writing conversation logs.
+Only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` may be exposed to browser code. `SUPABASE_SECRET_KEY` and `STUDENT_SESSION_SECRET` must stay server-only. The Supabase secret bypasses Row Level Security; the student session secret signs the HttpOnly student login cookie. The Python realtime agent reads the same Supabase URL and secret from root `.env` when resolving a custom `promptVersionId` and dual-writing conversation logs.
 
 ## Bootstrap
 
@@ -50,6 +52,8 @@ Local development may run without Supabase for the settings store. When the Supa
 
 Prompt editing requires Supabase when saving a custom prompt version. Without an active prompt row, the admin prompt API, token route, and Python realtime agent use the tracked markdown defaults under `prompts/realtime/`. With an active prompt row, `/api/token` records its `promptVersionId` in LiveKit metadata and the agent fetches that exact row from Supabase.
 
+The public student flow requires Supabase-backed `students` rows. Students first authenticate on the main screen with 학번, 이름, and their per-student access code; the server then sets a signed HttpOnly `student_session` cookie. `/api/token` requires that cookie and derives the LiveKit participant identity from the authenticated student instead of trusting a browser-supplied name.
+
 Conversation logging keeps the existing `logs/*.json` file write and adds Supabase dual-write when the Python agent has `NEXT_PUBLIC_SUPABASE_URL` or `SUPABASE_URL` plus `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY`. Each `ConversationLogger` instance creates a new `class_sessions.id`; `livekit_session_id` is retained as LiveKit room metadata and is not unique because named rooms can be reused across conversations. Missing or failing Supabase writes are logged by the agent and do not stop the session.
 
 Admin dashboard log APIs read `class_sessions` and `conversation_events` through the server-only Supabase secret key. The old `logs/*.json` reader is fallback-only for local development when Supabase admin environment variables are missing and `NODE_ENV !== 'production'`; configured Supabase read failures are surfaced instead of being hidden by file fallback. Production dashboard log reads are Supabase-backed and remain behind the admin guard. Set `CONVERSATION_LOG_FILE_FALLBACK=false` to disable the local file fallback during development.
@@ -71,6 +75,33 @@ SUPABASE_SECRET_KEY=<secret-key-from-supabase-status>
 ```
 
 Local Studio runs at `http://127.0.0.1:55323`; the local database URL is `postgresql://postgres:postgres@127.0.0.1:55322/postgres`.
+
+## Student Login Seed
+
+Apply `supabase/migrations/20260612030000_student_login.sql` and `supabase/migrations/20260612040000_student_access_code_on_students.sql`, then seed one row per student. `student_number` is the login identifier, `name` is the roster name, `class_number` is the class, `roll_number` is the student's number within that class, and `english_name` is used as the default editable display name in the lobby. If `access_code` is omitted, the database generates a unique 4-character lowercase alphanumeric code containing at least one letter and one digit.
+
+```sql
+insert into public.students (student_number, name, english_name, class_number, roll_number)
+values
+  ('20260001', '김민지', 'Minji Kim', 9, 1),
+  ('20260002', '이서준', 'Seojun Lee', 9, 2)
+on conflict (student_number) do update
+set name = excluded.name,
+    english_name = excluded.english_name,
+    class_number = excluded.class_number,
+    roll_number = excluded.roll_number,
+    active = true;
+```
+
+Admins can read generated student codes directly for classroom distribution:
+
+```sql
+select student_number, name, class_number, roll_number, access_code
+from public.students
+order by class_number, roll_number;
+```
+
+To set a code manually, provide a 4-character lowercase alphanumeric value that includes at least one letter and one digit. Codes are unique across `students`.
 
 ## app_settings Seed
 
