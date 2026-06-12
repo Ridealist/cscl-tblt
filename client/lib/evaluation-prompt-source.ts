@@ -1,6 +1,5 @@
 import { readFile } from 'fs/promises';
 import { join } from 'path';
-import 'server-only';
 
 const DEFAULT_PROMPT_SOURCE_DIR = join(process.cwd(), '..', 'prompts', 'evaluation');
 const PROMPT_SOURCE_MANIFEST_PATH = join(DEFAULT_PROMPT_SOURCE_DIR, 'manifest.json');
