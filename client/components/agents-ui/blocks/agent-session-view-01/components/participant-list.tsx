@@ -8,7 +8,7 @@ import {
 } from '@livekit/components-react';
 import { cn } from '@/lib/shadcn/utils';
 
-export function ParticipantList() {
+export function ParticipantList({ agentDisplayName = 'Daisy' }: { agentDisplayName?: string }) {
   const participants = useParticipants();
   const speakingParticipants = useSpeakingParticipants();
   const { localParticipant } = useLocalParticipant();
@@ -62,7 +62,9 @@ export function ParticipantList() {
                     : 'bg-muted-foreground/40'
                 )}
               />
-              <span className="text-muted-foreground truncate text-xs font-medium">Daisy</span>
+              <span className="text-muted-foreground truncate text-xs font-medium">
+                {agentDisplayName}
+              </span>
             </li>
           );
         })}

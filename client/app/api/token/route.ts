@@ -11,9 +11,20 @@ import {
   normalizeAgentRole,
 } from '@/lib/agent-role';
 import {
+  EvaluationPromptSourceError,
+  readEvaluationPromptState,
+} from '@/lib/evaluation-prompt-source';
+import {
   DEFAULT_REALTIME_PROMPT_METADATA,
   type RealtimePromptMetadata,
 } from '@/lib/realtime-prompt-config';
+import {
+  type ActivityType,
+  type SessionPurpose,
+  getActivityTypeForSessionPurpose,
+  getSessionPurposeForActivity,
+  normalizeSessionPurpose,
+} from '@/lib/session-activity';
 
 type ConnectionDetails = {
   serverUrl: string;
@@ -34,12 +45,42 @@ type RuntimeConfig = {
   agentMode: AgentMode;
   agentRole: AgentRole;
   feedbackConditionId: string;
+  sessionPurpose: SessionPurpose;
   realtimeResetting: boolean;
 };
 
 type RealtimePromptSnapshot = RealtimePromptMetadata & {
   taskCardId?: string;
 };
+
+type SessionActivityContext = {
+  activityType: ActivityType;
+  evaluationCharacter?: string;
+  evaluationId?: string;
+  evaluationPromptId?: string;
+  evaluationPromptVersion?: string;
+  sessionPurpose: SessionPurpose;
+};
+
+class SessionPurposeMismatchError extends Error {
+  expectedSessionPurpose: SessionPurpose;
+  requestedSessionPurpose: SessionPurpose;
+
+  constructor({
+    expectedSessionPurpose,
+    requestedSessionPurpose,
+  }: {
+    expectedSessionPurpose: SessionPurpose;
+    requestedSessionPurpose: SessionPurpose;
+  }) {
+    super(
+      '선생님이 활동 설정을 바꾸는 중입니다. 잠시 후 활동 선택 화면이 바뀌면 다시 입장해주세요.'
+    );
+    this.name = 'SessionPurposeMismatchError';
+    this.expectedSessionPurpose = expectedSessionPurpose;
+    this.requestedSessionPurpose = requestedSessionPurpose;
+  }
+}
 
 // don't cache the results
 export const revalidate = 0;
@@ -60,19 +101,25 @@ export async function POST(req: Request) {
       throw new Error('LIVEKIT_API_SECRET is not defined');
     }
 
-    const body = await req.json();
+    const body = (await req.json()) as Record<string, unknown>;
 
     // Use provided name/room or fall back to random values
-    const participantName = body?.participant_name?.trim() || 'user';
+    const participantName = text(body?.participant_name) ?? 'user';
     const participantIdentity = `${participantName}_${Math.floor(Math.random() * 10_000)}`;
-    const roomName = body?.room_name?.trim() || `room_${Math.floor(Math.random() * 10_000)}`;
+    const roomName = text(body?.room_name) ?? `room_${Math.floor(Math.random() * 10_000)}`;
     const config = readRuntimeConfig();
     const agentMode = inferAgentMode(body?.agent_mode, roomName, config.agentMode);
+    const sessionActivity =
+      agentMode === 'realtime'
+        ? await readSessionActivityContext(body, roomName, config.sessionPurpose)
+        : undefined;
     if (agentMode === 'realtime' && config.realtimeResetting) {
       logTokenEvent('rejected realtime token during reset', {
         roomName,
         participantName,
         requestedAgentMode: body?.agent_mode ?? null,
+        requestedActivityType: body?.activity_type ?? null,
+        requestedSessionPurpose: body?.session_purpose ?? null,
       });
       return NextResponse.json(
         { error: '개별 세션 초기화 중입니다. 잠시 후 다시 입장해주세요.' },
@@ -81,13 +128,17 @@ export async function POST(req: Request) {
     }
 
     const agentName = getAgentNameForConfig(agentMode, config.agentRole);
-    const promptSnapshot = agentMode === 'realtime' ? readRealtimePromptSnapshot() : undefined;
+    const promptSnapshot =
+      agentMode === 'realtime' && sessionActivity?.sessionPurpose !== 'evaluation'
+        ? readRealtimePromptSnapshot()
+        : undefined;
     const roomConfig = buildRoomConfig(
       agentName,
       agentMode,
       config.agentRole,
       config.feedbackConditionId,
-      promptSnapshot
+      promptSnapshot,
+      sessionActivity
     );
     const roomMetadata = JSON.parse(roomConfig.metadata);
     const requestedAgents = roomConfig.agents.map((agent) => ({
@@ -100,7 +151,10 @@ export async function POST(req: Request) {
       participantName,
       participantIdentity,
       requestedAgentMode: body?.agent_mode ?? null,
+      requestedActivityType: body?.activity_type ?? null,
+      requestedSessionPurpose: body?.session_purpose ?? null,
       inferredAgentMode: agentMode,
+      sessionActivity: sessionActivity ?? null,
       runtimeAgentMode: config.agentMode,
       runtimeAgentRole: config.agentRole,
       runtimeFeedbackConditionId: config.feedbackConditionId,
@@ -134,6 +188,25 @@ export async function POST(req: Request) {
     });
     return NextResponse.json(data, { headers });
   } catch (error) {
+    if (error instanceof SessionPurposeMismatchError) {
+      return NextResponse.json(
+        {
+          code: 'session_purpose_mismatch',
+          error: error.message,
+          expectedSessionPurpose: error.expectedSessionPurpose,
+          requestedSessionPurpose: error.requestedSessionPurpose,
+        },
+        { status: 409, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    if (error instanceof EvaluationPromptSourceError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
     if (error instanceof Error) {
       console.error('[api/token] token issuance failed', {
         message: error.message,
@@ -159,6 +232,7 @@ function readRuntimeConfig(): RuntimeConfig {
       agentMode: normalizeAgentMode(raw.agentMode),
       agentRole: normalizeAgentRole(raw.agentRole ?? raw.agentStance),
       feedbackConditionId: normalizeFeedbackConditionId(raw.feedbackConditionId),
+      sessionPurpose: normalizeSessionPurpose(raw.sessionPurpose),
       realtimeResetting: raw.realtimeResetting === true,
     };
   } catch {
@@ -166,6 +240,7 @@ function readRuntimeConfig(): RuntimeConfig {
       agentMode: 'pipeline',
       agentRole: DEFAULT_AGENT_ROLE,
       feedbackConditionId: DEFAULT_FEEDBACK_CONDITION_ID,
+      sessionPurpose: 'practice',
       realtimeResetting: false,
     };
   }
@@ -176,8 +251,120 @@ function normalizeFeedbackConditionId(value: unknown): string {
 }
 
 function inferAgentMode(value: unknown, roomName: string, fallback: AgentMode): AgentMode {
+  if (roomName.startsWith('eval-') || roomName.startsWith('task-')) return 'realtime';
   if (roomName.startsWith('realtime-')) return 'realtime';
   return normalizeAgentMode(value ?? fallback);
+}
+
+function text(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+type SessionPurposeSignal = {
+  sessionPurpose: SessionPurpose;
+  source: 'activity_type' | 'room_name' | 'session_purpose';
+};
+
+function parseRoomSessionPurpose(roomName: string): SessionPurpose | undefined {
+  if (roomName.startsWith('eval-')) return 'evaluation';
+  if (roomName.startsWith('task-')) return 'practice';
+  return undefined;
+}
+
+function parseBodyActivityType(value: unknown): ActivityType | undefined {
+  return value === 'free_conversation' || value === 'task_solution' ? value : undefined;
+}
+
+function parseBodySessionPurpose(value: unknown): SessionPurpose | undefined {
+  if (value === 'evaluation') return 'evaluation';
+  if (value === 'practice' || value === 'execution') return 'practice';
+  return undefined;
+}
+
+function collectSessionPurposeSignals(
+  body: Record<string, unknown>,
+  roomName: string
+): SessionPurposeSignal[] {
+  const roomSessionPurpose = parseRoomSessionPurpose(roomName);
+  const bodySessionPurpose = parseBodySessionPurpose(body?.session_purpose);
+  const bodyActivityType = parseBodyActivityType(body?.activity_type);
+  return [
+    ...(roomSessionPurpose
+      ? [{ source: 'room_name' as const, sessionPurpose: roomSessionPurpose }]
+      : []),
+    ...(bodySessionPurpose
+      ? [{ source: 'session_purpose' as const, sessionPurpose: bodySessionPurpose }]
+      : []),
+    ...(bodyActivityType
+      ? [
+          {
+            source: 'activity_type' as const,
+            sessionPurpose: getSessionPurposeForActivity(bodyActivityType),
+          },
+        ]
+      : []),
+  ];
+}
+
+function resolveRequestedSessionPurpose(
+  body: Record<string, unknown>,
+  roomName: string,
+  currentSessionPurpose: SessionPurpose
+): SessionPurpose {
+  const signals = collectSessionPurposeSignals(body, roomName);
+  const firstSignal = signals[0];
+  const conflictingSignal = signals.find(
+    (signal) => firstSignal && signal.sessionPurpose !== firstSignal.sessionPurpose
+  );
+
+  if (firstSignal && conflictingSignal) {
+    const requestedSessionPurpose =
+      firstSignal.sessionPurpose !== currentSessionPurpose
+        ? firstSignal.sessionPurpose
+        : conflictingSignal.sessionPurpose;
+    throw new SessionPurposeMismatchError({
+      expectedSessionPurpose: currentSessionPurpose,
+      requestedSessionPurpose,
+    });
+  }
+
+  const requestedSessionPurpose = firstSignal?.sessionPurpose ?? currentSessionPurpose;
+  if (requestedSessionPurpose !== currentSessionPurpose) {
+    throw new SessionPurposeMismatchError({
+      expectedSessionPurpose: currentSessionPurpose,
+      requestedSessionPurpose,
+    });
+  }
+
+  return currentSessionPurpose;
+}
+
+async function readSessionActivityContext(
+  body: Record<string, unknown>,
+  roomName: string,
+  currentSessionPurpose: SessionPurpose
+): Promise<SessionActivityContext> {
+  const sessionPurpose = resolveRequestedSessionPurpose(body, roomName, currentSessionPurpose);
+  const activityType = getActivityTypeForSessionPurpose(sessionPurpose);
+
+  if (sessionPurpose !== 'evaluation') {
+    return {
+      activityType,
+      sessionPurpose,
+    };
+  }
+
+  const evaluationPrompt = await readEvaluationPromptState({
+    evaluationId: text(body?.evaluation_id),
+  });
+  return {
+    activityType,
+    evaluationCharacter: evaluationPrompt.evaluationCharacter,
+    evaluationId: evaluationPrompt.evaluationId,
+    evaluationPromptId: evaluationPrompt.evaluationPromptId,
+    evaluationPromptVersion: evaluationPrompt.evaluationPromptVersion,
+    sessionPurpose,
+  };
 }
 
 function readRealtimePromptSnapshot(): RealtimePromptSnapshot {
@@ -211,18 +398,30 @@ function buildRoomConfig(
   agentMode: AgentMode,
   agentRole: AgentRole,
   feedbackConditionId: string,
-  promptSnapshot?: RealtimePromptSnapshot
+  promptSnapshot?: RealtimePromptSnapshot,
+  sessionActivity?: SessionActivityContext
 ): RoomConfiguration {
   const metadata = JSON.stringify({
     agentMode,
     ...(agentMode === 'realtime'
       ? {
-          agentRole,
-          promptId: promptSnapshot?.promptId ?? DEFAULT_REALTIME_PROMPT_METADATA.promptId,
-          promptSavedAt: promptSnapshot?.savedAt ?? DEFAULT_REALTIME_PROMPT_METADATA.savedAt,
-          promptSource: promptSnapshot?.source ?? DEFAULT_REALTIME_PROMPT_METADATA.source,
-          feedbackConditionId,
-          ...(promptSnapshot?.taskCardId ? { taskCardId: promptSnapshot.taskCardId } : {}),
+          sessionPurpose: sessionActivity?.sessionPurpose ?? 'practice',
+          activityType: sessionActivity?.activityType ?? 'task_solution',
+          ...(sessionActivity?.sessionPurpose === 'evaluation'
+            ? {
+                evaluationCharacter: sessionActivity.evaluationCharacter,
+                evaluationId: sessionActivity.evaluationId,
+                evaluationPromptId: sessionActivity.evaluationPromptId,
+                evaluationPromptVersion: sessionActivity.evaluationPromptVersion,
+              }
+            : {
+                agentRole,
+                promptId: promptSnapshot?.promptId ?? DEFAULT_REALTIME_PROMPT_METADATA.promptId,
+                promptSavedAt: promptSnapshot?.savedAt ?? DEFAULT_REALTIME_PROMPT_METADATA.savedAt,
+                promptSource: promptSnapshot?.source ?? DEFAULT_REALTIME_PROMPT_METADATA.source,
+                feedbackConditionId,
+                ...(promptSnapshot?.taskCardId ? { taskCardId: promptSnapshot.taskCardId } : {}),
+              }),
         }
       : {}),
   });
@@ -249,6 +448,7 @@ function createParticipantToken(
   });
   const grant: VideoGrant = {
     room: roomName,
+    roomCreate: true,
     roomJoin: true,
     canPublish: true,
     canPublishData: true,

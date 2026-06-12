@@ -6,6 +6,12 @@ import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { type AgentMode, normalizeAgentMode } from '@/lib/agent-mode';
 import { type AgentRole, normalizeAgentRole } from '@/lib/agent-role';
 import type { RealtimePromptSource } from '@/lib/realtime-prompt-config';
+import {
+  type ActivityType,
+  type SessionPurpose,
+  normalizeActivityType,
+  normalizeSessionPurpose,
+} from '@/lib/session-activity';
 
 const API_KEY = process.env.LIVEKIT_API_KEY;
 const API_SECRET = process.env.LIVEKIT_API_SECRET;
@@ -22,6 +28,7 @@ function readConfig() {
       classStart: typeof raw.classStart === 'number' ? raw.classStart : 1,
       activeClass: typeof raw.activeClass === 'number' ? raw.activeClass : 1,
       agentMode: normalizeAgentMode(raw.agentMode),
+      sessionPurpose: normalizeSessionPurpose(raw.sessionPurpose),
       realtimeResetting: raw.realtimeResetting === true,
     };
   } catch {
@@ -31,6 +38,7 @@ function readConfig() {
       classStart: 1,
       activeClass: 1,
       agentMode: 'pipeline' as AgentMode,
+      sessionPurpose: 'practice' as SessionPurpose,
       realtimeResetting: false,
     };
   }
@@ -47,25 +55,42 @@ type RoomCounts = {
 };
 
 function parseRealtimeRoomMetadata(metadata?: string): {
+  activityType?: ActivityType;
   agentRole?: AgentRole;
+  evaluationCharacter?: string;
+  evaluationId?: string;
   promptId?: string;
   promptSavedAt?: string | null;
   promptSource?: RealtimePromptSource;
+  sessionPurpose?: SessionPurpose;
 } {
   if (!metadata) return {};
   try {
     const parsed = JSON.parse(metadata) as {
       agentMode?: unknown;
+      activityType?: unknown;
       agentRole?: unknown;
       agentStance?: unknown;
+      evaluationCharacter?: unknown;
+      evaluationId?: unknown;
       promptId?: unknown;
       promptSavedAt?: unknown;
       promptSource?: unknown;
+      sessionPurpose?: unknown;
     };
+    if (parsed.agentMode !== 'realtime') return {};
+    const sessionPurpose = normalizeSessionPurpose(
+      parsed.sessionPurpose,
+      normalizeActivityType(parsed.activityType)
+    );
+    const activityType = normalizeActivityType(parsed.activityType);
     const rawRole = parsed.agentRole ?? parsed.agentStance;
-    if (parsed.agentMode !== 'realtime' || !rawRole) return {};
     return {
-      agentRole: normalizeAgentRole(rawRole),
+      activityType,
+      agentRole: rawRole ? normalizeAgentRole(rawRole) : undefined,
+      evaluationCharacter:
+        typeof parsed.evaluationCharacter === 'string' ? parsed.evaluationCharacter : undefined,
+      evaluationId: typeof parsed.evaluationId === 'string' ? parsed.evaluationId : undefined,
       promptId: typeof parsed.promptId === 'string' ? parsed.promptId : undefined,
       promptSavedAt:
         typeof parsed.promptSavedAt === 'string' || parsed.promptSavedAt === null
@@ -75,10 +100,17 @@ function parseRealtimeRoomMetadata(metadata?: string): {
         parsed.promptSource === 'custom' || parsed.promptSource === 'default'
           ? parsed.promptSource
           : undefined,
+      sessionPurpose,
     };
   } catch {
     return {};
   }
+}
+
+function isRealtimeRoomName(roomName: string): boolean {
+  return (
+    roomName.startsWith('realtime-') || roomName.startsWith('eval-') || roomName.startsWith('task-')
+  );
 }
 
 async function getRoomCounts(svc: RoomServiceClient, roomName: string): Promise<RoomCounts> {
@@ -105,7 +137,8 @@ export async function GET() {
     return NextResponse.json({ error: 'LiveKit credentials not configured' }, { status: 500 });
   }
 
-  const { activeClass, numGroupsPerClass, agentMode, realtimeResetting } = readConfig();
+  const { activeClass, numGroupsPerClass, agentMode, sessionPurpose, realtimeResetting } =
+    readConfig();
 
   const predefinedNames: string[] = Array.from(
     { length: numGroupsPerClass },
@@ -132,7 +165,7 @@ export async function GET() {
   }));
 
   const realtimeRooms = activeRooms
-    .filter((room) => room.name.startsWith('realtime-') && activeRoomNames.has(room.name))
+    .filter((room) => isRealtimeRoomName(room.name) && activeRoomNames.has(room.name))
     .map((room) => ({
       name: room.name,
       ...parseRealtimeRoomMetadata(room.metadata),
@@ -146,7 +179,7 @@ export async function GET() {
     .sort((a, b) => a.name.localeCompare(b.name));
 
   return NextResponse.json(
-    { rooms, activeClass, agentMode, realtimeResetting, realtimeRooms },
+    { rooms, activeClass, agentMode, sessionPurpose, realtimeResetting, realtimeRooms },
     { headers: { 'Cache-Control': 'no-store' } }
   );
 }

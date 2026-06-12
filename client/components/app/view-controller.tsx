@@ -9,6 +9,7 @@ import { AgentSessionView_01 } from '@/components/agents-ui/blocks/agent-session
 import { LobbyView } from '@/components/app/lobby-view';
 import { WelcomeView } from '@/components/app/welcome-view';
 import type { AgentMode } from '@/lib/agent-mode';
+import type { ActivityType, SessionPurpose } from '@/lib/session-activity';
 
 const MotionWelcomeView = motion.create(WelcomeView);
 const MotionLobbyView = motion.create(LobbyView);
@@ -30,14 +31,34 @@ const VIEW_MOTION_PROPS = {
 
 interface ViewControllerProps {
   appConfig: AppConfig;
-  onJoin: (participantName: string, roomName: string, agentMode: AgentMode) => void;
+  onJoin: (
+    participantName: string,
+    roomName: string,
+    agentMode: AgentMode,
+    options?: {
+      activityType?: ActivityType;
+      evaluationId?: string;
+      sessionPurpose?: SessionPurpose;
+    }
+  ) => void;
+  sessionActivityType?: ActivityType;
   sessionNotice?: string | null;
 }
 
-export function ViewController({ appConfig, onJoin, sessionNotice }: ViewControllerProps) {
+export function ViewController({
+  appConfig,
+  onJoin,
+  sessionActivityType,
+  sessionNotice,
+}: ViewControllerProps) {
   const { isConnected } = useSessionContext();
   const { resolvedTheme } = useTheme();
   const [showLobby, setShowLobby] = useState(false);
+  const agentDisplayName = sessionActivityType === 'free_conversation' ? 'Kate' : 'Daisy';
+  const agentAvatarSrc =
+    sessionActivityType === 'free_conversation'
+      ? '/agents/kate_photo.png'
+      : '/agents/daisy_photo.png';
 
   return (
     <AnimatePresence mode="wait">
@@ -68,6 +89,8 @@ export function ViewController({ appConfig, onJoin, sessionNotice }: ViewControl
           supportsVideoInput={appConfig.supportsVideoInput}
           supportsScreenShare={appConfig.supportsScreenShare}
           isPreConnectBufferEnabled={appConfig.isPreConnectBufferEnabled}
+          agentDisplayName={agentDisplayName}
+          agentAvatarSrc={agentAvatarSrc}
           audioVisualizerType={appConfig.audioVisualizerType}
           audioVisualizerColor={
             resolvedTheme === 'dark'

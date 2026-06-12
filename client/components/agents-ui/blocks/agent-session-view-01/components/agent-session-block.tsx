@@ -133,6 +133,10 @@ export interface AgentSessionView_01Props {
    * @default true
    */
   isPreConnectBufferEnabled?: boolean;
+  /** Display name used for the AI agent in session UI. */
+  agentDisplayName?: string;
+  /** Public image path used for the AI agent avatar. */
+  agentAvatarSrc?: string;
 
   /** Selects the visualizer style rendered in the main tile area. */
   audioVisualizerType?: 'bar' | 'wave' | 'grid' | 'radial' | 'aura';
@@ -162,6 +166,8 @@ export function AgentSessionView_01({
   supportsVideoInput = true,
   supportsScreenShare = true,
   isPreConnectBufferEnabled = true,
+  agentDisplayName = 'Daisy',
+  agentAvatarSrc = '/agents/daisy_photo.png',
 
   audioVisualizerType,
   audioVisualizerColor,
@@ -196,7 +202,7 @@ export function AgentSessionView_01({
       {...props}
     >
       <Fade top className="absolute inset-x-4 top-0 z-10 h-40" />
-      <ParticipantList />
+      <ParticipantList agentDisplayName={agentDisplayName} />
       {/* transcript */}
 
       <div
@@ -232,6 +238,8 @@ export function AgentSessionView_01({
         audioVisualizerGridRowCount={audioVisualizerGridRowCount}
         audioVisualizerGridColumnCount={audioVisualizerGridColumnCount}
         audioVisualizerWaveLineWidth={audioVisualizerWaveLineWidth}
+        agentDisplayName={agentDisplayName}
+        agentAvatarSrc={agentAvatarSrc}
         agentState={agentState}
       />
       {/* Bottom */}

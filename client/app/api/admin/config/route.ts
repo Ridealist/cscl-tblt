@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { type AgentMode, normalizeAgentMode } from '@/lib/agent-mode';
 import { type AgentRole, DEFAULT_AGENT_ROLE, normalizeAgentRole } from '@/lib/agent-role';
+import { type SessionPurpose, normalizeSessionPurpose } from '@/lib/session-activity';
 
 const CONFIG_PATH = join(process.cwd(), '..', 'config.json');
 const DEFAULT_PROMPT_SOURCE_DIR = join(process.cwd(), '..', 'prompts', 'realtime');
@@ -22,6 +23,7 @@ interface AppSettings {
   agentMode: AgentMode;
   agentRole: AgentRole;
   feedbackConditionId: string;
+  sessionPurpose: SessionPurpose;
   realtimeResetting: boolean;
 }
 
@@ -81,6 +83,7 @@ function readConfig(feedbackConditions = readFeedbackConditions()): AppSettings 
         raw.feedbackConditionId,
         feedbackConditions
       ),
+      sessionPurpose: normalizeSessionPurpose(raw.sessionPurpose),
       realtimeResetting: raw.realtimeResetting === true,
     };
   } catch {
@@ -92,6 +95,7 @@ function readConfig(feedbackConditions = readFeedbackConditions()): AppSettings 
       agentMode: 'pipeline',
       agentRole: DEFAULT_AGENT_ROLE,
       feedbackConditionId: normalizeFeedbackConditionId(null, feedbackConditions),
+      sessionPurpose: 'practice',
       realtimeResetting: false,
     };
   }
@@ -130,6 +134,7 @@ export async function POST(req: Request) {
         body.feedbackConditionId ?? current.feedbackConditionId,
         feedbackConditions
       ),
+      sessionPurpose: normalizeSessionPurpose(body.sessionPurpose ?? current.sessionPurpose),
       realtimeResetting:
         typeof body.realtimeResetting === 'boolean'
           ? body.realtimeResetting
