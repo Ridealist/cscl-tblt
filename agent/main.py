@@ -256,6 +256,13 @@ def prewarm(proc: JobProcess):
     proc.userdata["vad"] = silero.VAD.load()
 
 
+async def _shutdown_session(egress: EgressRecorder, conv_logger: ConversationLogger) -> None:
+    if conv_logger.closed:
+        return
+    await egress.stop()
+    await asyncio.to_thread(conv_logger.close)
+
+
 async def _run(ctx: JobContext) -> None:
     """dispatch 공통 세션 로직."""
     ctx.log_context_fields = {"room": ctx.room.name}
@@ -344,11 +351,18 @@ async def _run(ctx: JobContext) -> None:
 
     # 룸 연결 완료 후 Egress 녹음 시작
     await egress.start()
+    if egress.egress_id:
+        conv_logger.update_metadata(
+            {
+                "egress_id": egress.egress_id,
+                "recording_path": egress.filepath,
+            }
+        )
 
     # 룸 종료 시 Egress 자동 중지
     ctx.room.on(
         "disconnected",
-        lambda: asyncio.ensure_future(egress.stop()),
+        lambda: asyncio.ensure_future(_shutdown_session(egress, conv_logger)),
     )
 
     # ctx.connect()가 완료된 이후이므로 remote_participants가 확정됨
@@ -405,6 +419,22 @@ async def _run(ctx: JobContext) -> None:
     ctx.room.on(
         "participant_connected",
         lambda p: asyncio.ensure_future(on_participant_connected(p)),
+    )
+
+    async def on_participant_disconnected(p):
+        participant_names.pop(p.identity, None)
+        if _human_names():
+            return
+        log.info(
+            "Pipeline conversation ending because all participants left: room=%s session_id=%s",
+            ctx.room.name,
+            conv_logger.session_id,
+        )
+        await _shutdown_session(egress, conv_logger)
+
+    ctx.room.on(
+        "participant_disconnected",
+        lambda p: asyncio.ensure_future(on_participant_disconnected(p)),
     )
 
 
@@ -583,11 +613,18 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
     log.info("Realtime AgentSession started: room=%s role=%s", ctx.room.name, role)
 
     await egress.start()
+    if egress.egress_id:
+        conv_logger.update_metadata(
+            {
+                "egress_id": egress.egress_id,
+                "recording_path": egress.filepath,
+            }
+        )
     log.info("Realtime egress started: room=%s session_id=%s", ctx.room.name, conv_logger.session_id)
 
     ctx.room.on(
         "disconnected",
-        lambda: asyncio.ensure_future(egress.stop()),
+        lambda: asyncio.ensure_future(_shutdown_session(egress, conv_logger)),
     )
 
     for p in ctx.room.remote_participants.values():
@@ -614,6 +651,24 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
     ctx.room.on(
         "participant_connected",
         lambda p: asyncio.ensure_future(on_participant_connected(p)),
+    )
+
+    async def on_participant_disconnected(p):
+        if participant["identity"] != p.identity:
+            return
+        participant["identity"] = None
+        participant["name"] = None
+        log.info(
+            "Realtime conversation ending because participant left: room=%s session_id=%s identity=%s",
+            ctx.room.name,
+            conv_logger.session_id,
+            p.identity,
+        )
+        await _shutdown_session(egress, conv_logger)
+
+    ctx.room.on(
+        "participant_disconnected",
+        lambda p: asyncio.ensure_future(on_participant_disconnected(p)),
     )
 
 

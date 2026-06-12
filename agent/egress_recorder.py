@@ -27,6 +27,10 @@ class EgressRecorder:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         self._filepath = f"recordings/{room_name}--{ts}.mp3"
 
+    @property
+    def filepath(self) -> str:
+        return self._filepath
+
     def _make_client(self) -> api.LiveKitAPI:
         return api.LiveKitAPI(
             url=os.environ["LIVEKIT_URL"],

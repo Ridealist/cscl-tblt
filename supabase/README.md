@@ -4,14 +4,14 @@ This directory contains the database foundation for the staged Supabase migratio
 
 ## Current Scope
 
-The first migration adds the shared foundation used by the staged Supabase rollout:
+The migrations add the shared foundation used by the staged Supabase rollout:
 
 - `profiles`: Supabase Auth user metadata and app role.
 - `app_settings`: runtime storage for class and agent operation settings.
 - `realtime_prompt_versions`: versioned Realtime prompt overrides that replace
   `prompt_config.json`.
-
-Conversation log tables are intentionally deferred to #36, where `ConversationLogger` will introduce dual-write behavior.
+- `class_sessions`: LiveKit class session metadata written by `ConversationLogger`.
+- `conversation_events`: ordered user/agent utterance events for each class session.
 
 ## Environment Variables
 
@@ -23,7 +23,7 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 SUPABASE_SECRET_KEY=sb_secret_...
 ```
 
-Only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` may be exposed to browser code. `SUPABASE_SECRET_KEY` must stay server-only because it bypasses Row Level Security. The Python realtime agent reads the same URL and secret from root `.env` when resolving a custom `promptVersionId`.
+Only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` may be exposed to browser code. `SUPABASE_SECRET_KEY` must stay server-only because it bypasses Row Level Security. The Python realtime agent reads the same URL and secret from root `.env` when resolving a custom `promptVersionId` and dual-writing conversation logs.
 
 ## Bootstrap
 
@@ -49,6 +49,8 @@ Production uses Supabase `app_settings(id = 'default')` as the source of truth f
 Local development may run without Supabase for the settings store. When the Supabase admin environment variables are missing, or a local Supabase read/write fails, the Next.js settings store falls back to root `config.json`. This fallback is for local development and migration only; production returns a setup/runtime error instead.
 
 Prompt editing requires Supabase when saving a custom prompt version. Without an active prompt row, the admin prompt API, token route, and Python realtime agent use the tracked markdown defaults under `prompts/realtime/`. With an active prompt row, `/api/token` records its `promptVersionId` in LiveKit metadata and the agent fetches that exact row from Supabase.
+
+Conversation logging keeps the existing `logs/*.json` file write and adds Supabase dual-write when the Python agent has `NEXT_PUBLIC_SUPABASE_URL` or `SUPABASE_URL` plus `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY`. Missing or failing Supabase writes are logged by the agent and do not stop the session.
 
 `supabase/config.toml` pins this repo to the `5532x` local port range so it can run alongside another Supabase project using the CLI defaults.
 
