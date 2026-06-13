@@ -39,6 +39,9 @@ const API_SECRET = process.env.LIVEKIT_API_SECRET;
 const LIVEKIT_URL = process.env.LIVEKIT_URL;
 const CONFIG_PATH = join(process.cwd(), '..', 'config.json');
 const PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.json');
+const PROMPT_VERSIONS_DIR = join(process.cwd(), '..', 'prompt_versions');
+const PROMPT_VERSIONS_INDEX_PATH = join(PROMPT_VERSIONS_DIR, 'index.json');
+const PROMPT_VERSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 const DEFAULT_FEEDBACK_CONDITION_ID = 'no_corrective';
 
 type RuntimeConfig = {
@@ -50,6 +53,11 @@ type RuntimeConfig = {
 };
 
 type RealtimePromptSnapshot = RealtimePromptMetadata & {
+  feedbackConditionId?: string;
+  promptVersionCreatedAt?: string | null;
+  promptVersionHash?: string;
+  promptVersionId?: string;
+  promptVersionLabel?: string;
   taskCardId?: string;
 };
 
@@ -59,6 +67,11 @@ type SessionActivityContext = {
   evaluationId?: string;
   evaluationPromptId?: string;
   evaluationPromptVersion?: string;
+  promptSource?: RealtimePromptMetadata['source'];
+  promptVersionCreatedAt?: string | null;
+  promptVersionId?: string;
+  promptVersionHash?: string;
+  promptVersionLabel?: string;
   sessionPurpose: SessionPurpose;
 };
 
@@ -136,7 +149,7 @@ export async function POST(req: Request) {
       agentName,
       agentMode,
       config.agentRole,
-      config.feedbackConditionId,
+      promptSnapshot?.feedbackConditionId ?? config.feedbackConditionId,
       promptSnapshot,
       sessionActivity
     );
@@ -363,11 +376,61 @@ async function readSessionActivityContext(
     evaluationId: evaluationPrompt.evaluationId,
     evaluationPromptId: evaluationPrompt.evaluationPromptId,
     evaluationPromptVersion: evaluationPrompt.evaluationPromptVersion,
+    promptSource: evaluationPrompt.usingDefault ? 'default' : 'custom',
+    promptVersionCreatedAt: evaluationPrompt.promptVersionCreatedAt ?? undefined,
+    promptVersionId: evaluationPrompt.promptVersionId ?? undefined,
+    promptVersionHash: evaluationPrompt.promptVersionHash ?? undefined,
+    promptVersionLabel: evaluationPrompt.promptVersionLabel ?? undefined,
     sessionPurpose,
   };
 }
 
 function readRealtimePromptSnapshot(): RealtimePromptSnapshot {
+  try {
+    const index = JSON.parse(readFileSync(PROMPT_VERSIONS_INDEX_PATH, 'utf-8')) as {
+      active?: { realtime?: unknown };
+    };
+    const versionId =
+      typeof index.active?.realtime === 'string' &&
+      PROMPT_VERSION_ID_PATTERN.test(index.active.realtime)
+        ? index.active.realtime
+        : null;
+    if (versionId) {
+      const version = JSON.parse(
+        readFileSync(join(PROMPT_VERSIONS_DIR, 'realtime', `${versionId}.json`), 'utf-8')
+      ) as {
+        createdAt?: unknown;
+        hash?: unknown;
+        id?: unknown;
+        purpose?: unknown;
+        label?: unknown;
+        config?: {
+          feedbackConditionId?: unknown;
+          taskCardId?: unknown;
+        };
+      };
+      if (version.purpose === 'realtime' && typeof version.id === 'string') {
+        return {
+          promptId: version.id,
+          savedAt: typeof version.createdAt === 'string' ? version.createdAt : null,
+          source: 'custom',
+          promptVersionCreatedAt: typeof version.createdAt === 'string' ? version.createdAt : null,
+          feedbackConditionId:
+            typeof version.config?.feedbackConditionId === 'string'
+              ? version.config.feedbackConditionId
+              : undefined,
+          promptVersionHash: typeof version.hash === 'string' ? version.hash : undefined,
+          promptVersionId: version.id,
+          promptVersionLabel: typeof version.label === 'string' ? version.label : undefined,
+          taskCardId:
+            typeof version.config?.taskCardId === 'string' ? version.config.taskCardId : undefined,
+        };
+      }
+    }
+  } catch {
+    // Fall back to legacy prompt_config.json metadata.
+  }
+
   try {
     const raw = JSON.parse(readFileSync(PROMPT_CONFIG_PATH, 'utf-8')) as { realtime?: unknown };
     if (!raw.realtime || typeof raw.realtime !== 'object') {
@@ -413,12 +476,38 @@ function buildRoomConfig(
                 evaluationId: sessionActivity.evaluationId,
                 evaluationPromptId: sessionActivity.evaluationPromptId,
                 evaluationPromptVersion: sessionActivity.evaluationPromptVersion,
+                promptSource:
+                  sessionActivity.promptSource ?? DEFAULT_REALTIME_PROMPT_METADATA.source,
+                ...(sessionActivity.promptVersionId
+                  ? { promptVersionId: sessionActivity.promptVersionId }
+                  : {}),
+                ...(sessionActivity.promptVersionLabel
+                  ? { promptVersionLabel: sessionActivity.promptVersionLabel }
+                  : {}),
+                ...(sessionActivity.promptVersionCreatedAt
+                  ? { promptVersionCreatedAt: sessionActivity.promptVersionCreatedAt }
+                  : {}),
+                ...(sessionActivity.promptVersionHash
+                  ? { promptVersionHash: sessionActivity.promptVersionHash }
+                  : {}),
               }
             : {
                 agentRole,
                 promptId: promptSnapshot?.promptId ?? DEFAULT_REALTIME_PROMPT_METADATA.promptId,
                 promptSavedAt: promptSnapshot?.savedAt ?? DEFAULT_REALTIME_PROMPT_METADATA.savedAt,
                 promptSource: promptSnapshot?.source ?? DEFAULT_REALTIME_PROMPT_METADATA.source,
+                ...(promptSnapshot?.promptVersionId
+                  ? { promptVersionId: promptSnapshot.promptVersionId }
+                  : {}),
+                ...(promptSnapshot?.promptVersionLabel
+                  ? { promptVersionLabel: promptSnapshot.promptVersionLabel }
+                  : {}),
+                ...(promptSnapshot?.promptVersionCreatedAt
+                  ? { promptVersionCreatedAt: promptSnapshot.promptVersionCreatedAt }
+                  : {}),
+                ...(promptSnapshot?.promptVersionHash
+                  ? { promptVersionHash: promptSnapshot.promptVersionHash }
+                  : {}),
                 feedbackConditionId,
                 ...(promptSnapshot?.taskCardId ? { taskCardId: promptSnapshot.taskCardId } : {}),
               }),

@@ -18,6 +18,8 @@ const API_SECRET = process.env.LIVEKIT_API_SECRET;
 const LIVEKIT_URL = process.env.LIVEKIT_URL;
 
 const CONFIG_PATH = join(process.cwd(), '..', 'config.json');
+const PROMPT_VERSIONS_DIR = join(process.cwd(), '..', 'prompt_versions');
+const PROMPT_VERSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 function readConfig() {
   try {
@@ -63,7 +65,9 @@ function parseRealtimeRoomMetadata(metadata?: string): {
   evaluationPromptVersion?: string;
   feedbackConditionId?: string;
   promptId?: string;
+  promptVersionCreatedAt?: string | null;
   promptVersionId?: string;
+  promptVersionLabel?: string;
   promptSavedAt?: string | null;
   promptSource?: RealtimePromptSource;
   sessionPurpose?: SessionPurpose;
@@ -82,7 +86,9 @@ function parseRealtimeRoomMetadata(metadata?: string): {
       evaluationPromptVersion?: unknown;
       feedbackConditionId?: unknown;
       promptId?: unknown;
+      promptVersionCreatedAt?: unknown;
       promptVersionId?: unknown;
+      promptVersionLabel?: unknown;
       promptSavedAt?: unknown;
       promptSource?: unknown;
       sessionPurpose?: unknown;
@@ -110,8 +116,14 @@ function parseRealtimeRoomMetadata(metadata?: string): {
       feedbackConditionId:
         typeof parsed.feedbackConditionId === 'string' ? parsed.feedbackConditionId : undefined,
       promptId: typeof parsed.promptId === 'string' ? parsed.promptId : undefined,
+      promptVersionCreatedAt:
+        typeof parsed.promptVersionCreatedAt === 'string' || parsed.promptVersionCreatedAt === null
+          ? parsed.promptVersionCreatedAt
+          : undefined,
       promptVersionId:
         typeof parsed.promptVersionId === 'string' ? parsed.promptVersionId : undefined,
+      promptVersionLabel:
+        typeof parsed.promptVersionLabel === 'string' ? parsed.promptVersionLabel : undefined,
       promptSavedAt:
         typeof parsed.promptSavedAt === 'string' || parsed.promptSavedAt === null
           ? parsed.promptSavedAt
@@ -126,6 +138,45 @@ function parseRealtimeRoomMetadata(metadata?: string): {
   } catch {
     return {};
   }
+}
+
+function readPromptVersionSummary(
+  purpose: 'evaluation' | 'realtime',
+  versionId?: string
+): { label?: string; createdAt?: string | null } {
+  if (!versionId || !PROMPT_VERSION_ID_PATTERN.test(versionId)) return {};
+  try {
+    const version = JSON.parse(
+      readFileSync(join(PROMPT_VERSIONS_DIR, purpose, `${versionId}.json`), 'utf-8')
+    ) as {
+      createdAt?: unknown;
+      id?: unknown;
+      label?: unknown;
+      purpose?: unknown;
+    };
+    if (version.purpose !== purpose || version.id !== versionId) return {};
+    return {
+      label: typeof version.label === 'string' ? version.label : undefined,
+      createdAt: typeof version.createdAt === 'string' ? version.createdAt : null,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function enrichPromptVersionMetadata(
+  room: ReturnType<typeof parseRealtimeRoomMetadata>
+): ReturnType<typeof parseRealtimeRoomMetadata> {
+  if (!room.promptVersionId || (room.promptVersionLabel && room.promptVersionCreatedAt)) {
+    return room;
+  }
+  const purpose = room.sessionPurpose === 'evaluation' ? 'evaluation' : 'realtime';
+  const summary = readPromptVersionSummary(purpose, room.promptVersionId);
+  return {
+    ...room,
+    promptVersionLabel: room.promptVersionLabel ?? summary.label,
+    promptVersionCreatedAt: room.promptVersionCreatedAt ?? summary.createdAt,
+  };
 }
 
 function isRealtimeRoomName(roomName: string): boolean {
@@ -187,16 +238,19 @@ export async function GET() {
 
   const realtimeRooms = activeRooms
     .filter((room) => isRealtimeRoomName(room.name) && activeRoomNames.has(room.name))
-    .map((room) => ({
-      name: room.name,
-      ...parseRealtimeRoomMetadata(room.metadata),
-      ...(countMap.get(room.name) ?? {
-        numParticipants: 0,
-        totalParticipants: room.numParticipants,
-        numAgents: 0,
-        numEgress: 0,
-      }),
-    }))
+    .map((room) => {
+      const metadata = enrichPromptVersionMetadata(parseRealtimeRoomMetadata(room.metadata));
+      return {
+        name: room.name,
+        ...metadata,
+        ...(countMap.get(room.name) ?? {
+          numParticipants: 0,
+          totalParticipants: room.numParticipants,
+          numAgents: 0,
+          numEgress: 0,
+        }),
+      };
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
 
   return NextResponse.json(

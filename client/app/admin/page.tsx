@@ -245,7 +245,9 @@ interface RealtimeRoomStatus {
   evaluationPromptVersion?: string;
   feedbackConditionId?: string;
   promptId?: string;
+  promptVersionCreatedAt?: string | null;
   promptVersionId?: string;
+  promptVersionLabel?: string;
   promptSavedAt?: string | null;
   promptSource?: RealtimePromptSource;
   sessionPurpose?: SessionPurpose;
@@ -339,12 +341,22 @@ function RealtimeSessionSection({
   }
 
   function formatPromptApplied(room: RealtimeRoomStatus) {
+    const sessionPurpose = inferRoomSessionPurpose(room);
+    const defaultLabel =
+      sessionPurpose === 'evaluation' ? '기본 Evaluation 프롬프트' : '기본 Realtime 프롬프트';
     if (!room.promptSource) return '미기록';
-    if (room.promptSource === 'default') return '기본 프롬프트';
-    const savedAt = room.promptSavedAt
-      ? new Date(room.promptSavedAt).toLocaleString('ko-KR')
-      : '저장 시각 미기록';
-    return `수정 프롬프트 · ${room.promptId ?? 'ID 미기록'} · ${savedAt}`;
+    if (room.promptSource === 'default') return defaultLabel;
+
+    const label = room.promptVersionLabel?.trim();
+    const isGeneratedLabel = label
+      ? /^(realtime|evaluation) \d{4}-\d{2}-\d{2}T/.test(label)
+      : false;
+    if (label && !isGeneratedLabel) return label;
+
+    const savedAt = room.promptVersionCreatedAt ?? room.promptSavedAt;
+    if (savedAt) return new Date(savedAt).toLocaleString('ko-KR');
+
+    return room.promptVersionId ? `버전 ${room.promptVersionId}` : '수정 프롬프트';
   }
 
   function formatFeedbackCondition(room: RealtimeRoomStatus) {
@@ -411,13 +423,15 @@ function RealtimeSessionSection({
                       <span className="text-foreground font-semibold">
                         {room.evaluationId ?? '미기록'}
                       </span>
-                      {' · Prompt '}
+                    </span>
+                    <span className="text-muted-foreground text-xs">
+                      적용 프롬프트:{' '}
                       <span className="text-foreground font-semibold">
-                        {room.evaluationPromptId ?? '미기록'}
+                        {formatPromptApplied(room)}
                       </span>
                     </span>
                     <span className="text-muted-foreground text-xs">
-                      Version:{' '}
+                      Manifest Version:{' '}
                       <span className="text-foreground font-semibold">
                         {room.evaluationPromptVersion ?? '미기록'}
                       </span>
