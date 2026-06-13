@@ -155,6 +155,23 @@ def _metadata_feedback_condition_id(metadata) -> str | None:
     )
 
 
+def _metadata_prompt_version_id(metadata) -> str | None:
+    if not metadata:
+        return None
+    try:
+        parsed = json.loads(metadata) if isinstance(metadata, str) else metadata
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    prompt_version_id = parsed.get("promptVersionId")
+    return (
+        prompt_version_id.strip()
+        if isinstance(prompt_version_id, str) and prompt_version_id.strip()
+        else None
+    )
+
+
 def _metadata_activity_context(metadata) -> dict:
     if not metadata:
         return {}
@@ -178,6 +195,8 @@ def _metadata_activity_context(metadata) -> dict:
         "evaluation_prompt_id": parsed.get("evaluationPromptId"),
         "evaluation_prompt_version": parsed.get("evaluationPromptVersion"),
         "evaluation_character": parsed.get("evaluationCharacter"),
+        "prompt_version_id": parsed.get("promptVersionId"),
+        "prompt_version_hash": parsed.get("promptVersionHash"),
     }
     return {
         key: value
@@ -544,12 +563,14 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
     role = _resolve_realtime_job_role(ctx, fallback=role)
     task_card_id = _resolve_realtime_task_card_id(ctx)
     feedback_condition_id = _resolve_realtime_feedback_condition_id(ctx)
+    prompt_version_id = _metadata_prompt_version_id(getattr(ctx.job, "metadata", None))
     activity_context = _resolve_realtime_activity_context(ctx)
     is_evaluation = activity_context.get("session_purpose") == "evaluation"
     if is_evaluation:
         evaluation_prompt_source = await asyncio.to_thread(
             load_evaluation_prompt_source,
             activity_context.get("evaluation_id"),
+            activity_context.get("prompt_version_id"),
         )
         activity_context = {
             **activity_context,
@@ -579,15 +600,16 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
                 role=role,
                 task_card_id=task_card_id,
                 feedback_condition_id=feedback_condition_id,
+                prompt_version_id=prompt_version_id,
             )
 
         opening_sentence = get_realtime_opening_sentence(
             task_card_id,
             feedback_condition_id,
+            prompt_version_id,
         )
         character = "Daisy"
         prompt_source = "realtime"
-        prompt_version_id = None
         resolved_task_card_id = task_card_id
         resolved_feedback_condition_id = feedback_condition_id
     tts_voice = _realtime_tts_voice_for_session_purpose(activity_context.get("session_purpose"))
