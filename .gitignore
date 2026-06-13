@@ -4,6 +4,7 @@
 !.env.example
 config.json
 prompt_config.json
+prompt_versions/
 
 # ===== Python =====
 __pycache__/
