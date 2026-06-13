@@ -1,3 +1,7 @@
+import type { PromptVersionSummary } from '@/lib/prompt-version-store';
+
+export type RealtimeConversationExamplePrompts = Record<string, string>;
+
 export interface RealtimePromptConfig {
   basePrompt: string;
   dominantPrompt: string;
@@ -6,6 +10,7 @@ export interface RealtimePromptConfig {
   feedbackPrompt: string;
   taskCardId: string;
   taskCardPrompt: string;
+  conversationExamplePrompts: RealtimeConversationExamplePrompts;
 }
 
 export interface RealtimeFeedbackConditionSummary {
@@ -45,7 +50,13 @@ export interface RealtimePromptMetadata {
 
 export type RealtimePromptState = RealtimePromptConfig &
   RealtimePromptMetadata & {
+    activePromptVersionId: string | null;
     feedbackConditions: RealtimeFeedbackConditionSummary[];
+    promptVersionCreatedAt: string | null;
+    promptVersionHash: string | null;
+    promptVersionId: string | null;
+    promptVersionLabel: string | null;
+    promptVersions: PromptVersionSummary[];
     taskCards: RealtimeTaskCardSummary[];
     usingDefault: boolean;
   };
@@ -73,7 +84,8 @@ export function validateRealtimePromptConfig(
       | 'feedbackConditionId'
       | 'feedbackPrompt'
       | 'taskCardId'
-      | 'taskCardPrompt',
+      | 'taskCardPrompt'
+      | 'conversationExamplePrompts',
       unknown
     >
   >;
@@ -127,6 +139,31 @@ export function validateRealtimePromptConfig(
   }
   config.taskCardId = taskCardId;
   config.taskCardPrompt = taskCardPrompt.trim();
+
+  const conversationExamplePrompts: RealtimeConversationExamplePrompts = {};
+  if (source.conversationExamplePrompts !== undefined) {
+    if (
+      !source.conversationExamplePrompts ||
+      typeof source.conversationExamplePrompts !== 'object' ||
+      Array.isArray(source.conversationExamplePrompts)
+    ) {
+      return { ok: false, error: 'conversationExamplePrompts 값이 올바르지 않습니다.' };
+    }
+
+    for (const [key, value] of Object.entries(source.conversationExamplePrompts)) {
+      if (typeof value !== 'string' || !value.trim()) {
+        return { ok: false, error: `conversationExamplePrompts.${key} 값이 비어 있습니다.` };
+      }
+      if (value.length > REALTIME_PROMPT_MAX_CHARS) {
+        return {
+          ok: false,
+          error: `conversationExamplePrompts.${key} 값은 ${REALTIME_PROMPT_MAX_CHARS.toLocaleString('ko-KR')}자 이하여야 합니다.`,
+        };
+      }
+      conversationExamplePrompts[key] = value.trim();
+    }
+  }
+  config.conversationExamplePrompts = conversationExamplePrompts;
 
   return { ok: true, config };
 }

@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -11,8 +12,10 @@ DEFAULT_OPENING_SENTENCE = (
     "Hi, I'm Daisy. Let's talk about today's task together. What is your name?"
 )
 PROMPT_CONFIG_PATH = Path(__file__).parent.parent / "prompt_config.json"
+PROMPT_VERSIONS_DIR = Path(__file__).parent.parent / "prompt_versions"
 DEFAULT_PROMPT_SOURCE_DIR = Path(__file__).parent.parent / "prompts" / "realtime"
 PROMPT_SOURCE_MANIFEST_PATH = DEFAULT_PROMPT_SOURCE_DIR / "manifest.json"
+PROMPT_VERSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 PROMPT_FIELDS = ("basePrompt", "dominantPrompt", "collaborativePrompt")
 LEGACY_PROMPT_FIELDS = (*PROMPT_FIELDS, "taskCardPrompt")
 
@@ -37,6 +40,23 @@ def _valid_prompt_text(value: object) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
+
+
+def _valid_version_id(value: object) -> str | None:
+    version_id = _valid_prompt_text(value)
+    if version_id and PROMPT_VERSION_ID_PATTERN.match(version_id):
+        return version_id
+    return None
+
+
+def _valid_prompt_map(value: object) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: text.strip()
+        for key, text in value.items()
+        if isinstance(key, str) and isinstance(text, str) and text.strip()
+    }
 
 
 def _extract_task_card_opening(task_card_prompt: str) -> str | None:
@@ -196,6 +216,122 @@ def _load_task_card_source(
     return value, examples
 
 
+def _load_prompt_config_dict(
+    realtime: dict,
+    task_card_id: str | None = None,
+    feedback_condition_id: str | None = None,
+) -> tuple[
+    str,
+    dict[AgentRole, str],
+    FeedbackCondition,
+    str,
+    str,
+    ConversationExamples,
+] | None:
+    base_prompt = _valid_prompt_text(realtime.get("basePrompt"))
+    dominant_prompt = _valid_prompt_text(realtime.get("dominantPrompt"))
+    collaborative_prompt = _valid_prompt_text(
+        realtime.get("collaborativePrompt", realtime.get("passivePrompt"))
+    )
+    configured_task_card_id = realtime.get("taskCardId")
+    selected_task_card_id = task_card_id or (
+        configured_task_card_id if isinstance(configured_task_card_id, str) else None
+    )
+    configured_feedback_condition_id = realtime.get("feedbackConditionId")
+    selected_feedback_condition_id = feedback_condition_id or (
+        configured_feedback_condition_id
+        if isinstance(configured_feedback_condition_id, str)
+        else None
+    )
+    selected_feedback = normalize_feedback_condition(selected_feedback_condition_id)
+    feedback_prompts = _valid_prompt_map(realtime.get("feedbackPrompts"))
+    feedback_prompt = feedback_prompts.get(selected_feedback)
+    if not feedback_prompt and (
+        not selected_feedback_condition_id
+        or normalize_feedback_condition(configured_feedback_condition_id)
+        == selected_feedback
+    ):
+        feedback_prompt = _valid_prompt_text(realtime.get("feedbackPrompt"))
+    conversation_examples: ConversationExamples = {}
+    stored_task_cards = realtime.get("taskCards")
+    selected_task_card = (
+        stored_task_cards.get(selected_task_card_id)
+        if isinstance(stored_task_cards, dict) and isinstance(selected_task_card_id, str)
+        else None
+    )
+    task_card_prompt = (
+        _valid_prompt_text(selected_task_card.get("prompt"))
+        if isinstance(selected_task_card, dict)
+        else None
+    )
+    stored_conversation_examples = (
+        _valid_prompt_map(selected_task_card.get("conversationExamplePrompts"))
+        if isinstance(selected_task_card, dict)
+        else {}
+    )
+    if not task_card_prompt and (
+        not selected_task_card_id
+        or (
+            isinstance(configured_task_card_id, str)
+            and configured_task_card_id == selected_task_card_id
+        )
+    ):
+        task_card_prompt = _valid_prompt_text(realtime.get("taskCardPrompt"))
+        stored_conversation_examples = _valid_prompt_map(
+            realtime.get("conversationExamplePrompts")
+        )
+
+    if not task_card_prompt or not feedback_prompt or selected_task_card_id:
+        try:
+            manifest = json.loads(PROMPT_SOURCE_MANIFEST_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if isinstance(manifest, dict) and (not task_card_prompt or selected_task_card_id):
+            task_card_source = _load_task_card_source(
+                DEFAULT_PROMPT_SOURCE_DIR,
+                manifest,
+                selected_task_card_id.strip()
+                if isinstance(selected_task_card_id, str) and selected_task_card_id.strip()
+                else None,
+            )
+            if task_card_source:
+                default_task_card_prompt, default_conversation_examples = task_card_source
+                task_card_prompt = task_card_prompt or default_task_card_prompt
+                conversation_examples = default_conversation_examples
+
+        if isinstance(manifest, dict) and not feedback_prompt:
+            feedback_source = _load_feedback_source(
+                DEFAULT_PROMPT_SOURCE_DIR,
+                manifest,
+                selected_feedback_condition_id.strip()
+                if isinstance(selected_feedback_condition_id, str)
+                and selected_feedback_condition_id.strip()
+                else None,
+            )
+            if feedback_source:
+                selected_feedback, feedback_prompt = feedback_source
+
+    conversation_examples = {
+        **conversation_examples,
+        **stored_conversation_examples,
+    }
+
+    if not all((base_prompt, dominant_prompt, collaborative_prompt, feedback_prompt, task_card_prompt)):
+        return None
+
+    return (
+        base_prompt,
+        {
+            "dominant": dominant_prompt,
+            "collaborative": collaborative_prompt,
+        },
+        selected_feedback,
+        feedback_prompt,
+        task_card_prompt,
+        conversation_examples,
+    )
+
+
 def _load_prompt_config_file(
     path: Path,
     task_card_id: str | None = None,
@@ -218,82 +354,36 @@ def _load_prompt_config_file(
     if not isinstance(realtime, dict):
         return None
 
-    base_prompt = _valid_prompt_text(realtime.get("basePrompt"))
-    dominant_prompt = _valid_prompt_text(realtime.get("dominantPrompt"))
-    collaborative_prompt = _valid_prompt_text(
-        realtime.get("collaborativePrompt", realtime.get("passivePrompt"))
-    )
-    configured_task_card_id = realtime.get("taskCardId")
-    selected_task_card_id = task_card_id or (
-        configured_task_card_id if isinstance(configured_task_card_id, str) else None
-    )
-    configured_feedback_condition_id = realtime.get("feedbackConditionId")
-    selected_feedback_condition_id = feedback_condition_id or (
-        configured_feedback_condition_id
-        if isinstance(configured_feedback_condition_id, str)
-        else None
-    )
-    task_card_prompt = (
-        None
-        if selected_task_card_id
-        else _valid_prompt_text(realtime.get("taskCardPrompt"))
-    )
-    feedback_prompt = (
-        None
-        if selected_feedback_condition_id
-        else _valid_prompt_text(realtime.get("feedbackPrompt"))
-    )
-    selected_feedback = normalize_feedback_condition(selected_feedback_condition_id)
-    conversation_examples: ConversationExamples = {}
+    return _load_prompt_config_dict(realtime, task_card_id, feedback_condition_id)
 
-    if not task_card_prompt or not feedback_prompt:
-        try:
-            manifest = json.loads(PROMPT_SOURCE_MANIFEST_PATH.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return None
-        if isinstance(manifest, dict) and not task_card_prompt:
-            task_card_source = _load_task_card_source(
-                DEFAULT_PROMPT_SOURCE_DIR,
-                manifest,
-                selected_task_card_id.strip()
-                if isinstance(selected_task_card_id, str) and selected_task_card_id.strip()
-                else None,
-            )
-            if task_card_source:
-                task_card_prompt, conversation_examples = task_card_source
-            else:
-                conversation_examples = {}
-        elif not task_card_prompt:
-            conversation_examples = {}
 
-        if isinstance(manifest, dict) and not feedback_prompt:
-            feedback_source = _load_feedback_source(
-                DEFAULT_PROMPT_SOURCE_DIR,
-                manifest,
-                selected_feedback_condition_id.strip()
-                if isinstance(selected_feedback_condition_id, str)
-                and selected_feedback_condition_id.strip()
-                else None,
-            )
-            if feedback_source:
-                selected_feedback, feedback_prompt = feedback_source
-    else:
-        conversation_examples = {}
-
-    if not all((base_prompt, dominant_prompt, collaborative_prompt, feedback_prompt, task_card_prompt)):
+def _load_prompt_version_file(
+    version_id: str | None = None,
+) -> tuple[
+    str,
+    dict[AgentRole, str],
+    FeedbackCondition,
+    str,
+    str,
+    ConversationExamples,
+] | None:
+    safe_version_id = _valid_version_id(version_id)
+    if not safe_version_id:
         return None
-
-    return (
-        base_prompt,
-        {
-            "dominant": dominant_prompt,
-            "collaborative": collaborative_prompt,
-        },
-        selected_feedback,
-        feedback_prompt,
-        task_card_prompt,
-        conversation_examples,
-    )
+    try:
+        raw = json.loads(
+            (PROMPT_VERSIONS_DIR / "realtime" / f"{safe_version_id}.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw, dict) or raw.get("purpose") != "realtime":
+        return None
+    config = raw.get("config")
+    if not isinstance(config, dict):
+        return None
+    return _load_prompt_config_dict(config)
 
 
 def _load_prompt_source_dir(
@@ -376,6 +466,7 @@ def load_default_prompt_config(
 def load_prompt_config(
     task_card_id: str | None = None,
     feedback_condition_id: str | None = None,
+    prompt_version_id: str | None = None,
 ) -> tuple[
     str,
     dict[AgentRole, str],
@@ -384,6 +475,9 @@ def load_prompt_config(
     str,
     ConversationExamples,
 ]:
+    version_config = _load_prompt_version_file(prompt_version_id)
+    if version_config is not None:
+        return version_config
     default_config = load_default_prompt_config(task_card_id, feedback_condition_id)
     return _load_prompt_config_file(PROMPT_CONFIG_PATH, task_card_id, feedback_condition_id) or default_config
 
@@ -391,8 +485,13 @@ def load_prompt_config(
 def get_opening_sentence(
     task_card_id: str | None = None,
     feedback_condition_id: str | None = None,
+    prompt_version_id: str | None = None,
 ) -> str:
-    _, _, _, _, task_card_prompt, _ = load_prompt_config(task_card_id, feedback_condition_id)
+    _, _, _, _, task_card_prompt, _ = load_prompt_config(
+        task_card_id,
+        feedback_condition_id,
+        prompt_version_id,
+    )
     return _extract_task_card_opening(task_card_prompt) or DEFAULT_OPENING_SENTENCE
 
 
@@ -401,6 +500,7 @@ def build_prompt(
     role: str | None = "dominant",
     task_card_id: str | None = None,
     feedback_condition_id: str | None = None,
+    prompt_version_id: str | None = None,
 ) -> str:
     (
         base_prompt,
@@ -409,15 +509,17 @@ def build_prompt(
         feedback_prompt,
         task_card_prompt,
         conversation_examples,
-    ) = load_prompt_config(task_card_id, feedback_condition_id)
+    ) = load_prompt_config(task_card_id, feedback_condition_id, prompt_version_id)
     agent_role = normalize_role(role)
     prompt = (
         f"{base_prompt}\n\n{role_prompts[agent_role]}\n\n"
         f"{feedback_prompt}\n\n{task_card_prompt}"
     )
-    conversation_example = conversation_examples.get(
-        _example_key(agent_role, selected_feedback)
-    ) or conversation_examples.get(agent_role)
+    conversation_example = (
+        conversation_examples.get(_example_key(agent_role, selected_feedback))
+        or conversation_examples.get(f"{agent_role}.default")
+        or conversation_examples.get(agent_role)
+    )
     if conversation_example:
         prompt += f"\n\n{conversation_example}"
     name = participant_name.strip() if participant_name else ""
