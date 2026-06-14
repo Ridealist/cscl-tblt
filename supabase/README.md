@@ -2,6 +2,10 @@
 
 This directory contains the database foundation for the staged Supabase migration tracked in GitHub issue #4.
 
+기존 EC2 production 서버에 Supabase를 적용할 때는 repo root의
+`docs/production-supabase-runbook.md`를 우선 따른다. 이 문서는 schema와
+local/persistent storage 정책의 세부 설명이다.
+
 ## Current Scope
 
 The migrations add the shared foundation used by the staged Supabase rollout:
