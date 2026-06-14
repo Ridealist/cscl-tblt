@@ -126,64 +126,10 @@ def read_task_card_manifest(path, manifest):
             raise ValueError(f"Task card {task_card_id}.file must be a string.")
         if not isinstance(marker, str) or not marker:
             raise ValueError(f"Task card {task_card_id}.marker must be a string.")
-        examples = entry.get("examples")
-        parsed_examples = {}
-        if examples is not None:
-            if not isinstance(examples, dict):
-                raise ValueError(f"Task card {task_card_id}.examples must be an object.")
-            for role in ("dominant", "collaborative"):
-                role_examples = examples.get(role)
-                if role_examples is None:
-                    continue
-                if not isinstance(role_examples, dict):
-                    raise ValueError(
-                        f"Task card {task_card_id}.examples.{role} must be an object."
-                    )
-                if "file" in role_examples or "marker" in role_examples:
-                    example_filename = role_examples.get("file")
-                    example_marker = role_examples.get("marker")
-                    if not isinstance(example_filename, str) or not example_filename:
-                        raise ValueError(
-                            f"Task card {task_card_id}.examples.{role}.file must be a string."
-                        )
-                    if not isinstance(example_marker, str) or not example_marker:
-                        raise ValueError(
-                            f"Task card {task_card_id}.examples.{role}.marker must be a string."
-                        )
-                    parsed_examples[role] = {
-                        "default": {
-                            "file": example_filename,
-                            "marker": example_marker,
-                        }
-                    }
-                    continue
-
-                parsed_examples[role] = {}
-                for feedback_id, example in role_examples.items():
-                    if not isinstance(example, dict):
-                        raise ValueError(
-                            f"Task card {task_card_id}.examples.{role}.{feedback_id} must be an object."
-                        )
-                    example_filename = example.get("file")
-                    example_marker = example.get("marker")
-                    if not isinstance(example_filename, str) or not example_filename:
-                        raise ValueError(
-                            f"Task card {task_card_id}.examples.{role}.{feedback_id}.file must be a string."
-                        )
-                    if not isinstance(example_marker, str) or not example_marker:
-                        raise ValueError(
-                            f"Task card {task_card_id}.examples.{role}.{feedback_id}.marker must be a string."
-                        )
-                    parsed_examples[role][feedback_id] = {
-                        "file": example_filename,
-                        "marker": example_marker,
-                    }
-
         entries[task_card_id] = {
             "file": filename,
             "marker": marker,
             "base_path": task_card_manifest_path.parent,
-            "examples": parsed_examples,
         }
     return entries
 
@@ -294,29 +240,9 @@ def read_prompt_folder(path):
             raise ValueError(
                 f"Task card source file {prompt_path} must start with {entry['marker']!r}"
             )
-        example_prompts = {}
-        for role, role_examples in entry.get("examples", {}).items():
-            for feedback_id, example in role_examples.items():
-                example_path = entry["base_path"] / example["file"]
-                try:
-                    example_value = example_path.read_text(encoding="utf-8").strip()
-                except OSError as exc:
-                    raise ValueError(
-                        f"Conversation example source file is not readable: {example_path}"
-                    ) from exc
-                if not example_value:
-                    raise ValueError(f"Conversation example source file is empty: {example_path}")
-                if not example_value.startswith(example["marker"]):
-                    raise ValueError(
-                        f"Conversation example source file {example_path} must start with "
-                        f"{example['marker']!r}"
-                    )
-                example_prompts[f"{role}.{feedback_id}"] = example_value
         if task_card_id == default_task_card_id:
             realtime["taskCardId"] = task_card_id
             realtime["taskCardPrompt"] = value
-            if example_prompts:
-                realtime["conversationExamplePrompts"] = example_prompts
     return {"realtime": realtime}
 
 

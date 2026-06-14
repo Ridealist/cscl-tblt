@@ -75,7 +75,7 @@ REALTIME_AGENT_NAMES = {
 REALTIME_AGENT_NAME = "realtime-agent"
 REALTIME_TTS_VOICE_BY_SESSION_PURPOSE = {
     "evaluation": "b7d50908-b17c-442d-ad8d-810c63997ed9",  # Kate / Sierra - California Girl
-    "practice": "32b3f3c5-7171-46aa-abe7-b598964aa793",  # Daisy / Reading Girl
+    "practice": "b7d50908-b17c-442d-ad8d-810c63997ed9",  # Kate / Sierra - California Girl
 }
 REALTIME_TTS_EXTRA_KWARGS_BY_SESSION_PURPOSE = {
     "evaluation": {
@@ -514,7 +514,7 @@ class RealtimeAssistant(Agent):
         role: str,
         build_prompt_fn,
         opening_sentence: str,
-        character: str = "Daisy",
+        character: str = "Kate",
         prompt_source: str = "realtime",
         prompt_version_id: str | None = None,
         task_card_id: str | None = None,
@@ -608,7 +608,7 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
             feedback_condition_id,
             prompt_version_id,
         )
-        character = "Daisy"
+        character = "Kate"
         prompt_source = "realtime"
         resolved_task_card_id = task_card_id
         resolved_feedback_condition_id = feedback_condition_id

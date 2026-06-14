@@ -1,13 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { type AgentRole, getAgentRoleLabel, normalizeAgentRole } from '@/lib/agent-role';
 import type { PromptVersionSummary } from '@/lib/prompt-version-store';
 import type {
   RealtimeFeedbackConditionSummary,
-  RealtimeFeedbackExamples,
   RealtimePromptConfig,
   RealtimePromptState,
   RealtimeTaskCardSummary,
@@ -113,17 +111,7 @@ const EMPTY_PROMPT: RealtimePromptConfig = {
   feedbackPrompt: '',
   taskCardId: 'school_event_invitation',
   taskCardPrompt: '',
-  conversationExamplePrompts: {},
 };
-
-function sameTextMap(a: Record<string, string>, b: Record<string, string>) {
-  const aKeys = Object.keys(a).sort();
-  const bKeys = Object.keys(b).sort();
-  return (
-    aKeys.length === bKeys.length &&
-    aKeys.every((key, index) => key === bKeys[index] && a[key] === b[key])
-  );
-}
 
 function samePrompt(a: RealtimePromptConfig | null, b: RealtimePromptConfig | null) {
   if (!a || !b) return false;
@@ -134,8 +122,7 @@ function samePrompt(a: RealtimePromptConfig | null, b: RealtimePromptConfig | nu
     a.feedbackConditionId === b.feedbackConditionId &&
     a.feedbackPrompt === b.feedbackPrompt &&
     a.taskCardId === b.taskCardId &&
-    a.taskCardPrompt === b.taskCardPrompt &&
-    sameTextMap(a.conversationExamplePrompts, b.conversationExamplePrompts)
+    a.taskCardPrompt === b.taskCardPrompt
   );
 }
 
@@ -187,22 +174,6 @@ function formatVersionOption(version: PromptVersionSummary, activeVersionId: str
   return [version.id === activeVersionId ? '활성' : null, savedAt, customLabel]
     .filter(Boolean)
     .join(' · ');
-}
-
-function getTaskCardExamplePrompts(taskCard: RealtimeTaskCardSummary | null) {
-  const prompts: Record<string, string> = {};
-  if (!taskCard?.examples) return prompts;
-
-  for (const role of ['dominant', 'collaborative'] as const) {
-    const roleExamples: RealtimeFeedbackExamples | undefined = taskCard.examples[role];
-    if (!roleExamples) continue;
-    for (const [feedbackConditionId, example] of Object.entries(roleExamples)) {
-      const key = feedbackConditionId === 'default' ? role : `${role}.${feedbackConditionId}`;
-      prompts[key] = example.prompt;
-    }
-  }
-
-  return prompts;
 }
 
 function VersionSaveDialog({
@@ -702,7 +673,6 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
-  const [examplesOpen, setExamplesOpen] = useState(false);
   const [versionDialogOpen, setVersionDialogOpen] = useState(false);
 
   const hasChanges = useMemo(() => !samePrompt(prompt, savedPrompt), [prompt, savedPrompt]);
@@ -734,38 +704,6 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
       ),
     [selectedFeedbackCondition, selectedRoleLabel, selectedRolePromptKey]
   );
-  const feedbackConditionTitles = useMemo(
-    () => new Map(feedbackConditions.map((condition) => [condition.id, condition.title])),
-    [feedbackConditions]
-  );
-  const exampleEntries = useMemo(() => {
-    const currentKey = `${selectedAgentRole}.${prompt.feedbackConditionId}`;
-    return Object.entries(prompt.conversationExamplePrompts)
-      .map(([key, value]) => {
-        const [role, feedbackConditionId = 'default'] = key.split('.');
-        const roleLabel =
-          role === 'collaborative'
-            ? getAgentRoleLabel('collaborative')
-            : getAgentRoleLabel('dominant');
-        const feedbackConditionTitle =
-          feedbackConditionId === 'default'
-            ? 'Default'
-            : (feedbackConditionTitles.get(feedbackConditionId) ?? feedbackConditionId);
-        return {
-          key,
-          title: `${roleLabel} + ${feedbackConditionTitle}`,
-          value,
-          active: key === currentKey,
-        };
-      })
-      .sort((a, b) => Number(b.active) - Number(a.active) || a.key.localeCompare(b.key));
-  }, [
-    feedbackConditionTitles,
-    prompt.conversationExamplePrompts,
-    prompt.feedbackConditionId,
-    selectedAgentRole,
-  ]);
-
   function formatPromptSavedAt(value: string | null) {
     return value ? new Date(value).toLocaleString('ko-KR') : '저장 이력 없음';
   }
@@ -806,7 +744,6 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
         feedbackPrompt: data.feedbackPrompt,
         taskCardId: data.taskCardId,
         taskCardPrompt: data.taskCardPrompt,
-        conversationExamplePrompts: data.conversationExamplePrompts,
       });
       setSavedPrompt({
         basePrompt: data.basePrompt,
@@ -816,7 +753,6 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
         feedbackPrompt: data.feedbackPrompt,
         taskCardId: data.taskCardId,
         taskCardPrompt: data.taskCardPrompt,
-        conversationExamplePrompts: data.conversationExamplePrompts,
       });
       setFeedbackConditions(data.feedbackConditions);
       setTaskCards(data.taskCards);
@@ -861,7 +797,6 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
         feedbackPrompt: saved.feedbackPrompt,
         taskCardId: saved.taskCardId,
         taskCardPrompt: saved.taskCardPrompt,
-        conversationExamplePrompts: saved.conversationExamplePrompts,
       };
       setPrompt(next);
       setSavedPrompt(next);
@@ -904,7 +839,6 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
         feedbackPrompt: saved.feedbackPrompt,
         taskCardId: saved.taskCardId,
         taskCardPrompt: saved.taskCardPrompt,
-        conversationExamplePrompts: saved.conversationExamplePrompts,
       };
       setPrompt(next);
       setSavedPrompt(next);
@@ -934,7 +868,6 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
       feedbackPrompt: state.feedbackPrompt,
       taskCardId: state.taskCardId,
       taskCardPrompt: state.taskCardPrompt,
-      conversationExamplePrompts: state.conversationExamplePrompts,
     };
     setPrompt(next);
     setSavedPrompt(next);
@@ -1168,12 +1101,10 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
               disabled={saving}
               onChange={(e) => {
                 const selected = taskCards.find((taskCard) => taskCard.id === e.target.value);
-                setExamplesOpen(false);
                 setPrompt((current) => ({
                   ...current,
                   taskCardId: e.target.value,
                   taskCardPrompt: selected?.prompt ?? current.taskCardPrompt,
-                  conversationExamplePrompts: getTaskCardExamplePrompts(selected ?? null),
                 }));
               }}
               className="border-input bg-background text-foreground focus:ring-primary w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 disabled:opacity-50"
@@ -1198,70 +1129,14 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
               disabled={saving}
               className="border-input bg-muted/40 text-foreground min-h-32 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none"
             />
-            <div className="border-border flex flex-col gap-3 border-t pt-3">
-              <button
-                type="button"
-                onClick={() => setExamplesOpen((open) => !open)}
-                disabled={exampleEntries.length === 0}
-                className="text-foreground enabled:hover:bg-muted flex w-full items-center justify-between gap-3 rounded-md px-1 py-1 text-left text-sm font-semibold transition-colors disabled:cursor-default disabled:opacity-60"
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  {examplesOpen ? (
-                    <ChevronDown className="size-4 shrink-0" aria-hidden="true" />
-                  ) : (
-                    <ChevronRight className="size-4 shrink-0" aria-hidden="true" />
-                  )}
-                  <span>Conversation Examples</span>
+            {selectedFeedbackCondition && (
+              <p className="text-muted-foreground text-xs">
+                운영 설정의 조합 기준:{' '}
+                <span className="text-foreground font-semibold">
+                  {selectedRoleLabel} + {selectedFeedbackCondition.title}
                 </span>
-                <span className="text-muted-foreground shrink-0 font-mono text-xs">
-                  {exampleEntries.length > 0
-                    ? `${exampleEntries.length}개`
-                    : '등록된 examples 없음'}
-                </span>
-              </button>
-              {selectedFeedbackCondition && (
-                <p className="text-muted-foreground px-1 text-xs">
-                  운영 설정의 조합 기준:{' '}
-                  <span className="text-foreground font-semibold">
-                    {selectedRoleLabel} + {selectedFeedbackCondition.title}
-                  </span>
-                </p>
-              )}
-
-              {examplesOpen && exampleEntries.length > 0 && (
-                <div className="flex flex-col gap-4">
-                  {exampleEntries.map((entry) => (
-                    <div
-                      key={entry.key}
-                      className="border-border flex flex-col gap-2 border-l pl-4"
-                    >
-                      <div className="flex items-end justify-between gap-3">
-                        <h4 className="text-foreground text-xs font-semibold">{entry.title}</h4>
-                        <span className="text-muted-foreground shrink-0 font-mono text-xs">
-                          {entry.value.length.toLocaleString('ko-KR')}자
-                        </span>
-                      </div>
-                      <textarea
-                        value={entry.value}
-                        rows={18}
-                        spellCheck={false}
-                        onChange={(e) =>
-                          setPrompt((current) => ({
-                            ...current,
-                            conversationExamplePrompts: {
-                              ...current.conversationExamplePrompts,
-                              [entry.key]: e.target.value,
-                            },
-                          }))
-                        }
-                        disabled={saving}
-                        className="border-input bg-muted/40 text-foreground min-h-32 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none"
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+              </p>
+            )}
           </section>
         </>
       )}

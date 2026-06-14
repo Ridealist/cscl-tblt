@@ -6,10 +6,9 @@ from typing import Literal
 
 AgentRole = Literal["dominant", "collaborative"]
 FeedbackCondition = Literal["no_corrective", "explicit_correction"]
-ConversationExamples = dict[str, str]
 DEFAULT_FEEDBACK_CONDITION_ID: FeedbackCondition = "no_corrective"
 DEFAULT_OPENING_SENTENCE = (
-    "Hi, I'm Daisy. Let's talk about today's task together. What is your name?"
+    "Hi, I'm Kate. Let's talk about today's task together. What is your name?"
 )
 PROMPT_CONFIG_PATH = Path(__file__).parent.parent / "prompt_config.json"
 PROMPT_VERSIONS_DIR = Path(__file__).parent.parent / "prompt_versions"
@@ -30,10 +29,6 @@ def normalize_feedback_condition(value: str | None = None) -> FeedbackCondition:
     if value in ("explicit_correction", "explicit", "correction"):
         return "explicit_correction"
     return DEFAULT_FEEDBACK_CONDITION_ID
-
-
-def _example_key(role: AgentRole, feedback_condition: FeedbackCondition) -> str:
-    return f"{role}.{feedback_condition}"
 
 
 def _valid_prompt_text(value: object) -> str | None:
@@ -75,56 +70,6 @@ def _extract_task_card_opening(task_card_prompt: str) -> str | None:
         opening = " ".join(opening_lines).strip()
         return opening or None
     return None
-
-
-def _load_task_card_examples(source_dir: Path, entry: dict) -> ConversationExamples | None:
-    examples = entry.get("examples")
-    if examples is None:
-        return {}
-    if not isinstance(examples, dict):
-        return None
-
-    loaded: ConversationExamples = {}
-    for role in ("dominant", "collaborative"):
-        role_examples = examples.get(role)
-        if role_examples is None:
-            continue
-        if not isinstance(role_examples, dict):
-            return None
-
-        # Legacy shape: examples.{role}.{file, marker}
-        if "file" in role_examples or "marker" in role_examples:
-            filename = role_examples.get("file")
-            marker = role_examples.get("marker")
-            if not isinstance(filename, str) or not isinstance(marker, str):
-                return None
-            try:
-                value = (source_dir / "task-cards" / filename).read_text(encoding="utf-8").strip()
-            except OSError:
-                return None
-            if not value or not value.startswith(marker):
-                return None
-            loaded[role] = value
-            continue
-
-        for feedback_condition in ("no_corrective", "explicit_correction"):
-            example = role_examples.get(feedback_condition)
-            if example is None:
-                continue
-            if not isinstance(example, dict):
-                return None
-            filename = example.get("file")
-            marker = example.get("marker")
-            if not isinstance(filename, str) or not isinstance(marker, str):
-                return None
-            try:
-                value = (source_dir / "task-cards" / filename).read_text(encoding="utf-8").strip()
-            except OSError:
-                return None
-            if not value or not value.startswith(marker):
-                return None
-            loaded[_example_key(role, feedback_condition)] = value
-    return loaded
 
 
 def _load_feedback_source(
@@ -171,7 +116,7 @@ def _load_task_card_source(
     source_dir: Path,
     manifest: dict,
     task_card_id: str | None = None,
-) -> tuple[str, ConversationExamples] | None:
+) -> str | None:
     legacy_entry = manifest.get("taskCardPrompt")
     if isinstance(legacy_entry, dict) and task_card_id is None:
         filename = legacy_entry.get("file")
@@ -182,7 +127,7 @@ def _load_task_card_source(
             value = (source_dir / filename).read_text(encoding="utf-8").strip()
         except OSError:
             return None
-        return (value, {}) if value and value.startswith(marker) else None
+        return value if value and value.startswith(marker) else None
 
     manifest_file = manifest.get("taskCardManifest", "task-cards/manifest.json")
     default_task_card_id = manifest.get("defaultTaskCardId")
@@ -210,10 +155,7 @@ def _load_task_card_source(
         return None
     if not value or not value.startswith(marker):
         return None
-    examples = _load_task_card_examples(source_dir, entry)
-    if examples is None:
-        return None
-    return value, examples
+    return value
 
 
 def _load_prompt_config_dict(
@@ -226,7 +168,6 @@ def _load_prompt_config_dict(
     FeedbackCondition,
     str,
     str,
-    ConversationExamples,
 ] | None:
     base_prompt = _valid_prompt_text(realtime.get("basePrompt"))
     dominant_prompt = _valid_prompt_text(realtime.get("dominantPrompt"))
@@ -252,7 +193,6 @@ def _load_prompt_config_dict(
         == selected_feedback
     ):
         feedback_prompt = _valid_prompt_text(realtime.get("feedbackPrompt"))
-    conversation_examples: ConversationExamples = {}
     stored_task_cards = realtime.get("taskCards")
     selected_task_card = (
         stored_task_cards.get(selected_task_card_id)
@@ -264,11 +204,6 @@ def _load_prompt_config_dict(
         if isinstance(selected_task_card, dict)
         else None
     )
-    stored_conversation_examples = (
-        _valid_prompt_map(selected_task_card.get("conversationExamplePrompts"))
-        if isinstance(selected_task_card, dict)
-        else {}
-    )
     if not task_card_prompt and (
         not selected_task_card_id
         or (
@@ -277,16 +212,13 @@ def _load_prompt_config_dict(
         )
     ):
         task_card_prompt = _valid_prompt_text(realtime.get("taskCardPrompt"))
-        stored_conversation_examples = _valid_prompt_map(
-            realtime.get("conversationExamplePrompts")
-        )
 
-    if not task_card_prompt or not feedback_prompt or selected_task_card_id:
+    if not task_card_prompt or not feedback_prompt:
         try:
             manifest = json.loads(PROMPT_SOURCE_MANIFEST_PATH.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return None
-        if isinstance(manifest, dict) and (not task_card_prompt or selected_task_card_id):
+        if isinstance(manifest, dict) and not task_card_prompt:
             task_card_source = _load_task_card_source(
                 DEFAULT_PROMPT_SOURCE_DIR,
                 manifest,
@@ -295,9 +227,7 @@ def _load_prompt_config_dict(
                 else None,
             )
             if task_card_source:
-                default_task_card_prompt, default_conversation_examples = task_card_source
-                task_card_prompt = task_card_prompt or default_task_card_prompt
-                conversation_examples = default_conversation_examples
+                task_card_prompt = task_card_source
 
         if isinstance(manifest, dict) and not feedback_prompt:
             feedback_source = _load_feedback_source(
@@ -311,11 +241,6 @@ def _load_prompt_config_dict(
             if feedback_source:
                 selected_feedback, feedback_prompt = feedback_source
 
-    conversation_examples = {
-        **conversation_examples,
-        **stored_conversation_examples,
-    }
-
     if not all((base_prompt, dominant_prompt, collaborative_prompt, feedback_prompt, task_card_prompt)):
         return None
 
@@ -328,7 +253,6 @@ def _load_prompt_config_dict(
         selected_feedback,
         feedback_prompt,
         task_card_prompt,
-        conversation_examples,
     )
 
 
@@ -342,7 +266,6 @@ def _load_prompt_config_file(
     FeedbackCondition,
     str,
     str,
-    ConversationExamples,
 ] | None:
     try:
         with open(path, encoding="utf-8") as f:
@@ -365,7 +288,6 @@ def _load_prompt_version_file(
     FeedbackCondition,
     str,
     str,
-    ConversationExamples,
 ] | None:
     safe_version_id = _valid_version_id(version_id)
     if not safe_version_id:
@@ -396,7 +318,6 @@ def _load_prompt_source_dir(
     FeedbackCondition,
     str,
     str,
-    ConversationExamples,
 ] | None:
     try:
         manifest = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
@@ -429,7 +350,7 @@ def _load_prompt_source_dir(
     task_card_source = _load_task_card_source(path, manifest, task_card_id)
     if not task_card_source:
         return None
-    task_card_prompt, conversation_examples = task_card_source
+    task_card_prompt = task_card_source
 
     return (
         values["basePrompt"],
@@ -440,7 +361,6 @@ def _load_prompt_source_dir(
         selected_feedback,
         feedback_prompt,
         task_card_prompt,
-        conversation_examples,
     )
 
 
@@ -453,7 +373,6 @@ def load_default_prompt_config(
     FeedbackCondition,
     str,
     str,
-    ConversationExamples,
 ]:
     config = _load_prompt_source_dir(DEFAULT_PROMPT_SOURCE_DIR, task_card_id, feedback_condition_id)
     if config is None:
@@ -473,7 +392,6 @@ def load_prompt_config(
     FeedbackCondition,
     str,
     str,
-    ConversationExamples,
 ]:
     version_config = _load_prompt_version_file(prompt_version_id)
     if version_config is not None:
@@ -487,7 +405,7 @@ def get_opening_sentence(
     feedback_condition_id: str | None = None,
     prompt_version_id: str | None = None,
 ) -> str:
-    _, _, _, _, task_card_prompt, _ = load_prompt_config(
+    _, _, _, _, task_card_prompt = load_prompt_config(
         task_card_id,
         feedback_condition_id,
         prompt_version_id,
@@ -505,23 +423,15 @@ def build_prompt(
     (
         base_prompt,
         role_prompts,
-        selected_feedback,
+        _selected_feedback,
         feedback_prompt,
         task_card_prompt,
-        conversation_examples,
     ) = load_prompt_config(task_card_id, feedback_condition_id, prompt_version_id)
     agent_role = normalize_role(role)
     prompt = (
         f"{base_prompt}\n\n{role_prompts[agent_role]}\n\n"
         f"{feedback_prompt}\n\n{task_card_prompt}"
     )
-    conversation_example = (
-        conversation_examples.get(_example_key(agent_role, selected_feedback))
-        or conversation_examples.get(f"{agent_role}.default")
-        or conversation_examples.get(agent_role)
-    )
-    if conversation_example:
-        prompt += f"\n\n{conversation_example}"
     name = participant_name.strip() if participant_name else ""
 
     if name:

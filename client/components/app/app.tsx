@@ -48,16 +48,22 @@ export function App({ appConfig }: AppProps) {
     }
     return TokenSource.custom(async () => {
       const info = sessionInfoRef.current;
+      if (!info) {
+        throw new Error(
+          '세션 정보가 아직 준비되지 않았습니다. 활동 선택 화면에서 다시 입장해주세요.'
+        );
+      }
+
       const res = await fetch('/api/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          participant_name: info?.participantName,
-          room_name: info?.roomName,
-          agent_mode: info?.agentMode,
-          ...(info?.activityType ? { activity_type: info.activityType } : {}),
-          ...(info?.sessionPurpose ? { session_purpose: info.sessionPurpose } : {}),
-          ...(info?.evaluationId ? { evaluation_id: info.evaluationId } : {}),
+          participant_name: info.participantName,
+          room_name: info.roomName,
+          agent_mode: info.agentMode,
+          ...(info.activityType ? { activity_type: info.activityType } : {}),
+          ...(info.sessionPurpose ? { session_purpose: info.sessionPurpose } : {}),
+          ...(info.evaluationId ? { evaluation_id: info.evaluationId } : {}),
         }),
       });
       if (!res.ok) {

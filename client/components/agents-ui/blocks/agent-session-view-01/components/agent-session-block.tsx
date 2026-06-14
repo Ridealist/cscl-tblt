@@ -166,8 +166,8 @@ export function AgentSessionView_01({
   supportsVideoInput = true,
   supportsScreenShare = true,
   isPreConnectBufferEnabled = true,
-  agentDisplayName = 'Daisy',
-  agentAvatarSrc = '/agents/daisy_photo.png',
+  agentDisplayName = 'Kate',
+  agentAvatarSrc = '/agents/kate_photo.png',
 
   audioVisualizerType,
   audioVisualizerColor,

@@ -8,7 +8,7 @@ import {
 } from '@livekit/components-react';
 import { cn } from '@/lib/shadcn/utils';
 
-export function ParticipantList({ agentDisplayName = 'Daisy' }: { agentDisplayName?: string }) {
+export function ParticipantList({ agentDisplayName = 'Kate' }: { agentDisplayName?: string }) {
   const participants = useParticipants();
   const speakingParticipants = useSpeakingParticipants();
   const { localParticipant } = useLocalParticipant();
