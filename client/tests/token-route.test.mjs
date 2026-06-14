@@ -332,7 +332,7 @@ test('token route marks eval-prefixed realtime rooms as evaluation sessions', as
       evaluationPromptId: 'manifest-prompt-id',
       evaluationPromptVersion: 'manifest-version-1',
       evaluationCharacter: 'Kate',
-      openingSentence: "Hi, I’m Kate. I’m new here. Nice to meet you!",
+      openingSentence: 'Hi, I’m Kate. I’m new here. Nice to meet you!',
       prompt: '# PRE-TEST INTERACTION PROMPT: Kate',
       evaluations: [],
     },
