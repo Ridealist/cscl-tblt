@@ -116,12 +116,24 @@ export async function POST(req: Request) {
 
     const body = (await req.json()) as Record<string, unknown>;
 
-    // Use provided name/room or fall back to random values
-    const participantName = text(body?.participant_name) ?? 'user';
+    const participantName = text(body?.participant_name);
+    const roomName = text(body?.room_name);
+    const requestedAgentMode = parseBodyAgentMode(body?.agent_mode);
+    if (!participantName || !roomName || !requestedAgentMode) {
+      logTokenEvent('rejected incomplete token request', {
+        participantNameSet: Boolean(participantName),
+        roomNameSet: Boolean(roomName),
+        requestedAgentMode: body?.agent_mode ?? null,
+      });
+      return NextResponse.json(
+        { error: '세션 정보가 누락되었습니다. 활동 선택 화면에서 다시 입장해주세요.' },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
     const participantIdentity = `${participantName}_${Math.floor(Math.random() * 10_000)}`;
-    const roomName = text(body?.room_name) ?? `room_${Math.floor(Math.random() * 10_000)}`;
     const config = readRuntimeConfig();
-    const agentMode = inferAgentMode(body?.agent_mode, roomName, config.agentMode);
+    const agentMode = inferAgentMode(requestedAgentMode, roomName, config.agentMode);
     const sessionActivity =
       agentMode === 'realtime'
         ? await readSessionActivityContext(body, roomName, config.sessionPurpose)
@@ -286,6 +298,11 @@ function parseRoomSessionPurpose(roomName: string): SessionPurpose | undefined {
 
 function parseBodyActivityType(value: unknown): ActivityType | undefined {
   return value === 'free_conversation' || value === 'task_solution' ? value : undefined;
+}
+
+function parseBodyAgentMode(value: unknown): AgentMode | undefined {
+  if (value === 'pipeline' || value === 'realtime') return value;
+  return undefined;
 }
 
 function parseBodySessionPurpose(value: unknown): SessionPurpose | undefined {

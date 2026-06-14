@@ -97,8 +97,8 @@ export function TileLayout({
   audioVisualizerGridColumnCount,
   audioVisualizerWaveLineWidth,
   agentState,
-  agentDisplayName = 'Daisy',
-  agentAvatarSrc = '/agents/daisy_photo.png',
+  agentDisplayName = 'Kate',
+  agentAvatarSrc = '/agents/kate_photo.png',
 }: TileLayoutProps) {
   const { videoTrack: agentVideoTrack } = useVoiceAssistant();
   const [screenShareTrack] = useTracks([Track.Source.ScreenShare]);
