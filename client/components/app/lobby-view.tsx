@@ -285,7 +285,7 @@ export function LobbyView({
                 >
                   {activityType === 'free_conversation'
                     ? 'Kate와 서로 알아가기'
-                    : 'Daisy와 영어 과제 해결하기'}
+                    : 'Kate와 영어 과제 해결하기'}
                 </span>
               </button>
             ))}

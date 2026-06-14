@@ -121,11 +121,11 @@ def test_realtime_tts_voice_changes_by_session_purpose() -> None:
     )
     assert (
         _realtime_tts_voice_for_session_purpose("practice")
-        == "32b3f3c5-7171-46aa-abe7-b598964aa793"
+        == "b7d50908-b17c-442d-ad8d-810c63997ed9"
     )
     assert (
         _realtime_tts_voice_for_session_purpose(None)
-        == "32b3f3c5-7171-46aa-abe7-b598964aa793"
+        == "b7d50908-b17c-442d-ad8d-810c63997ed9"
     )
 
 

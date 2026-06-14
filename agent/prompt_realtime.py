@@ -9,7 +9,7 @@ FeedbackCondition = Literal["no_corrective", "explicit_correction"]
 ConversationExamples = dict[str, str]
 DEFAULT_FEEDBACK_CONDITION_ID: FeedbackCondition = "no_corrective"
 DEFAULT_OPENING_SENTENCE = (
-    "Hi, I'm Daisy. Let's talk about today's task together. What is your name?"
+    "Hi, I'm Kate. Let's talk about today's task together. What is your name?"
 )
 PROMPT_CONFIG_PATH = Path(__file__).parent.parent / "prompt_config.json"
 PROMPT_VERSIONS_DIR = Path(__file__).parent.parent / "prompt_versions"

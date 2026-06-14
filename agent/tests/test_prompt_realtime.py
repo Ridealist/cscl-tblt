@@ -430,12 +430,10 @@ def test_realtime_opening_comes_from_selected_task_card(tmp_path, monkeypatch) -
     monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
 
     assert get_opening_sentence("morning_exercise_challenge") == (
-        "Hi, I'm Daisy. Today, let's choose one morning exercise for our class. "
-        "What is your name?"
+        "Hi, I'm Kate. Let's choose one morning exercise activity for our Class."
     )
     assert get_opening_sentence("school_event_invitation") == (
-        "Hi, I'm Daisy. Today, let's choose one school event and make an invitation. "
-        "What is your name?"
+        "Hi, I'm Kate. Today, let's choose one school event and make an invitation."
     )
 
 

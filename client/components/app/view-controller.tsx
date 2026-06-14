@@ -45,20 +45,12 @@ interface ViewControllerProps {
   sessionNotice?: string | null;
 }
 
-export function ViewController({
-  appConfig,
-  onJoin,
-  sessionActivityType,
-  sessionNotice,
-}: ViewControllerProps) {
+export function ViewController({ appConfig, onJoin, sessionNotice }: ViewControllerProps) {
   const { isConnected } = useSessionContext();
   const { resolvedTheme } = useTheme();
   const [showLobby, setShowLobby] = useState(false);
-  const agentDisplayName = sessionActivityType === 'free_conversation' ? 'Kate' : 'Daisy';
-  const agentAvatarSrc =
-    sessionActivityType === 'free_conversation'
-      ? '/agents/kate_photo.png'
-      : '/agents/daisy_photo.png';
+  const agentDisplayName = 'Kate';
+  const agentAvatarSrc = '/agents/kate_photo.png';
 
   return (
     <AnimatePresence mode="wait">
