@@ -12,6 +12,11 @@ const SESSION_COLUMNS = [
   'room_name',
   'agent_mode',
   'agent_role',
+  'session_purpose',
+  'activity_type',
+  'evaluation_id',
+  'evaluation_prompt_id',
+  'evaluation_prompt_version',
   'feedback_condition_id',
   'task_card_id',
   'prompt_version_id',
@@ -40,11 +45,16 @@ type SupabaseSessionRow = {
   room_name?: unknown;
   agent_mode?: unknown;
   agent_role?: unknown;
+  activity_type?: unknown;
+  evaluation_id?: unknown;
+  evaluation_prompt_id?: unknown;
+  evaluation_prompt_version?: unknown;
   feedback_condition_id?: unknown;
   task_card_id?: unknown;
   prompt_version_id?: unknown;
   egress_id?: unknown;
   recording_path?: unknown;
+  session_purpose?: unknown;
   metadata?: unknown;
   started_at?: unknown;
   ended_at?: unknown;
@@ -109,9 +119,12 @@ export interface ConversationLogData {
 export interface ConversationLogSessionFilters {
   agentMode?: string;
   agentRole?: string;
+  activityType?: string;
+  evaluationId?: string;
   feedbackConditionId?: string;
   promptVersionId?: string;
   room?: string;
+  sessionPurpose?: string;
   limit?: number;
 }
 
@@ -182,9 +195,12 @@ export function parseConversationLogSessionFilters(
   return {
     agentMode: text(searchParams.get('agentMode')),
     agentRole: text(searchParams.get('agentRole')),
+    activityType: text(searchParams.get('activityType')),
+    evaluationId: text(searchParams.get('evaluationId')),
     feedbackConditionId: text(searchParams.get('feedbackConditionId')),
     promptVersionId: text(searchParams.get('promptVersionId')),
     room: text(searchParams.get('room')),
+    sessionPurpose: text(searchParams.get('sessionPurpose')),
     limit: Number.isFinite(limit) ? limit : undefined,
   };
 }
@@ -194,11 +210,16 @@ function sessionMetadata(row: SupabaseSessionRow): ConversationLogMetadata {
   const values: ConversationLogMetadata = {
     agent_mode: text(row.agent_mode),
     agent_role: text(row.agent_role),
+    activity_type: text(row.activity_type),
+    evaluation_id: text(row.evaluation_id),
+    evaluation_prompt_id: text(row.evaluation_prompt_id),
+    evaluation_prompt_version: text(row.evaluation_prompt_version),
     feedback_condition_id: text(row.feedback_condition_id),
     task_card_id: text(row.task_card_id),
     prompt_version_id: text(row.prompt_version_id),
     egress_id: text(row.egress_id),
     recording_path: text(row.recording_path),
+    session_purpose: text(row.session_purpose),
   };
 
   Object.entries(values).forEach(([key, value]) => {
@@ -300,11 +321,14 @@ async function readSupabaseSessions(
     .limit(limit);
   if (filters.agentMode) query = query.eq('agent_mode', filters.agentMode);
   if (filters.agentRole) query = query.eq('agent_role', filters.agentRole);
+  if (filters.activityType) query = query.eq('activity_type', filters.activityType);
+  if (filters.evaluationId) query = query.eq('evaluation_id', filters.evaluationId);
   if (filters.feedbackConditionId) {
     query = query.eq('feedback_condition_id', filters.feedbackConditionId);
   }
   if (filters.promptVersionId) query = query.eq('prompt_version_id', filters.promptVersionId);
   if (filters.room) query = query.eq('room_name', filters.room);
+  if (filters.sessionPurpose) query = query.eq('session_purpose', filters.sessionPurpose);
 
   const { data: sessionRows, error: sessionError } = await query;
   if (sessionError) throw supabaseReadError('class_sessions');
@@ -354,7 +378,9 @@ async function readSupabaseLogData(sessionId: string): Promise<ConversationLogDa
         .select(EVENT_COLUMNS)
         .eq('session_id', sessionId)
         .order('sequence', { ascending: true })
-        .order('created_at', { ascending: true }),
+        .order('created_at', {
+          ascending: true,
+        }) as unknown as SupabasePagedQuery<SupabaseEventRow>,
     'conversation_events'
   );
 
@@ -427,6 +453,8 @@ function readFileLogSessions(
           const metadata = objectValue(data.metadata);
           if (filters.agentMode && metadata.agent_mode !== filters.agentMode) return [];
           if (filters.agentRole && metadata.agent_role !== filters.agentRole) return [];
+          if (filters.activityType && metadata.activity_type !== filters.activityType) return [];
+          if (filters.evaluationId && metadata.evaluation_id !== filters.evaluationId) return [];
           if (
             filters.feedbackConditionId &&
             metadata.feedback_condition_id !== filters.feedbackConditionId
@@ -438,6 +466,9 @@ function readFileLogSessions(
           }
           const room = text(data.room) ?? '—';
           if (filters.room && room !== filters.room) return [];
+          if (filters.sessionPurpose && metadata.session_purpose !== filters.sessionPurpose) {
+            return [];
+          }
           return [
             {
               id: `file:${filename}`,

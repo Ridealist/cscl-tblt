@@ -69,7 +69,7 @@ def _install_livekit_mocks() -> None:
 
 _install_livekit_mocks()
 
-from main import _metadata_prompt_version_id  # noqa: E402
+from main import _metadata_activity_context, _metadata_prompt_version_id  # noqa: E402
 
 
 def test_metadata_prompt_version_id_prefers_explicit_version_id() -> None:
@@ -107,3 +107,26 @@ def test_metadata_prompt_version_id_ignores_default_prompt_id() -> None:
     )
 
     assert _metadata_prompt_version_id(metadata) is None
+
+
+def test_metadata_activity_context_maps_evaluation_fields() -> None:
+    metadata = json.dumps(
+        {
+            "activityType": "free_conversation",
+            "agentMode": "realtime",
+            "evaluationCharacter": "Kate",
+            "evaluationId": "pretest_6_10",
+            "evaluationPromptId": "pretest_6_10",
+            "evaluationPromptVersion": "2026-06-10",
+            "sessionPurpose": "evaluation",
+        }
+    )
+
+    assert _metadata_activity_context(metadata) == {
+        "activity_type": "free_conversation",
+        "evaluation_character": "Kate",
+        "evaluation_id": "pretest_6_10",
+        "evaluation_prompt_id": "pretest_6_10",
+        "evaluation_prompt_version": "2026-06-10",
+        "session_purpose": "evaluation",
+    }

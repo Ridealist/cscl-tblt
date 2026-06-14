@@ -136,6 +136,12 @@ function loadSettingsStore(options = {}) {
         };
       }
 
+      if (specifier === '@/lib/session-activity') {
+        return {
+          normalizeSessionPurpose: (value) => (value === 'evaluation' ? 'evaluation' : 'practice'),
+        };
+      }
+
       if (specifier === '@/lib/supabase/admin') {
         return {
           createSupabaseAdminClient: () => createSupabaseClient(options, calls),
@@ -165,6 +171,7 @@ test('readSettings maps Supabase app_settings rows to normalized settings', asyn
       agent_mode: 'realtime',
       agent_role: 'passive',
       feedback_condition_id: 'unknown',
+      session_purpose: 'evaluation',
       realtime_resetting: true,
     },
   });
@@ -181,6 +188,7 @@ test('readSettings maps Supabase app_settings rows to normalized settings', asyn
     agentMode: 'realtime',
     agentRole: 'collaborative',
     feedbackConditionId: 'no_corrective',
+    sessionPurpose: 'evaluation',
     realtimeResetting: true,
   });
 });
@@ -195,6 +203,7 @@ test('writeSettings merges input and upserts app_settings with updated_by', asyn
       agent_mode: 'pipeline',
       agent_role: 'dominant',
       feedback_condition_id: 'no_corrective',
+      session_purpose: 'practice',
       realtime_resetting: false,
     },
   });
@@ -207,6 +216,7 @@ test('writeSettings merges input and upserts app_settings with updated_by', asyn
       classStart: 11,
       feedbackConditionId: 'explicit_correction',
       numClasses: 2,
+      sessionPurpose: 'evaluation',
       realtimeResetting: true,
     },
     {
@@ -223,6 +233,7 @@ test('writeSettings merges input and upserts app_settings with updated_by', asyn
     agentMode: 'realtime',
     agentRole: 'collaborative',
     feedbackConditionId: 'explicit_correction',
+    sessionPurpose: 'evaluation',
     realtimeResetting: true,
   });
   assert.deepEqual(plain(calls.upserts), [
@@ -236,6 +247,7 @@ test('writeSettings merges input and upserts app_settings with updated_by', asyn
         agent_mode: 'realtime',
         agent_role: 'collaborative',
         feedback_condition_id: 'explicit_correction',
+        session_purpose: 'evaluation',
         realtime_resetting: true,
         updated_by: 'admin-user',
       },
@@ -255,6 +267,7 @@ test('readSettings falls back to config.json in local development when Supabase 
       feedbackConditionId: 'explicit_correction',
       numClasses: 3,
       numGroupsPerClass: 8,
+      sessionPurpose: 'evaluation',
       realtimeResetting: true,
     }),
   });
@@ -271,7 +284,49 @@ test('readSettings falls back to config.json in local development when Supabase 
     agentMode: 'realtime',
     agentRole: 'collaborative',
     feedbackConditionId: 'explicit_correction',
+    sessionPurpose: 'evaluation',
     realtimeResetting: true,
+  });
+  assert.equal(calls.readFiles.length, 1);
+});
+
+test('readSettings overlays local session purpose when Supabase schema does not return it', async () => {
+  const { calls, readSettings } = loadSettingsStore({
+    readRow: {
+      num_classes: 4,
+      num_groups_per_class: 4,
+      class_start: 1,
+      active_class: 1,
+      agent_mode: 'realtime',
+      agent_role: 'dominant',
+      feedback_condition_id: 'no_corrective',
+      realtime_resetting: false,
+    },
+    readFileContent: JSON.stringify({
+      activeClass: 1,
+      agentMode: 'realtime',
+      agentRole: 'dominant',
+      classStart: 1,
+      feedbackConditionId: 'no_corrective',
+      numClasses: 4,
+      numGroupsPerClass: 4,
+      sessionPurpose: 'evaluation',
+      realtimeResetting: false,
+    }),
+  });
+
+  const settings = await readSettings();
+
+  assert.deepEqual(plain(settings), {
+    numClasses: 4,
+    numGroupsPerClass: 4,
+    classStart: 1,
+    activeClass: 1,
+    agentMode: 'realtime',
+    agentRole: 'dominant',
+    feedbackConditionId: 'no_corrective',
+    sessionPurpose: 'evaluation',
+    realtimeResetting: false,
   });
   assert.equal(calls.readFiles.length, 1);
 });
@@ -287,6 +342,7 @@ test('readSettings falls back to config.json in local development when Supabase 
       feedbackConditionId: 'no_corrective',
       numClasses: 4,
       numGroupsPerClass: 12,
+      sessionPurpose: 'practice',
       realtimeResetting: false,
     }),
   });
@@ -301,6 +357,7 @@ test('readSettings falls back to config.json in local development when Supabase 
     agentMode: 'pipeline',
     agentRole: 'dominant',
     feedbackConditionId: 'no_corrective',
+    sessionPurpose: 'practice',
     realtimeResetting: false,
   });
   assert.equal(calls.readFiles.length, 1);
@@ -317,6 +374,7 @@ test('writeSettings falls back to config.json in local development when Supabase
       feedbackConditionId: 'no_corrective',
       numClasses: 4,
       numGroupsPerClass: 4,
+      sessionPurpose: 'practice',
       realtimeResetting: false,
     }),
   });
@@ -332,6 +390,7 @@ test('writeSettings falls back to config.json in local development when Supabase
     agentMode: 'pipeline',
     agentRole: 'dominant',
     feedbackConditionId: 'no_corrective',
+    sessionPurpose: 'practice',
     realtimeResetting: true,
   });
   assert.equal(calls.renames.length, 1);

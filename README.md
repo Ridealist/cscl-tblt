@@ -526,6 +526,8 @@ pnpm prompts:check
 > `logs/`는 agent 로컬 파일 출력이다. Realtime custom prompt는 Next.js admin/token 경로와 Python realtime agent 모두 Supabase `realtime_prompt_versions`를 사용한다. legacy `prompt_config.json`은 migration 참고용이며 runtime source로 사용하지 않는다.
 > 운영 설정은 Supabase `app_settings`를 사용하며, Supabase가 없는 로컬 개발 환경에서만 `config.json` fallback을 사용한다.
 
+기존 EC2 production 서버에 Supabase를 적용하는 절차는 [Production Supabase Runbook](docs/production-supabase-runbook.md)을 따른다.
+
 ---
 
 ### 최초 서버 세팅 절차
@@ -583,6 +585,8 @@ LIVEKIT_API_SECRET=<값>
 NEXT_PUBLIC_SUPABASE_URL=<Supabase Project URL>
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<Supabase publishable key>
 SUPABASE_SECRET_KEY=<Supabase secret key>
+STUDENT_SESSION_SECRET=<long random server-only secret>
+CONVERSATION_LOG_FILE_FALLBACK=false
 ```
 
 Python realtime agent도 custom prompt version fetch를 위해 root **`/opt/cscl-tblt/.env`**에 Supabase URL과 secret을 읽을 수 있어야 한다. `NEXT_PUBLIC_SUPABASE_URL`/`SUPABASE_SECRET_KEY`를 같은 값으로 두거나, agent 전용으로 `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`를 둘 수 있다.

@@ -10,10 +10,29 @@ import type {
   RealtimePromptState,
   RealtimeTaskCardSummary,
 } from '@/lib/realtime-prompt-config';
+import { type SessionPurpose, getSessionPurposeLabel } from '@/lib/session-activity';
 
 type PromptField = keyof RealtimePromptConfig;
 
 type PromptResponse = RealtimePromptState;
+type EvaluationPromptResponse = {
+  source: 'evaluation';
+  usingDefault: boolean;
+  evaluationId: string;
+  evaluationPromptId: string;
+  evaluationPromptVersion?: string | null;
+  evaluationCharacter: string;
+  openingSentence: string;
+  prompt: string;
+  evaluations: Array<{
+    id: string;
+    character: string;
+    file: string;
+    promptId: string;
+    version?: string | null;
+    openingSentence: string;
+  }>;
+};
 type RuntimeSettingsResponse = {
   agentRole?: unknown;
   feedbackConditionId?: unknown;
@@ -106,7 +125,155 @@ function confirmPromptChange(action: string) {
   );
 }
 
-export function PromptEditorView() {
+export function PromptEditorView({ sessionPurpose }: { sessionPurpose: SessionPurpose }) {
+  if (sessionPurpose === 'evaluation') {
+    return <EvaluationPromptView />;
+  }
+  return <PracticePromptEditorView sessionPurpose={sessionPurpose} />;
+}
+
+function EvaluationPromptView() {
+  const [promptState, setPromptState] = useState<EvaluationPromptResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
+
+  async function loadPrompt() {
+    setLoading(true);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/admin/prompts/evaluation', { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ text: data.error ?? 'Evaluation 프롬프트를 불러오지 못했습니다.', ok: false });
+        setPromptState(null);
+        return;
+      }
+      setPromptState(data as EvaluationPromptResponse);
+    } catch {
+      setMessage({ text: 'Evaluation 프롬프트를 불러오지 못했습니다.', ok: false });
+      setPromptState(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadPrompt();
+  }, []);
+
+  return (
+    <div className="flex flex-col gap-6">
+      <section className="flex flex-col gap-2">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-foreground text-sm font-semibold">Evaluation 프롬프트</h2>
+            <p className="text-muted-foreground text-xs">
+              자유 대화 평가 세션에서 Kate가 사용하는 manifest 기반 프롬프트입니다.
+            </p>
+            <p className="text-muted-foreground text-xs">
+              운영 설정: {getSessionPurposeLabel('evaluation')}
+            </p>
+          </div>
+          <span className="bg-muted text-muted-foreground shrink-0 rounded px-2 py-1 text-xs">
+            파일 기준
+          </span>
+        </div>
+        {promptState && (
+          <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs">
+            <span>
+              Evaluation ID:{' '}
+              <span className="text-foreground font-mono font-semibold">
+                {promptState.evaluationId}
+              </span>
+            </span>
+            <span>
+              Prompt ID:{' '}
+              <span className="text-foreground font-mono font-semibold">
+                {promptState.evaluationPromptId}
+              </span>
+            </span>
+            <span>
+              Version:{' '}
+              <span className="text-foreground font-semibold">
+                {promptState.evaluationPromptVersion ?? '미기록'}
+              </span>
+            </span>
+            <span>
+              Character:{' '}
+              <span className="text-foreground font-semibold">
+                {promptState.evaluationCharacter}
+              </span>
+            </span>
+          </div>
+        )}
+      </section>
+
+      {loading ? (
+        <p className="text-muted-foreground text-sm">프롬프트를 불러오는 중...</p>
+      ) : promptState ? (
+        <>
+          <section className="flex flex-col gap-3">
+            <div className="flex items-end justify-between gap-3">
+              <div>
+                <h3 className="text-foreground text-sm font-semibold">Opening</h3>
+                <p className="text-muted-foreground text-xs">Evaluation 세션 첫 발화입니다.</p>
+              </div>
+              <span className="text-muted-foreground shrink-0 font-mono text-xs">
+                {promptState.openingSentence.length.toLocaleString('ko-KR')}자
+              </span>
+            </div>
+            <textarea
+              value={promptState.openingSentence}
+              rows={2}
+              readOnly
+              spellCheck={false}
+              className="border-input bg-muted/40 text-foreground w-full resize-none rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none"
+            />
+          </section>
+
+          <section className="flex flex-col gap-3">
+            <div className="flex items-end justify-between gap-3">
+              <div>
+                <h3 className="text-foreground text-sm font-semibold">Prompt Source</h3>
+                <p className="text-muted-foreground text-xs">
+                  평가 데이터 수집용 자유 대화 프롬프트 전체 내용입니다.
+                </p>
+              </div>
+              <span className="text-muted-foreground shrink-0 font-mono text-xs">
+                {promptState.prompt.length.toLocaleString('ko-KR')}자
+              </span>
+            </div>
+            <textarea
+              value={promptState.prompt}
+              rows={32}
+              readOnly
+              spellCheck={false}
+              className="border-input bg-muted/40 text-foreground min-h-96 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none"
+            />
+          </section>
+        </>
+      ) : null}
+
+      {message && (
+        <p className={`text-xs ${message.ok ? 'text-green-600' : 'text-destructive'}`}>
+          {message.text}
+        </p>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={loadPrompt}
+          disabled={loading}
+          className="text-muted-foreground hover:text-foreground px-2 py-2 text-sm underline underline-offset-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          다시 불러오기
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionPurpose }) {
   const [prompt, setPrompt] = useState<RealtimePromptConfig>(EMPTY_PROMPT);
   const [savedPrompt, setSavedPrompt] = useState<RealtimePromptConfig | null>(null);
   const [selectedAgentRole, setSelectedAgentRole] = useState<AgentRole>('dominant');
@@ -339,6 +506,9 @@ export function PromptEditorView() {
             <h2 className="text-foreground text-sm font-semibold">Realtime 프롬프트</h2>
             <p className="text-muted-foreground text-xs">
               저장된 변경사항은 새로 시작하는 개별 대화 세션부터 적용됩니다.
+            </p>
+            <p className="text-muted-foreground text-xs">
+              운영 설정: {getSessionPurposeLabel(sessionPurpose)}
             </p>
             <p className="text-muted-foreground text-xs">
               {usingDefault

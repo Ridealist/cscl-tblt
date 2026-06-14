@@ -2,12 +2,16 @@
 
 This directory contains the database foundation for the staged Supabase migration tracked in GitHub issue #4.
 
+기존 EC2 production 서버에 Supabase를 적용할 때는 repo root의
+`docs/production-supabase-runbook.md`를 우선 따른다. 이 문서는 schema와
+local/persistent storage 정책의 세부 설명이다.
+
 ## Current Scope
 
 The migrations add the shared foundation used by the staged Supabase rollout:
 
 - `profiles`: Supabase Auth user metadata and app role.
-- `app_settings`: runtime storage for class and agent operation settings.
+- `app_settings`: runtime storage for class, agent, and session purpose operation settings.
 - `realtime_prompt_versions`: versioned Realtime prompt overrides that replace
   `prompt_config.json`.
 - `class_sessions`: LiveKit class session metadata written by `ConversationLogger`.
@@ -31,8 +35,10 @@ Only `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` may b
 
 1. Create a Supabase project.
 2. Apply `supabase/migrations/20260611000000_foundation.sql`.
-3. Create the first admin user through Supabase Auth.
-4. Grant that user admin access from SQL or the dashboard:
+3. Apply `supabase/migrations/20260612070000_session_purpose_and_activity.sql` before
+   using Evaluation/Practice session filtering.
+4. Create the first admin user through Supabase Auth.
+5. Grant that user admin access from SQL or the dashboard:
 
 ```sql
 insert into public.profiles (user_id, role, display_name)
@@ -46,7 +52,7 @@ Admin routes use Supabase Auth sessions and `profiles.role = 'admin'` checks.
 
 ## Local Development Policy
 
-Production uses Supabase `app_settings(id = 'default')` as the source of truth for class count, active class, agent mode, agent role, feedback condition, and realtime reset lock state. Custom Realtime prompt overrides are stored as rows in `realtime_prompt_versions`; at most one row is active.
+Production uses Supabase `app_settings(id = 'default')` as the source of truth for class count, active class, agent mode, agent role, feedback condition, session purpose (`session_purpose = practice | evaluation`), and realtime reset lock state. Custom Realtime prompt overrides are stored as rows in `realtime_prompt_versions`; at most one row is active.
 
 Local development may run without Supabase for the settings store. When the Supabase admin environment variables are missing, or a local Supabase read/write fails, the Next.js settings store falls back to root `config.json`. This fallback is for local development and migration only; production returns a setup/runtime error instead.
 
@@ -56,7 +62,7 @@ The public student flow requires Supabase-backed `students` rows. Students first
 
 Conversation logging keeps the existing `logs/*.json` file write and adds Supabase dual-write when the Python agent has `NEXT_PUBLIC_SUPABASE_URL` or `SUPABASE_URL` plus `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY`. Each `ConversationLogger` instance creates a new `class_sessions.id`; `livekit_session_id` is retained as LiveKit room metadata and is not unique because named rooms can be reused across conversations. Missing or failing Supabase writes are logged by the agent and do not stop the session.
 
-Admin dashboard log APIs read `class_sessions` and `conversation_events` through the server-only Supabase secret key. The old `logs/*.json` reader is fallback-only for local development when Supabase admin environment variables are missing and `NODE_ENV !== 'production'`; configured Supabase read failures are surfaced instead of being hidden by file fallback. Production dashboard log reads are Supabase-backed and remain behind the admin guard. Set `CONVERSATION_LOG_FILE_FALLBACK=false` to disable the local file fallback during development.
+Admin dashboard log APIs read `class_sessions` and `conversation_events` through the server-only Supabase secret key. The old `logs/*.json` reader is fallback-only for local development when Supabase admin environment variables are missing and `NODE_ENV !== 'production'`; configured Supabase read failures are surfaced instead of being hidden by file fallback. Production dashboard log reads are Supabase-backed and remain behind the admin guard. Evaluation filtering depends on `class_sessions.session_purpose`, `activity_type`, and `evaluation_id`, so apply `20260612070000_session_purpose_and_activity.sql` before relying on dashboard filters. Set `CONVERSATION_LOG_FILE_FALLBACK=false` to disable the local file fallback during development.
 
 `supabase/config.toml` pins this repo to the `5532x` local port range so it can run alongside another Supabase project using the CLI defaults.
 
@@ -117,6 +123,7 @@ insert into public.app_settings (
   agent_mode,
   agent_role,
   feedback_condition_id,
+  session_purpose,
   realtime_resetting
 )
 values (
@@ -128,6 +135,7 @@ values (
   'realtime',
   'collaborative',
   'explicit_correction',
+  'practice',
   false
 )
 on conflict (id) do update
@@ -138,8 +146,16 @@ set num_classes = excluded.num_classes,
     agent_mode = excluded.agent_mode,
     agent_role = excluded.agent_role,
     feedback_condition_id = excluded.feedback_condition_id,
+    session_purpose = excluded.session_purpose,
     realtime_resetting = excluded.realtime_resetting;
 ```
+
+Use `session_purpose = 'practice'` for the existing TBLT task-solution flow, and
+`session_purpose = 'evaluation'` for Kate free-conversation source-data
+collection. Non-evaluation `class_sessions` rows are normalized to `practice` by
+the session-purpose migration, and existing rows are backfilled with
+`activity_type` plus evaluation prompt fields where metadata or `eval-*` room
+names make that possible.
 
 ## realtime_prompt_versions Migration
 

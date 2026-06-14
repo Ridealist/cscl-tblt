@@ -8,6 +8,7 @@ import { AgentSessionView_01 } from '@/components/agents-ui/blocks/agent-session
 import { LobbyView } from '@/components/app/lobby-view';
 import { StudentLoginView } from '@/components/app/student-login-view';
 import type { AgentMode } from '@/lib/agent-mode';
+import type { ActivityType, SessionPurpose } from '@/lib/session-activity';
 import type { StudentProfile } from '@/lib/student';
 
 const MotionStudentLoginView = motion.create(StudentLoginView);
@@ -31,9 +32,19 @@ const VIEW_MOTION_PROPS = {
 interface ViewControllerProps {
   appConfig: AppConfig;
   checkingStudent: boolean;
-  onJoin: (displayName: string, roomName: string, agentMode: AgentMode) => void;
+  onJoin: (
+    displayName: string,
+    roomName: string,
+    agentMode: AgentMode,
+    options?: {
+      activityType?: ActivityType;
+      evaluationId?: string;
+      sessionPurpose?: SessionPurpose;
+    }
+  ) => void;
   onStudentLogin: (student: StudentProfile) => void;
   onStudentLogout: () => void;
+  sessionActivityType?: ActivityType;
   sessionNotice?: string | null;
   student: StudentProfile | null;
 }
@@ -44,11 +55,17 @@ export function ViewController({
   onJoin,
   onStudentLogin,
   onStudentLogout,
+  sessionActivityType,
   sessionNotice,
   student,
 }: ViewControllerProps) {
   const { isConnected } = useSessionContext();
   const { resolvedTheme } = useTheme();
+  const agentDisplayName = sessionActivityType === 'free_conversation' ? 'Kate' : 'Daisy';
+  const agentAvatarSrc =
+    sessionActivityType === 'free_conversation'
+      ? '/agents/kate_photo.png'
+      : '/agents/daisy_photo.png';
 
   return (
     <AnimatePresence mode="wait">
@@ -86,6 +103,8 @@ export function ViewController({
           supportsVideoInput={appConfig.supportsVideoInput}
           supportsScreenShare={appConfig.supportsScreenShare}
           isPreConnectBufferEnabled={appConfig.isPreConnectBufferEnabled}
+          agentDisplayName={agentDisplayName}
+          agentAvatarSrc={agentAvatarSrc}
           audioVisualizerType={appConfig.audioVisualizerType}
           audioVisualizerColor={
             resolvedTheme === 'dark'

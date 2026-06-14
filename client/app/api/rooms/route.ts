@@ -3,6 +3,7 @@ import { RoomServiceClient } from 'livekit-server-sdk';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { type AgentRole, normalizeAgentRole } from '@/lib/agent-role';
 import type { RealtimePromptSource } from '@/lib/realtime-prompt-config';
+import type { ActivityType, SessionPurpose } from '@/lib/session-activity';
 import { SettingsStoreError, readSettings } from '@/lib/settings-store';
 
 const API_KEY = process.env.LIVEKIT_API_KEY;
@@ -20,12 +21,19 @@ type RoomCounts = {
 };
 
 function parseRealtimeRoomMetadata(metadata?: string): {
+  activityType?: ActivityType;
   agentRole?: AgentRole;
+  evaluationCharacter?: string;
+  evaluationId?: string;
+  evaluationPromptId?: string;
+  evaluationPromptVersion?: string;
   feedbackConditionId?: string;
   promptId?: string;
   promptVersionId?: string;
   promptSavedAt?: string | null;
   promptSource?: RealtimePromptSource;
+  sessionPurpose?: SessionPurpose;
+  taskCardId?: string;
 } {
   if (!metadata) return {};
   try {
@@ -33,16 +41,36 @@ function parseRealtimeRoomMetadata(metadata?: string): {
       agentMode?: unknown;
       agentRole?: unknown;
       agentStance?: unknown;
+      activityType?: unknown;
+      evaluationCharacter?: unknown;
+      evaluationId?: unknown;
+      evaluationPromptId?: unknown;
+      evaluationPromptVersion?: unknown;
       feedbackConditionId?: unknown;
       promptId?: unknown;
       promptVersionId?: unknown;
       promptSavedAt?: unknown;
       promptSource?: unknown;
+      sessionPurpose?: unknown;
+      taskCardId?: unknown;
     };
     const rawRole = parsed.agentRole ?? parsed.agentStance;
-    if (parsed.agentMode !== 'realtime' || !rawRole) return {};
+    if (parsed.agentMode !== 'realtime') return {};
     return {
-      agentRole: normalizeAgentRole(rawRole),
+      ...(rawRole ? { agentRole: normalizeAgentRole(rawRole) } : {}),
+      activityType:
+        parsed.activityType === 'free_conversation' || parsed.activityType === 'task_solution'
+          ? parsed.activityType
+          : undefined,
+      evaluationCharacter:
+        typeof parsed.evaluationCharacter === 'string' ? parsed.evaluationCharacter : undefined,
+      evaluationId: typeof parsed.evaluationId === 'string' ? parsed.evaluationId : undefined,
+      evaluationPromptId:
+        typeof parsed.evaluationPromptId === 'string' ? parsed.evaluationPromptId : undefined,
+      evaluationPromptVersion:
+        typeof parsed.evaluationPromptVersion === 'string'
+          ? parsed.evaluationPromptVersion
+          : undefined,
       feedbackConditionId:
         typeof parsed.feedbackConditionId === 'string' ? parsed.feedbackConditionId : undefined,
       promptId: typeof parsed.promptId === 'string' ? parsed.promptId : undefined,
@@ -56,10 +84,19 @@ function parseRealtimeRoomMetadata(metadata?: string): {
         parsed.promptSource === 'custom' || parsed.promptSource === 'default'
           ? parsed.promptSource
           : undefined,
+      sessionPurpose:
+        parsed.sessionPurpose === 'evaluation' || parsed.sessionPurpose === 'practice'
+          ? parsed.sessionPurpose
+          : undefined,
+      taskCardId: typeof parsed.taskCardId === 'string' ? parsed.taskCardId : undefined,
     };
   } catch {
     return {};
   }
+}
+
+function isRealtimeRoomName(name: string) {
+  return name.startsWith('realtime-') || name.startsWith('eval-') || name.startsWith('task-');
 }
 
 async function getRoomCounts(svc: RoomServiceClient, roomName: string): Promise<RoomCounts> {
@@ -98,7 +135,7 @@ export async function GET() {
     );
   }
 
-  const { activeClass, numGroupsPerClass, agentMode, realtimeResetting } = settings;
+  const { activeClass, numGroupsPerClass, agentMode, realtimeResetting, sessionPurpose } = settings;
 
   const predefinedNames: string[] = Array.from(
     { length: numGroupsPerClass },
@@ -125,7 +162,7 @@ export async function GET() {
   }));
 
   const realtimeRooms = activeRooms
-    .filter((room) => room.name.startsWith('realtime-') && activeRoomNames.has(room.name))
+    .filter((room) => isRealtimeRoomName(room.name) && activeRoomNames.has(room.name))
     .map((room) => ({
       name: room.name,
       ...parseRealtimeRoomMetadata(room.metadata),
@@ -139,7 +176,7 @@ export async function GET() {
     .sort((a, b) => a.name.localeCompare(b.name));
 
   return NextResponse.json(
-    { rooms, activeClass, agentMode, realtimeResetting, realtimeRooms },
+    { rooms, activeClass, agentMode, realtimeResetting, sessionPurpose, realtimeRooms },
     { headers: { 'Cache-Control': 'no-store' } }
   );
 }

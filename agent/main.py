@@ -20,6 +20,11 @@ from livekit.plugins import openai
 
 from egress_recorder import EgressRecorder
 from logger import ConversationLogger
+from prompt_evaluation import (
+    build_prompt_from_source as build_evaluation_prompt_from_source,
+    get_opening_sentence_from_source as get_evaluation_opening_sentence_from_source,
+    load_prompt_source as load_evaluation_prompt_source,
+)
 from prompt_pipeline import build_prompt as build_pipeline_prompt
 from prompt_pipeline import _clean_names
 from prompt_realtime import (
@@ -180,6 +185,37 @@ def _metadata_student_context(metadata) -> dict:
     }
 
 
+def _metadata_activity_context(metadata) -> dict:
+    if not metadata:
+        return {}
+    try:
+        parsed = json.loads(metadata) if isinstance(metadata, str) else metadata
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+
+    session_purpose = parsed.get("sessionPurpose")
+    activity_type = parsed.get("activityType")
+    values = {
+        "session_purpose": session_purpose
+        if session_purpose in ("evaluation", "practice", "execution")
+        else None,
+        "activity_type": activity_type
+        if activity_type in ("free_conversation", "task_solution")
+        else None,
+        "evaluation_id": parsed.get("evaluationId"),
+        "evaluation_prompt_id": parsed.get("evaluationPromptId"),
+        "evaluation_prompt_version": parsed.get("evaluationPromptVersion"),
+        "evaluation_character": parsed.get("evaluationCharacter"),
+    }
+    return {
+        key: value
+        for key, value in values.items()
+        if isinstance(value, str) and value.strip()
+    }
+
+
 def _resolve_realtime_job_role(ctx: JobContext, fallback: str) -> str:
     for metadata in (
         getattr(ctx.job, "metadata", None),
@@ -238,6 +274,51 @@ def _resolve_realtime_student_context(ctx: JobContext) -> dict:
         if student_context:
             return student_context
     return {}
+
+
+def _resolve_realtime_activity_context(ctx: JobContext) -> dict:
+    for metadata in (
+        getattr(ctx.job, "metadata", None),
+        getattr(ctx.room, "metadata", None),
+        getattr(getattr(ctx.job, "room", None), "metadata", None),
+    ):
+        activity_context = _metadata_activity_context(metadata)
+        if activity_context:
+            return _normalize_activity_context(activity_context)
+
+    room_name = getattr(ctx.room, "name", "")
+    if isinstance(room_name, str) and room_name.startswith("eval-"):
+        return {
+            "activity_type": "free_conversation",
+            "evaluation_id": "pretest_6_10",
+            "session_purpose": "evaluation",
+        }
+    return {
+        "activity_type": "task_solution",
+        "session_purpose": "practice",
+    }
+
+
+def _normalize_activity_context(activity_context: dict) -> dict:
+    activity_type = activity_context.get("activity_type")
+    session_purpose = activity_context.get("session_purpose")
+    if activity_type == "free_conversation" or session_purpose == "evaluation":
+        session_purpose = "evaluation"
+        activity_type = "free_conversation"
+    elif session_purpose != "evaluation":
+        session_purpose = "practice"
+        activity_type = "task_solution" if activity_type != "task_solution" else activity_type
+
+    normalized = {
+        **activity_context,
+        "activity_type": activity_type,
+        "session_purpose": session_purpose,
+    }
+    return {
+        key: value
+        for key, value in normalized.items()
+        if isinstance(value, str) and value.strip()
+    }
 
 
 class Assistant(Agent):
@@ -481,17 +562,20 @@ class RealtimeAssistant(Agent):
         get_name_fn,
         role: str,
         prompt_source,
+        build_prompt_fn,
+        get_opening_sentence_fn,
     ) -> None:
         super().__init__(
-            instructions=build_realtime_prompt_from_source(prompt_source, role=role)
+            instructions=build_prompt_fn(prompt_source, role=role)
         )
         self._get_name = get_name_fn
         self._role = role
         self._prompt_source = prompt_source
-        self._task_card_id = prompt_source.task_card_id
-        self._feedback_condition_id = prompt_source.feedback_condition
-        self._prompt_version_id = prompt_source.prompt_version_id
-        self._opening_sentence = get_realtime_opening_sentence_from_source(prompt_source)
+        self._build_prompt = build_prompt_fn
+        self._task_card_id = getattr(prompt_source, "task_card_id", None)
+        self._feedback_condition_id = getattr(prompt_source, "feedback_condition", None)
+        self._prompt_version_id = getattr(prompt_source, "prompt_version_id", None)
+        self._opening_sentence = get_opening_sentence_fn(prompt_source)
 
     async def on_enter(self) -> None:
         """1:1 realtime 세션 입장 직후 참가자 이름을 반영하고 첫 턴을 생성."""
@@ -508,15 +592,16 @@ class RealtimeAssistant(Agent):
             name,
         )
         await self.update_instructions(
-            build_realtime_prompt_from_source(
+            self._build_prompt(
                 self._prompt_source,
                 name,
                 role=self._role,
             )
         )
 
+        character = getattr(self._prompt_source, "evaluation_character", None) or "Daisy"
         instruction = (
-            "Say only this exact opening as Daisy, a friendly classmate, and nothing else: "
+            f"Say only this exact opening as {character}, a friendly classmate, and nothing else: "
             f"{json.dumps(self._opening_sentence, ensure_ascii=False)}"
         )
         log.info("Realtime first reply requested: %s", self._opening_sentence)
@@ -530,41 +615,72 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
     feedback_condition_id = _resolve_realtime_feedback_condition_id(ctx)
     prompt_version_id = _resolve_realtime_prompt_version_id(ctx)
     student_context = _resolve_realtime_student_context(ctx)
-    prompt_source = await asyncio.to_thread(
-        load_realtime_prompt_source,
-        task_card_id,
-        feedback_condition_id,
-        prompt_version_id,
-    )
-    resolved_task_card_id = prompt_source.task_card_id or task_card_id
-    resolved_feedback_condition_id = prompt_source.feedback_condition
+    activity_context = _resolve_realtime_activity_context(ctx)
+    is_evaluation = activity_context.get("session_purpose") == "evaluation"
+    if is_evaluation:
+        prompt_source = await asyncio.to_thread(
+            load_evaluation_prompt_source,
+            activity_context.get("evaluation_id"),
+        )
+        activity_context = {
+            **activity_context,
+            "evaluation_id": prompt_source.evaluation_id,
+            "evaluation_prompt_id": prompt_source.evaluation_prompt_id,
+            "evaluation_prompt_version": prompt_source.evaluation_prompt_version,
+            "evaluation_character": prompt_source.evaluation_character,
+        }
+        build_prompt_fn = build_evaluation_prompt_from_source
+        get_opening_sentence_fn = get_evaluation_opening_sentence_from_source
+        resolved_task_card_id = None
+        resolved_feedback_condition_id = None
+    else:
+        prompt_source = await asyncio.to_thread(
+            load_realtime_prompt_source,
+            task_card_id,
+            feedback_condition_id,
+            prompt_version_id,
+        )
+        build_prompt_fn = build_realtime_prompt_from_source
+        get_opening_sentence_fn = get_realtime_opening_sentence_from_source
+        resolved_task_card_id = prompt_source.task_card_id or task_card_id
+        resolved_feedback_condition_id = prompt_source.feedback_condition
     ctx.log_context_fields = {
         "room": ctx.room.name,
         "mode": "realtime",
         "role": role,
+        "session_purpose": activity_context.get("session_purpose"),
+        "activity_type": activity_context.get("activity_type"),
         "feedback_condition_id": resolved_feedback_condition_id,
         "prompt_source": prompt_source.source,
         "prompt_version_id": prompt_source.prompt_version_id,
     }
     log.info(
         "Starting realtime job: room=%s room_sid=%s job_id=%s role=%s "
-        "feedback_condition_id=%s task_card_id=%s prompt_source=%s "
-        "prompt_version_id=%s metadata=%s",
+        "session_purpose=%s activity_type=%s feedback_condition_id=%s "
+        "task_card_id=%s prompt_source=%s prompt_version_id=%s metadata=%s",
         ctx.room.name,
         ctx.job.room.sid,
         getattr(ctx.job, "id", None),
         role,
+        activity_context.get("session_purpose"),
+        activity_context.get("activity_type"),
         resolved_feedback_condition_id,
         resolved_task_card_id,
         prompt_source.source,
         prompt_source.prompt_version_id,
         getattr(ctx.job, "metadata", None),
     )
-    conv_logger = ConversationLogger(
-        ctx.job.room.sid,
-        ctx.room.name,
-        metadata={
-            "agent_mode": "realtime",
+    prompt_metadata = (
+        {
+            "evaluation_id": activity_context.get("evaluation_id"),
+            "evaluation_prompt_id": activity_context.get("evaluation_prompt_id"),
+            "evaluation_prompt_version": activity_context.get("evaluation_prompt_version"),
+            "evaluation_character": activity_context.get("evaluation_character"),
+            "prompt_id": activity_context.get("evaluation_prompt_id"),
+            "prompt_source": prompt_source.source,
+        }
+        if is_evaluation
+        else {
             "agent_role": role,
             "feedback_condition_id": resolved_feedback_condition_id,
             "task_card_id": resolved_task_card_id,
@@ -572,6 +688,16 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
             "prompt_id": prompt_source.prompt_version_id or "default",
             "prompt_version_id": prompt_source.prompt_version_id,
             "prompt_saved_at": prompt_source.saved_at,
+        }
+    )
+    conv_logger = ConversationLogger(
+        ctx.job.room.sid,
+        ctx.room.name,
+        metadata={
+            "agent_mode": "realtime",
+            "activity_type": activity_context.get("activity_type"),
+            "session_purpose": activity_context.get("session_purpose"),
+            **prompt_metadata,
             **student_context,
         },
     )
@@ -595,6 +721,8 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
         get_name_fn=lambda: participant["name"],
         role=role,
         prompt_source=prompt_source,
+        build_prompt_fn=build_prompt_fn,
+        get_opening_sentence_fn=get_opening_sentence_fn,
     )
 
     session = AgentSession(
@@ -674,7 +802,7 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
         if participant["identity"] is None:
             _register_participant(p)
             await assistant.update_instructions(
-                build_realtime_prompt_from_source(
+                build_prompt_fn(
                     prompt_source,
                     participant["name"],
                     role=role,
