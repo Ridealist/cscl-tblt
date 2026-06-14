@@ -3,6 +3,7 @@ import { dirname, join } from 'path';
 import 'server-only';
 import { type AgentMode, normalizeAgentMode } from '@/lib/agent-mode';
 import { type AgentRole, DEFAULT_AGENT_ROLE, normalizeAgentRole } from '@/lib/agent-role';
+import { type SessionPurpose, normalizeSessionPurpose } from '@/lib/session-activity';
 import { createSupabaseAdminClient, hasSupabaseAdminEnv } from '@/lib/supabase/admin';
 
 const SETTINGS_ID = 'default';
@@ -17,6 +18,7 @@ export interface AppSettings {
   agentMode: AgentMode;
   agentRole: AgentRole;
   feedbackConditionId: string;
+  sessionPurpose: SessionPurpose;
   realtimeResetting: boolean;
 }
 
@@ -29,6 +31,7 @@ type AppSettingsRow = {
   agent_mode?: unknown;
   agent_role?: unknown;
   feedback_condition_id?: unknown;
+  session_purpose?: unknown;
   realtime_resetting?: unknown;
   updated_by?: unknown;
 };
@@ -58,6 +61,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   agentMode: 'pipeline',
   agentRole: DEFAULT_AGENT_ROLE,
   feedbackConditionId: DEFAULT_FEEDBACK_CONDITION_ID,
+  sessionPurpose: 'practice',
   realtimeResetting: false,
 };
 
@@ -119,6 +123,7 @@ export function normalizeSettings(
     agentMode: normalizeAgentMode(value.agentMode),
     agentRole: normalizeAgentRole(value.agentRole ?? value.agentStance),
     feedbackConditionId: normalizeFeedbackConditionId(value.feedbackConditionId, options),
+    sessionPurpose: normalizeSessionPurpose(value.sessionPurpose),
     realtimeResetting: value.realtimeResetting === true,
   };
 }
@@ -149,6 +154,7 @@ export function mergeSettings(
       input.feedbackConditionId ?? current.feedbackConditionId,
       options
     ),
+    sessionPurpose: normalizeSessionPurpose(input.sessionPurpose ?? current.sessionPurpose),
     realtimeResetting:
       typeof input.realtimeResetting === 'boolean'
         ? input.realtimeResetting
@@ -169,10 +175,15 @@ function rowToSettings(
       agentMode: row.agent_mode as AgentMode | undefined,
       agentRole: row.agent_role as AgentRole | undefined,
       feedbackConditionId: row.feedback_condition_id as string | undefined,
+      sessionPurpose: row.session_purpose as SessionPurpose | undefined,
       realtimeResetting: row.realtime_resetting === true,
     },
     options
   );
+}
+
+function hasValidSessionPurpose(value: unknown): value is SessionPurpose {
+  return value === 'evaluation' || value === 'practice';
 }
 
 function settingsToRow(settings: AppSettings, updatedBy?: string | null): AppSettingsRow {
@@ -185,6 +196,7 @@ function settingsToRow(settings: AppSettings, updatedBy?: string | null): AppSet
     agent_mode: settings.agentMode,
     agent_role: settings.agentRole,
     feedback_condition_id: settings.feedbackConditionId,
+    session_purpose: settings.sessionPurpose,
     realtime_resetting: settings.realtimeResetting,
     updated_by: updatedBy ?? null,
   };
@@ -231,7 +243,13 @@ async function readSupabaseSettings(
   }
 
   if (data) {
-    return rowToSettings(data as AppSettingsRow, options);
+    const row = data as AppSettingsRow;
+    const settings = rowToSettings(row, options);
+    if (allowsLocalFallback() && !hasValidSessionPurpose(row.session_purpose)) {
+      const localSettings = await readLocalSettings(options);
+      return { ...settings, sessionPurpose: localSettings.sessionPurpose };
+    }
+    return settings;
   }
 
   const defaults = normalizeSettings(DEFAULT_APP_SETTINGS, options);

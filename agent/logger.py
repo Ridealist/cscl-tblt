@@ -13,6 +13,13 @@ from urllib.request import Request, urlopen
 from uuid import UUID, uuid4
 
 LOGS_DIR = Path(__file__).parent.parent / "logs"
+SESSION_ACTIVITY_COLUMNS = (
+    "session_purpose",
+    "activity_type",
+    "evaluation_id",
+    "evaluation_prompt_id",
+    "evaluation_prompt_version",
+)
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +55,14 @@ def _agent_role(value: Any) -> str | None:
     return value if value in ("dominant", "collaborative") else None
 
 
+def _session_purpose(value: Any) -> str:
+    return "evaluation" if value == "evaluation" else "practice"
+
+
+def _activity_type(value: Any) -> str | None:
+    return value if value in ("free_conversation", "task_solution") else None
+
+
 class FileConversationWriter:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -62,6 +77,17 @@ class SupabaseConversationConfig:
     url: str
     key: str
     timeout: int = 5
+
+
+class SupabaseRequestError(RuntimeError):
+    def __init__(self, method: str, path: str, status: int, body: str) -> None:
+        super().__init__(
+            f"Supabase request failed: {method} {path} {status} {body[:300]}"
+        )
+        self.method = method
+        self.path = path
+        self.status = status
+        self.body = body
 
 
 class SupabaseConversationWriter:
@@ -83,6 +109,7 @@ class SupabaseConversationWriter:
         self._class_session_id = class_session_id or str(uuid4())
         self._session_ready = False
         self._last_metadata_json: str | None = None
+        self._supports_session_activity_columns = True
 
     @classmethod
     def from_env(
@@ -123,11 +150,10 @@ class SupabaseConversationWriter:
             self._ensure_session_locked()
             if metadata_json == self._last_metadata_json:
                 return
-            payload = self._session_payload(metadata)
-            self._request(
+            self._write_class_session(
                 "PATCH",
                 f"class_sessions?id=eq.{quote(self._class_session_id or '', safe='')}",
-                payload,
+                metadata,
                 prefer="return=minimal",
             )
             self._last_metadata_json = metadata_json
@@ -170,12 +196,11 @@ class SupabaseConversationWriter:
     def end_session(self, metadata: dict) -> None:
         with self._lock:
             self._ensure_session_locked()
-            payload = self._session_payload(metadata)
-            payload["ended_at"] = _utc_timestamp()
-            self._request(
+            self._write_class_session(
                 "PATCH",
                 f"class_sessions?id=eq.{quote(self._class_session_id or '', safe='')}",
-                payload,
+                metadata,
+                extra_payload={"ended_at": _utc_timestamp()},
                 prefer="return=minimal",
             )
             log.info(
@@ -191,10 +216,10 @@ class SupabaseConversationWriter:
         if self._session_ready:
             return
 
-        rows = self._request(
+        rows = self._write_class_session(
             "POST",
             "class_sessions?on_conflict=id&select=id",
-            self._session_payload(self.metadata),
+            self.metadata,
             prefer="resolution=merge-duplicates,return=representation",
         )
         if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
@@ -216,9 +241,9 @@ class SupabaseConversationWriter:
             self.room_name,
         )
 
-    def _session_payload(self, metadata: dict) -> dict:
+    def _session_payload(self, metadata: dict, *, include_session_activity_columns: bool) -> dict:
         agent_mode = _agent_mode(metadata.get("agent_mode"))
-        return {
+        payload = {
             "id": self._class_session_id,
             "livekit_session_id": self.livekit_session_id,
             "room_name": self.room_name,
@@ -231,6 +256,60 @@ class SupabaseConversationWriter:
             "recording_path": _optional_text(metadata.get("recording_path")),
             "metadata": metadata,
         }
+        if include_session_activity_columns:
+            payload.update(
+                {
+                    "session_purpose": _session_purpose(metadata.get("session_purpose")),
+                    "activity_type": _activity_type(metadata.get("activity_type")),
+                    "evaluation_id": _optional_text(metadata.get("evaluation_id")),
+                    "evaluation_prompt_id": _optional_text(metadata.get("evaluation_prompt_id")),
+                    "evaluation_prompt_version": _optional_text(
+                        metadata.get("evaluation_prompt_version")
+                    ),
+                }
+            )
+        return payload
+
+    def _write_class_session(
+        self,
+        method: str,
+        path: str,
+        metadata: dict,
+        *,
+        extra_payload: dict | None = None,
+        prefer: str | None = None,
+    ) -> Any:
+        payload = self._session_payload(
+            metadata,
+            include_session_activity_columns=self._supports_session_activity_columns,
+        )
+        if extra_payload:
+            payload.update(extra_payload)
+        try:
+            return self._request(method, path, payload, prefer=prefer)
+        except SupabaseRequestError as exc:
+            if not self._is_missing_session_activity_column_error(exc):
+                raise
+
+            self._supports_session_activity_columns = False
+            log.warning(
+                "Supabase class_sessions schema is missing evaluation/session columns; "
+                "retrying without dedicated columns. Apply the latest migration to enable "
+                "Supabase column filtering for evaluation logs."
+            )
+            payload = self._session_payload(
+                metadata,
+                include_session_activity_columns=False,
+            )
+            if extra_payload:
+                payload.update(extra_payload)
+            return self._request(method, path, payload, prefer=prefer)
+
+    def _is_missing_session_activity_column_error(self, error: SupabaseRequestError) -> bool:
+        if error.status != 400 or "PGRST204" not in error.body:
+            return False
+        body = error.body.lower()
+        return any(column in body for column in SESSION_ACTIVITY_COLUMNS)
 
     def _request(
         self,
@@ -262,9 +341,7 @@ class SupabaseConversationWriter:
                 body = response.read().decode("utf-8")
         except HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(
-                f"Supabase request failed: {method} {path} {exc.code} {body[:300]}"
-            ) from exc
+            raise SupabaseRequestError(method, path, exc.code, body) from exc
         except (TimeoutError, URLError, OSError) as exc:
             raise RuntimeError(f"Supabase request failed: {method} {path}") from exc
 

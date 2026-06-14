@@ -39,6 +39,14 @@ class SettingsStoreError extends Error {
   }
 }
 
+class EvaluationPromptSourceError extends Error {
+  constructor(message, status = 500) {
+    super(message);
+    this.name = 'EvaluationPromptSourceError';
+    this.status = status;
+  }
+}
+
 const CUSTOM_PROMPT_VERSION = {
   promptId: '00000000-0000-4000-8000-000000000035',
   savedAt: '2026-06-12T00:00:00.000Z',
@@ -208,6 +216,37 @@ function loadTokenRoute(options = {}) {
           readActiveRealtimePromptVersion: async () => options.activePromptVersion ?? null,
         };
       }
+      if (specifier === '@/lib/evaluation-prompt-source') {
+        return {
+          EvaluationPromptSourceError,
+          readEvaluationPromptState: async ({ evaluationId } = {}) =>
+            options.evaluationPromptState ?? {
+              source: 'evaluation',
+              usingDefault: !evaluationId,
+              evaluationId: evaluationId ?? 'pretest_6_10',
+              evaluationPromptId: 'pretest_6_10',
+              evaluationPromptVersion: '2026-06-10',
+              evaluationCharacter: 'Kate',
+              openingSentence: 'Hi, I’m Kate. I’m new here. Nice to meet you!',
+              prompt: '# PRE-TEST INTERACTION PROMPT: Kate',
+              evaluations: [],
+            },
+        };
+      }
+      if (specifier === '@/lib/session-activity') {
+        return {
+          getActivityTypeForSessionPurpose: (sessionPurpose) =>
+            sessionPurpose === 'evaluation' ? 'free_conversation' : 'task_solution',
+          getSessionPurposeForActivity: (activityType) =>
+            activityType === 'free_conversation' ? 'evaluation' : 'practice',
+          normalizeActivityType: (value) =>
+            value === 'free_conversation' ? 'free_conversation' : 'task_solution',
+          normalizeSessionPurpose: (value, activityType) =>
+            value === 'evaluation' || activityType === 'free_conversation'
+              ? 'evaluation'
+              : 'practice',
+        };
+      }
       if (specifier === '@/lib/settings-store') {
         return {
           SettingsStoreError,
@@ -219,6 +258,7 @@ function loadTokenRoute(options = {}) {
             agentMode: 'realtime',
             agentRole: 'dominant',
             feedbackConditionId: 'no_corrective',
+            sessionPurpose: options.sessionPurpose ?? 'practice',
             realtimeResetting: false,
           }),
         };
@@ -241,7 +281,7 @@ function loadTokenRoute(options = {}) {
   return { exports, accessTokens, createdDispatches, createdRooms };
 }
 
-test('token route creates a named LiveKit room config with agent dispatch', async () => {
+test('token route creates a named realtime room config for token-based agent dispatch', async () => {
   const { exports, accessTokens, createdDispatches, createdRooms } = loadTokenRoute({
     activePromptVersion: CUSTOM_PROMPT_VERSION,
   });
@@ -270,19 +310,172 @@ test('token route creates a named LiveKit room config with agent dispatch', asyn
   const metadata = JSON.parse(token.assignedRoomConfig.agents[0].metadata);
   assert.equal(metadata.promptVersionId, CUSTOM_PROMPT_VERSION.promptId);
   assert.equal(metadata.promptSource, 'custom');
+  assert.equal(metadata.sessionPurpose, 'practice');
+  assert.equal(metadata.activityType, 'task_solution');
   assert.equal(metadata.studentId, 'student-id-1');
   assert.equal(metadata.studentNumber, '20260001');
   assert.equal(metadata.studentDisplayName, 'Debug User');
   assert.equal(metadata.studentClassNumber, 9);
   assert.equal(metadata.studentRollNumber, 2);
 
-  assert.equal(createdRooms.length, 1);
-  assert.equal(createdRooms[0].name, 'realtime-debug-room');
-  assert.equal(createdRooms[0].metadata, token.assignedRoomConfig.metadata);
-  assert.equal(createdDispatches.length, 1);
-  assert.equal(createdDispatches[0].roomName, 'realtime-debug-room');
-  assert.equal(createdDispatches[0].agentName, 'realtime-agent');
-  assert.deepEqual(JSON.parse(createdDispatches[0].options.metadata), metadata);
+  assert.equal(createdRooms.length, 0);
+  assert.equal(createdDispatches.length, 0);
+});
+
+test('token route marks eval-prefixed realtime rooms as evaluation sessions', async () => {
+  const { exports, accessTokens, createdDispatches, createdRooms } = loadTokenRoute({
+    activePromptVersion: CUSTOM_PROMPT_VERSION,
+    evaluationPromptState: {
+      source: 'evaluation',
+      usingDefault: false,
+      evaluationId: 'pretest_6_10',
+      evaluationPromptId: 'manifest-prompt-id',
+      evaluationPromptVersion: 'manifest-version-1',
+      evaluationCharacter: 'Kate',
+      openingSentence: "Hi, I’m Kate. I’m new here. Nice to meet you!",
+      prompt: '# PRE-TEST INTERACTION PROMPT: Kate',
+      evaluations: [],
+    },
+    sessionPurpose: 'evaluation',
+  });
+
+  const response = await exports.POST({
+    json: async () => ({
+      display_name: 'Debug User',
+      room_name: 'eval-9-minji-kim-a1b2c3d4',
+      agent_mode: 'realtime',
+      activity_type: 'free_conversation',
+      session_purpose: 'evaluation',
+      evaluation_id: 'pretest_6_10',
+    }),
+  });
+
+  assert.equal(response.status, 200);
+
+  const token = accessTokens[0];
+  assert.equal(token.grant.room, 'eval-9-minji-kim-a1b2c3d4');
+  assert.equal(token.assignedRoomConfig.agents[0].agentName, 'realtime-agent');
+  const metadata = JSON.parse(token.assignedRoomConfig.metadata);
+  assert.equal(metadata.agentMode, 'realtime');
+  assert.equal(metadata.sessionPurpose, 'evaluation');
+  assert.equal(metadata.activityType, 'free_conversation');
+  assert.equal(metadata.evaluationCharacter, 'Kate');
+  assert.equal(metadata.evaluationId, 'pretest_6_10');
+  assert.equal(metadata.evaluationPromptId, 'manifest-prompt-id');
+  assert.equal(metadata.evaluationPromptVersion, 'manifest-version-1');
+  assert.equal(metadata.promptVersionId, undefined);
+  assert.equal(metadata.promptSource, undefined);
+  assert.equal(createdRooms.length, 0);
+  assert.equal(createdDispatches.length, 0);
+});
+
+test('token route rejects stale eval room requests when admin purpose is practice', async () => {
+  const { exports, accessTokens } = loadTokenRoute({ sessionPurpose: 'practice' });
+
+  const response = await exports.POST({
+    json: async () => ({
+      display_name: 'Debug User',
+      room_name: 'eval-9-minji-kim-a1b2c3d4',
+      agent_mode: 'realtime',
+      activity_type: 'free_conversation',
+      session_purpose: 'evaluation',
+    }),
+  });
+
+  assert.equal(response.status, 409);
+  assert.equal(response.jsonBody.code, 'session_purpose_mismatch');
+  assert.equal(response.jsonBody.expectedSessionPurpose, 'practice');
+  assert.equal(response.jsonBody.requestedSessionPurpose, 'evaluation');
+  assert.match(response.jsonBody.error, /잠시 후 활동 선택 화면이 바뀌면 다시 입장해주세요/);
+  assert.equal(accessTokens.length, 0);
+});
+
+test('token route rejects stale task room requests when admin purpose is evaluation', async () => {
+  const { exports, accessTokens } = loadTokenRoute({ sessionPurpose: 'evaluation' });
+
+  const response = await exports.POST({
+    json: async () => ({
+      display_name: 'Debug User',
+      room_name: 'task-9-minji-kim-a1b2c3d4',
+      agent_mode: 'realtime',
+      activity_type: 'task_solution',
+      session_purpose: 'practice',
+    }),
+  });
+
+  assert.equal(response.status, 409);
+  assert.equal(response.jsonBody.code, 'session_purpose_mismatch');
+  assert.equal(response.jsonBody.expectedSessionPurpose, 'evaluation');
+  assert.equal(response.jsonBody.requestedSessionPurpose, 'practice');
+  assert.equal(accessTokens.length, 0);
+});
+
+test('token route rejects realtime requests with conflicting purpose signals', async () => {
+  const { exports, accessTokens } = loadTokenRoute({ sessionPurpose: 'evaluation' });
+
+  const response = await exports.POST({
+    json: async () => ({
+      display_name: 'Debug User',
+      room_name: 'eval-9-minji-kim-a1b2c3d4',
+      agent_mode: 'realtime',
+      activity_type: 'task_solution',
+      session_purpose: 'evaluation',
+    }),
+  });
+
+  assert.equal(response.status, 409);
+  assert.equal(response.jsonBody.code, 'session_purpose_mismatch');
+  assert.equal(response.jsonBody.expectedSessionPurpose, 'evaluation');
+  assert.equal(response.jsonBody.requestedSessionPurpose, 'practice');
+  assert.equal(accessTokens.length, 0);
+});
+
+test('token route reports stale room purpose when room and body disagree', async () => {
+  const { exports, accessTokens } = loadTokenRoute({ sessionPurpose: 'practice' });
+
+  const response = await exports.POST({
+    json: async () => ({
+      display_name: 'Debug User',
+      room_name: 'eval-9-minji-kim-a1b2c3d4',
+      agent_mode: 'realtime',
+      activity_type: 'free_conversation',
+      session_purpose: 'practice',
+    }),
+  });
+
+  assert.equal(response.status, 409);
+  assert.equal(response.jsonBody.code, 'session_purpose_mismatch');
+  assert.equal(response.jsonBody.expectedSessionPurpose, 'practice');
+  assert.equal(response.jsonBody.requestedSessionPurpose, 'evaluation');
+  assert.equal(accessTokens.length, 0);
+});
+
+test('token route marks task-prefixed realtime rooms as practice sessions', async () => {
+  const { exports, accessTokens, createdDispatches, createdRooms } = loadTokenRoute({
+    activePromptVersion: CUSTOM_PROMPT_VERSION,
+  });
+
+  const response = await exports.POST({
+    json: async () => ({
+      display_name: 'Debug User',
+      room_name: 'task-9-minji-kim-a1b2c3d4',
+      agent_mode: 'realtime',
+      activity_type: 'task_solution',
+      session_purpose: 'practice',
+    }),
+  });
+
+  assert.equal(response.status, 200);
+
+  const metadata = JSON.parse(accessTokens[0].assignedRoomConfig.metadata);
+  assert.equal(metadata.agentMode, 'realtime');
+  assert.equal(metadata.sessionPurpose, 'practice');
+  assert.equal(metadata.activityType, 'task_solution');
+  assert.equal(metadata.promptVersionId, CUSTOM_PROMPT_VERSION.promptId);
+  assert.equal(metadata.promptSource, 'custom');
+  assert.equal(metadata.taskCardId, CUSTOM_PROMPT_VERSION.taskCardId);
+  assert.equal(createdRooms.length, 0);
+  assert.equal(createdDispatches.length, 0);
 });
 
 test('token route explicitly dispatches the pipeline agent for pipeline rooms', async () => {
