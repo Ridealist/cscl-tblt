@@ -12,6 +12,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { useAgentErrors } from '@/hooks/useAgentErrors';
 import { useDebugMode } from '@/hooks/useDebug';
 import type { AgentMode } from '@/lib/agent-mode';
+import type { ActivityType, SessionPurpose } from '@/lib/session-activity';
 import type { StudentProfile } from '@/lib/student';
 import { getSandboxTokenSource } from '@/lib/utils';
 
@@ -33,6 +34,9 @@ export function App({ appConfig }: AppProps) {
     displayName: string;
     roomName: string;
     agentMode: AgentMode;
+    activityType?: ActivityType;
+    evaluationId?: string;
+    sessionPurpose?: SessionPurpose;
   } | null>(null);
   const hadConnectedSessionRef = useRef(false);
   const [, forceRender] = useState(0);
@@ -77,6 +81,9 @@ export function App({ appConfig }: AppProps) {
           display_name: info.displayName,
           room_name: info.roomName,
           agent_mode: info.agentMode,
+          ...(info.activityType ? { activity_type: info.activityType } : {}),
+          ...(info.sessionPurpose ? { session_purpose: info.sessionPurpose } : {}),
+          ...(info.evaluationId ? { evaluation_id: info.evaluationId } : {}),
         }),
       });
       if (!res.ok) {
@@ -114,8 +121,17 @@ export function App({ appConfig }: AppProps) {
   }, [session.isConnected]);
 
   const handleJoin = useCallback(
-    (displayName: string, roomName: string, agentMode: AgentMode) => {
-      sessionInfoRef.current = { displayName, roomName, agentMode };
+    (
+      displayName: string,
+      roomName: string,
+      agentMode: AgentMode,
+      options?: {
+        activityType?: ActivityType;
+        evaluationId?: string;
+        sessionPurpose?: SessionPurpose;
+      }
+    ) => {
+      sessionInfoRef.current = { displayName, roomName, agentMode, ...options };
       setSessionNotice(null);
       forceRender((n) => n + 1);
       void session.start({ tracks: { microphone: { enabled: false } } }).catch((error) => {
@@ -149,6 +165,7 @@ export function App({ appConfig }: AppProps) {
           onJoin={handleJoin}
           onStudentLogin={setStudent}
           onStudentLogout={handleStudentLogout}
+          sessionActivityType={sessionInfoRef.current?.activityType}
           sessionNotice={sessionNotice}
           student={student}
         />
