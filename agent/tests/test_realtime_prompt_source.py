@@ -51,7 +51,6 @@ def test_prompt_sources_are_read_as_realtime_prompt_config() -> None:
         "feedbackPrompt",
         "taskCardId",
         "taskCardPrompt",
-        "conversationExamplePrompts",
     }
     for key in check_prompts.PROMPT_FIELDS:
         assert config["realtime"][key] == (SOURCE_PATH / manifest[key]["file"]).read_text(
@@ -61,12 +60,6 @@ def test_prompt_sources_are_read_as_realtime_prompt_config() -> None:
     assert config["realtime"]["taskCardPrompt"] == (
         task_cards[task_card_id]["base_path"] / task_cards[task_card_id]["file"]
     ).read_text(encoding="utf-8").strip()
-    assert set(config["realtime"]["conversationExamplePrompts"]) == {
-        "dominant.no_corrective",
-        "dominant.explicit_correction",
-        "collaborative.no_corrective",
-        "collaborative.explicit_correction",
-    }
 
 
 def test_prompt_source_parser_splits_pasted_document_sections() -> None:
@@ -207,144 +200,6 @@ def test_prompt_folder_rejects_missing_file(tmp_path) -> None:
         assert "base.md" in str(exc)
     else:
         raise AssertionError("expected missing prompt file to fail")
-
-
-def test_prompt_folder_reads_optional_conversation_examples(tmp_path) -> None:
-    check_prompts = _load_check_module()
-    source = tmp_path / "realtime"
-    source.mkdir()
-    (source / "roles").mkdir()
-    (source / "manifest.json").write_text(
-        """
-        {
-          "basePrompt": {"file": "base.md", "marker": "# BASE PROMPT:"},
-          "dominantPrompt": {
-            "file": "roles/dominant.md",
-            "marker": "# INTERLOCUTOR ROLE PROMPT: Dominant"
-          },
-          "collaborativePrompt": {
-            "file": "roles/collaborative.md",
-            "marker": "# INTERLOCUTOR ROLE PROMPT: Collaborative"
-          },
-          "feedbackConditionManifest": "feedbacks/manifest.json",
-          "defaultFeedbackConditionId": "no_corrective",
-          "taskCardManifest": "task-cards/manifest.json",
-          "defaultTaskCardId": "example"
-        }
-        """,
-        encoding="utf-8",
-    )
-    _write_feedback_source(source)
-    task_cards = source / "task-cards"
-    examples = task_cards / "examples"
-    examples.mkdir(parents=True)
-    (task_cards / "manifest.json").write_text(
-        """
-        {
-          "example": {
-            "file": "task_card.md",
-            "marker": "# TASK CARD:",
-            "examples": {
-              "dominant": {
-                "file": "examples/example.dominant.md",
-                "marker": "# CONVERSATION EXAMPLE: Dominant"
-              }
-            }
-          }
-        }
-        """,
-        encoding="utf-8",
-    )
-    (source / "base.md").write_text("# BASE PROMPT: Example\nbase", encoding="utf-8")
-    (source / "roles" / "dominant.md").write_text(
-        "# INTERLOCUTOR ROLE PROMPT: Dominant\ndominant",
-        encoding="utf-8",
-    )
-    (source / "roles" / "collaborative.md").write_text(
-        "# INTERLOCUTOR ROLE PROMPT: Collaborative\ncollab",
-        encoding="utf-8",
-    )
-    (task_cards / "task_card.md").write_text("# TASK CARD: Example\ntask", encoding="utf-8")
-    (examples / "example.dominant.md").write_text(
-        "# CONVERSATION EXAMPLE: Dominant\ndominant example",
-        encoding="utf-8",
-    )
-
-    config = check_prompts.read_prompt_folder(source)
-
-    assert config["realtime"]["conversationExamplePrompts"] == {
-        "dominant.default": "# CONVERSATION EXAMPLE: Dominant\ndominant example"
-    }
-
-
-def test_prompt_folder_rejects_wrong_conversation_example_heading(tmp_path) -> None:
-    check_prompts = _load_check_module()
-    source = tmp_path / "realtime"
-    source.mkdir()
-    (source / "roles").mkdir()
-    (source / "manifest.json").write_text(
-        """
-        {
-          "basePrompt": {"file": "base.md", "marker": "# BASE PROMPT:"},
-          "dominantPrompt": {
-            "file": "roles/dominant.md",
-            "marker": "# INTERLOCUTOR ROLE PROMPT: Dominant"
-          },
-          "collaborativePrompt": {
-            "file": "roles/collaborative.md",
-            "marker": "# INTERLOCUTOR ROLE PROMPT: Collaborative"
-          },
-          "feedbackConditionManifest": "feedbacks/manifest.json",
-          "defaultFeedbackConditionId": "no_corrective",
-          "taskCardManifest": "task-cards/manifest.json",
-          "defaultTaskCardId": "example"
-        }
-        """,
-        encoding="utf-8",
-    )
-    _write_feedback_source(source)
-    task_cards = source / "task-cards"
-    examples = task_cards / "examples"
-    examples.mkdir(parents=True)
-    (task_cards / "manifest.json").write_text(
-        """
-        {
-          "example": {
-            "file": "task_card.md",
-            "marker": "# TASK CARD:",
-            "examples": {
-              "dominant": {
-                "file": "examples/example.dominant.md",
-                "marker": "# CONVERSATION EXAMPLE: Dominant"
-              }
-            }
-          }
-        }
-        """,
-        encoding="utf-8",
-    )
-    (source / "base.md").write_text("# BASE PROMPT: Example\nbase", encoding="utf-8")
-    (source / "roles" / "dominant.md").write_text(
-        "# INTERLOCUTOR ROLE PROMPT: Dominant\ndominant",
-        encoding="utf-8",
-    )
-    (source / "roles" / "collaborative.md").write_text(
-        "# INTERLOCUTOR ROLE PROMPT: Collaborative\ncollab",
-        encoding="utf-8",
-    )
-    (task_cards / "task_card.md").write_text("# TASK CARD: Example\ntask", encoding="utf-8")
-    (examples / "example.dominant.md").write_text(
-        "# WRONG HEADING\ndominant example",
-        encoding="utf-8",
-    )
-
-    try:
-        check_prompts.read_prompt_folder(source)
-    except ValueError as exc:
-        assert "example.dominant.md" in str(exc)
-        assert "# CONVERSATION EXAMPLE: Dominant" in str(exc)
-    else:
-        raise AssertionError("expected wrong conversation example heading to fail")
 
 
 def test_prompt_folder_rejects_incomplete_manifest(tmp_path) -> None:

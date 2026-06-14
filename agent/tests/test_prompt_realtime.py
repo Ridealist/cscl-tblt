@@ -38,35 +38,20 @@ def _read_default_prompt_sources():
     config["taskCardPrompt"] = (
         source_dir / "task-cards" / task_cards[task_card_id]["file"]
     ).read_text(encoding="utf-8").strip()
-    examples = task_cards[task_card_id].get("examples", {})
-    conversation_examples = {}
-    for role, role_examples in examples.items():
-        for feedback_condition_id, example in role_examples.items():
-            conversation_examples[f"{role}.{feedback_condition_id}"] = (
-                source_dir / "task-cards" / example["file"]
-            ).read_text(encoding="utf-8").strip()
-    if conversation_examples:
-        config["conversationExamplePrompts"] = conversation_examples
     return config
 
 
 def _expected_prompt(config, role: str) -> str:
     role_key = f"{role}Prompt"
-    prompt = (
+    return (
         f"{config['basePrompt']}\n\n{config[role_key]}\n\n"
         f"{config['feedbackPrompt']}\n\n{config['taskCardPrompt']}"
     )
-    feedback_condition_id = normalize_feedback_condition(config.get("feedbackConditionId"))
-    example = config.get("conversationExamplePrompts", {}).get(
-        f"{role}.{feedback_condition_id}"
-    ) or config.get("conversationExamplePrompts", {}).get(role)
-    return f"{prompt}\n\n{example}" if example else prompt
 
 
-def _write_prompt_source_with_examples(source_dir):
+def _write_prompt_source(source_dir):
     task_cards_dir = source_dir / "task-cards"
-    examples_dir = task_cards_dir / "examples"
-    examples_dir.mkdir(parents=True)
+    task_cards_dir.mkdir(parents=True)
     (source_dir / "manifest.json").write_text(
         """
         {
@@ -126,51 +111,13 @@ def _write_prompt_source_with_examples(source_dir):
         {
           "example": {
             "file": "task_card.md",
-            "marker": "# TASK CARD:",
-            "examples": {
-              "dominant": {
-                "no_corrective": {
-                  "file": "examples/example.dominant.no_fb.md",
-                  "marker": "# CONVERSATION EXAMPLE: Dominant + No Corrective Feedback"
-                },
-                "explicit_correction": {
-                  "file": "examples/example.dominant.explicit_fb.md",
-                  "marker": "# CONVERSATION EXAMPLE: Dominant + Explicit Correction"
-                }
-              },
-              "collaborative": {
-                "no_corrective": {
-                  "file": "examples/example.collaborative.no_fb.md",
-                  "marker": "# CONVERSATION EXAMPLE: Collaborative + No Corrective Feedback"
-                },
-                "explicit_correction": {
-                  "file": "examples/example.collaborative.explicit_fb.md",
-                  "marker": "# CONVERSATION EXAMPLE: Collaborative + Explicit Correction"
-                }
-              }
-            }
+            "marker": "# TASK CARD:"
           }
         }
         """,
         encoding="utf-8",
     )
     (task_cards_dir / "task_card.md").write_text("# TASK CARD: Example\ntask", encoding="utf-8")
-    (examples_dir / "example.dominant.no_fb.md").write_text(
-        "# CONVERSATION EXAMPLE: Dominant + No Corrective Feedback\ndominant no feedback example",
-        encoding="utf-8",
-    )
-    (examples_dir / "example.dominant.explicit_fb.md").write_text(
-        "# CONVERSATION EXAMPLE: Dominant + Explicit Correction\ndominant explicit feedback example",
-        encoding="utf-8",
-    )
-    (examples_dir / "example.collaborative.no_fb.md").write_text(
-        "# CONVERSATION EXAMPLE: Collaborative + No Corrective Feedback\ncollaborative no feedback example",
-        encoding="utf-8",
-    )
-    (examples_dir / "example.collaborative.explicit_fb.md").write_text(
-        "# CONVERSATION EXAMPLE: Collaborative + Explicit Correction\ncollaborative explicit feedback example",
-        encoding="utf-8",
-    )
 
 
 def test_realtime_prompt_builds_dominant_from_markdown_sources(
@@ -294,7 +241,6 @@ def test_realtime_prompt_uses_runtime_feedback_condition_id(
 
     assert "# FEEDBACK CONDITION PROMPT: Explicit Correction" in prompt
     assert "# FEEDBACK CONDITION PROMPT: No Corrective Feedback" not in prompt
-    assert "# CONVERSATION EXAMPLE: Dominant + Explicit Correction" in prompt
 
 
 def test_realtime_prompt_call_feedback_condition_overrides_runtime_selection(
@@ -323,7 +269,6 @@ def test_realtime_prompt_call_feedback_condition_overrides_runtime_selection(
 
     assert "# FEEDBACK CONDITION PROMPT: No Corrective Feedback" in prompt
     assert "# FEEDBACK CONDITION PROMPT: Explicit Correction" not in prompt
-    assert "# CONVERSATION EXAMPLE: Dominant + No Corrective Feedback" in prompt
 
 
 def test_realtime_prompt_uses_runtime_feedback_prompt_for_selected_condition(
@@ -356,7 +301,6 @@ def test_realtime_prompt_uses_runtime_feedback_prompt_for_selected_condition(
     assert "Runtime explicit feedback condition." in prompt
     assert "# FEEDBACK CONDITION PROMPT: Explicit Correction" not in prompt
     assert "# TASK CARD: Our Class Morning Exercise Challenge" in prompt
-    assert "# CONVERSATION EXAMPLE: Dominant + Explicit Correction" in prompt
 
 
 def test_realtime_prompt_call_task_card_id_overrides_runtime_selection(
@@ -383,7 +327,7 @@ def test_realtime_prompt_call_task_card_id_overrides_runtime_selection(
     assert "# TASK CARD: Plan a School Event and Invite Friends" not in prompt
 
 
-def test_realtime_prompt_uses_runtime_task_card_and_examples_for_selected_card(
+def test_realtime_prompt_uses_runtime_task_card_for_selected_card(
     tmp_path, monkeypatch
 ) -> None:
     config_path = tmp_path / "prompt_config.json"
@@ -400,10 +344,7 @@ def test_realtime_prompt_uses_runtime_task_card_and_examples_for_selected_card(
             "taskCardId": "morning_exercise_challenge",
             "taskCards": {
               "morning_exercise_challenge": {
-                "prompt": "# TASK CARD: Runtime Card\\n# Opening\\nRuntime opening.\\n# Details\\nruntime task.",
-                "conversationExamplePrompts": {
-                  "dominant.no_corrective": "# CONVERSATION EXAMPLE: Runtime\\nruntime example"
-                }
+                "prompt": "# TASK CARD: Runtime Card\\n# Opening\\nRuntime opening.\\n# Details\\nruntime task."
               }
             }
           }
@@ -422,7 +363,7 @@ def test_realtime_prompt_uses_runtime_task_card_and_examples_for_selected_card(
     assert "Runtime no-feedback condition." in prompt
     assert "# TASK CARD: Runtime Card" in prompt
     assert "# TASK CARD: Our Class Morning Exercise Challenge" not in prompt
-    assert prompt.endswith("# CONVERSATION EXAMPLE: Runtime\nruntime example")
+    assert prompt.endswith("# TASK CARD: Runtime Card\n# Opening\nRuntime opening.\n# Details\nruntime task.")
     assert get_opening_sentence("morning_exercise_challenge", "no_corrective") == "Runtime opening."
 
 
@@ -442,37 +383,12 @@ def test_realtime_opening_falls_back_when_task_card_has_no_opening(
 ) -> None:
     source_dir = tmp_path / "realtime"
     source_dir.mkdir()
-    _write_prompt_source_with_examples(source_dir)
+    _write_prompt_source(source_dir)
     monkeypatch.setattr(prompt_realtime, "DEFAULT_PROMPT_SOURCE_DIR", source_dir)
     monkeypatch.setattr(prompt_realtime, "PROMPT_SOURCE_MANIFEST_PATH", source_dir / "manifest.json")
     monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
 
     assert get_opening_sentence("example") == prompt_realtime.DEFAULT_OPENING_SENTENCE
-
-
-def test_realtime_prompt_appends_role_specific_conversation_example(tmp_path, monkeypatch) -> None:
-    source_dir = tmp_path / "realtime"
-    source_dir.mkdir()
-    _write_prompt_source_with_examples(source_dir)
-    monkeypatch.setattr(prompt_realtime, "DEFAULT_PROMPT_SOURCE_DIR", source_dir)
-    monkeypatch.setattr(prompt_realtime, "PROMPT_SOURCE_MANIFEST_PATH", source_dir / "manifest.json")
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
-
-    dominant_prompt = build_prompt(role="dominant")
-    collaborative_prompt = build_prompt(role="collaborative")
-
-    assert dominant_prompt.endswith(
-        "# TASK CARD: Example\ntask\n\n"
-        "# CONVERSATION EXAMPLE: Dominant + No Corrective Feedback\n"
-        "dominant no feedback example"
-    )
-    assert "# CONVERSATION EXAMPLE: Collaborative" not in dominant_prompt
-    assert collaborative_prompt.endswith(
-        "# TASK CARD: Example\ntask\n\n"
-        "# CONVERSATION EXAMPLE: Collaborative + No Corrective Feedback\n"
-        "collaborative no feedback example"
-    )
-    assert "# CONVERSATION EXAMPLE: Dominant" not in collaborative_prompt
 
 
 def test_realtime_prompt_uses_legacy_passive_prompt_runtime_config(
@@ -550,10 +466,7 @@ def test_realtime_prompt_uses_prompt_version_snapshot(tmp_path, monkeypatch) -> 
             "feedbackConditionId": "no_corrective",
             "feedbackPrompt": "Version feedback condition.",
             "taskCardId": "school_event_invitation",
-            "taskCardPrompt": "# TASK CARD: Version Card\\n# Opening\\nVersion opening.\\n# Details\\nVersion task card.",
-            "conversationExamplePrompts": {
-              "dominant.no_corrective": "# CONVERSATION EXAMPLE: Version\\nVersion example."
-            }
+            "taskCardPrompt": "# TASK CARD: Version Card\\n# Opening\\nVersion opening.\\n# Details\\nVersion task card."
           }
         }
         """,
@@ -583,49 +496,9 @@ def test_realtime_prompt_uses_prompt_version_snapshot(tmp_path, monkeypatch) -> 
         "Version base prompt.\n\nVersion dominant role.\n\n"
         "Version feedback condition.\n\n"
         "# TASK CARD: Version Card\n# Opening\nVersion opening.\n# Details\n"
-        "Version task card.\n\n"
-        "# CONVERSATION EXAMPLE: Version\nVersion example."
+        "Version task card."
     )
     assert get_opening_sentence(prompt_version_id="realtime-version") == "Version opening."
-
-
-def test_realtime_prompt_uses_default_example_key_from_version_snapshot(
-    tmp_path, monkeypatch
-) -> None:
-    versions_dir = tmp_path / "prompt_versions"
-    realtime_versions_dir = versions_dir / "realtime"
-    realtime_versions_dir.mkdir(parents=True)
-    (realtime_versions_dir / "realtime-version.json").write_text(
-        """
-        {
-          "schemaVersion": 1,
-          "purpose": "realtime",
-          "id": "realtime-version",
-          "label": "Realtime version",
-          "createdAt": "2026-06-13T01:00:00.000Z",
-          "hash": "hash",
-          "config": {
-            "basePrompt": "Version base prompt.",
-            "dominantPrompt": "Version dominant role.",
-            "collaborativePrompt": "Version collaborative role.",
-            "feedbackConditionId": "no_corrective",
-            "feedbackPrompt": "Version feedback condition.",
-            "taskCardId": "school_event_invitation",
-            "taskCardPrompt": "# TASK CARD: Version Card\\n# Opening\\nVersion opening.\\n# Details\\nVersion task card.",
-            "conversationExamplePrompts": {
-              "dominant.default": "# CONVERSATION EXAMPLE: Version Default\\nVersion default example."
-            }
-          }
-        }
-        """,
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(prompt_realtime, "PROMPT_VERSIONS_DIR", versions_dir)
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
-
-    prompt = build_prompt(role="dominant", prompt_version_id="realtime-version")
-
-    assert "# CONVERSATION EXAMPLE: Version Default\nVersion default example." in prompt
 
 
 def test_realtime_prompt_missing_default_source_fails(tmp_path, monkeypatch) -> None:

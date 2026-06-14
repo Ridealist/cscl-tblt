@@ -14,9 +14,7 @@ import {
 } from '@/lib/prompt-version-store';
 import {
   DEFAULT_REALTIME_PROMPT_METADATA,
-  type RealtimeConversationExamplePrompts,
   type RealtimeFeedbackConditionSummary,
-  type RealtimeFeedbackExamples,
   type RealtimePromptConfig,
   type RealtimePromptMetadata,
   type RealtimePromptState,
@@ -36,7 +34,6 @@ type PromptFileShape = {
 
 type StoredTaskCardPrompt = {
   prompt?: unknown;
-  conversationExamplePrompts?: unknown;
 };
 type StoredRealtimePrompt = Partial<RealtimePromptConfig> &
   Partial<RealtimePromptMetadata> & {
@@ -68,9 +65,6 @@ type TaskCardManifest = Record<
     topic?: string;
     level?: string;
     marker: string;
-    examples?: Partial<
-      Record<'dominant' | 'collaborative', Record<string, { file: string; marker: string }>>
-    >;
   }
 >;
 type PromptDefaults = RealtimePromptConfig & {
@@ -112,14 +106,8 @@ function readStoredFeedbackPrompts(
 function readStoredTaskCards(
   source: StoredRealtimePrompt | undefined,
   fallbackTaskCardId?: string
-): Record<
-  string,
-  { prompt?: string; conversationExamplePrompts: RealtimeConversationExamplePrompts }
-> {
-  const stored: Record<
-    string,
-    { prompt?: string; conversationExamplePrompts: RealtimeConversationExamplePrompts }
-  > = {};
+): Record<string, { prompt?: string }> {
+  const stored: Record<string, { prompt?: string }> = {};
 
   if (
     source?.taskCards &&
@@ -133,9 +121,8 @@ function readStoredTaskCards(
         typeof taskCard.prompt === 'string' && taskCard.prompt.trim()
           ? taskCard.prompt.trim()
           : undefined;
-      const conversationExamplePrompts = readStringMap(taskCard.conversationExamplePrompts);
-      if (prompt || Object.keys(conversationExamplePrompts).length > 0) {
-        stored[taskCardId] = { prompt, conversationExamplePrompts };
+      if (prompt) {
+        stored[taskCardId] = { prompt };
       }
     }
   }
@@ -148,66 +135,23 @@ function readStoredTaskCards(
   ) {
     stored[fallbackTaskCardId] = {
       prompt: source.taskCardPrompt.trim(),
-      conversationExamplePrompts: readStringMap(source.conversationExamplePrompts),
     };
   }
 
   return stored;
 }
 
-function getTaskCardExamplePrompts(
-  taskCard: RealtimeTaskCardSummary | undefined
-): RealtimeConversationExamplePrompts {
-  const prompts: RealtimeConversationExamplePrompts = {};
-  if (!taskCard?.examples) return prompts;
-
-  for (const role of ['dominant', 'collaborative'] as const) {
-    const roleExamples: RealtimeFeedbackExamples | undefined = taskCard.examples[role];
-    if (!roleExamples) continue;
-    for (const [feedbackConditionId, example] of Object.entries(roleExamples)) {
-      const key = feedbackConditionId === 'default' ? role : `${role}.${feedbackConditionId}`;
-      prompts[key] = example.prompt;
-    }
-  }
-
-  return prompts;
-}
-
 function applyTaskCardOverrides(
   taskCards: RealtimeTaskCardSummary[],
-  storedTaskCards: Record<
-    string,
-    { prompt?: string; conversationExamplePrompts: RealtimeConversationExamplePrompts }
-  >
+  storedTaskCards: Record<string, { prompt?: string }>
 ): RealtimeTaskCardSummary[] {
   return taskCards.map((taskCard) => {
     const stored = storedTaskCards[taskCard.id];
     if (!stored) return taskCard;
 
-    const examples: NonNullable<RealtimeTaskCardSummary['examples']> = {};
-    if (taskCard.examples?.dominant) {
-      examples.dominant = { ...taskCard.examples.dominant };
-    }
-    if (taskCard.examples?.collaborative) {
-      examples.collaborative = { ...taskCard.examples.collaborative };
-    }
-
-    for (const [key, prompt] of Object.entries(stored.conversationExamplePrompts)) {
-      const [role, feedbackConditionId = 'default'] = key.split('.');
-      if (role !== 'dominant' && role !== 'collaborative') continue;
-      examples[role] = examples[role] ? { ...examples[role] } : {};
-      const existing = examples[role]?.[feedbackConditionId];
-      examples[role][feedbackConditionId] = {
-        file: existing?.file ?? 'custom',
-        marker: existing?.marker ?? '',
-        prompt,
-      };
-    }
-
     return {
       ...taskCard,
       prompt: stored.prompt ?? taskCard.prompt,
-      ...(Object.keys(examples).length ? { examples } : {}),
     };
   });
 }
@@ -251,7 +195,6 @@ async function stateFromRealtimeVersion(
   const taskCards = applyTaskCardOverrides(defaults.taskCards, {
     [config.taskCardId]: {
       prompt: config.taskCardPrompt,
-      conversationExamplePrompts: config.conversationExamplePrompts,
     },
   });
   const versionMetadata = await readRealtimeVersionMetadata();
@@ -329,7 +272,6 @@ async function readDefaultPromptConfigForTask(
     feedbackPrompt: feedbackCondition.feedbackPrompt,
     taskCardId: taskCard.taskCardId,
     taskCardPrompt: taskCard.taskCardPrompt,
-    conversationExamplePrompts: taskCard.conversationExamplePrompts,
   });
   if (!result.ok) {
     throw new Error(result.error);
@@ -407,7 +349,6 @@ async function readTaskCardConfig(
 ): Promise<{
   taskCardId: string;
   taskCardPrompt: string;
-  conversationExamplePrompts: RealtimeConversationExamplePrompts;
   taskCards: RealtimeTaskCardSummary[];
 }> {
   if (manifest.taskCardPrompt?.file && manifest.taskCardPrompt.marker && !taskCardId) {
@@ -422,7 +363,6 @@ async function readTaskCardConfig(
     return {
       taskCardId: 'legacy_task_card',
       taskCardPrompt,
-      conversationExamplePrompts: {},
       taskCards: [
         {
           id: 'legacy_task_card',
@@ -454,66 +394,12 @@ async function readTaskCardConfig(
       if (!prompt.startsWith(entry.marker)) {
         throw new Error(`${entry.file} 파일은 ${entry.marker} 헤딩으로 시작해야 합니다.`);
       }
-      const examples: NonNullable<RealtimeTaskCardSummary['examples']> = {};
-      if (entry.examples) {
-        for (const role of ['dominant', 'collaborative'] as const) {
-          const roleExamples = entry.examples[role];
-          if (!roleExamples) continue;
-          examples[role] = {};
-
-          if ('file' in roleExamples || 'marker' in roleExamples) {
-            const legacyExample = roleExamples as unknown as { file?: string; marker?: string };
-            if (
-              typeof legacyExample.file !== 'string' ||
-              typeof legacyExample.marker !== 'string'
-            ) {
-              throw new Error(`${id} ${role} example 설정이 올바르지 않습니다.`);
-            }
-            const examplePrompt = (
-              await readFile(
-                join(DEFAULT_PROMPT_SOURCE_DIR, 'task-cards', legacyExample.file),
-                'utf-8'
-              )
-            ).trim();
-            if (!examplePrompt.startsWith(legacyExample.marker)) {
-              throw new Error(
-                `${legacyExample.file} 파일은 ${legacyExample.marker} 헤딩으로 시작해야 합니다.`
-              );
-            }
-            examples[role].default = {
-              file: legacyExample.file,
-              marker: legacyExample.marker,
-              prompt: examplePrompt,
-            };
-            continue;
-          }
-
-          for (const [feedbackConditionId, example] of Object.entries(roleExamples)) {
-            const examplePrompt = (
-              await readFile(join(DEFAULT_PROMPT_SOURCE_DIR, 'task-cards', example.file), 'utf-8')
-            ).trim();
-            if (!examplePrompt.startsWith(example.marker)) {
-              throw new Error(`${example.file} 파일은 ${example.marker} 헤딩으로 시작해야 합니다.`);
-            }
-            examples[role][feedbackConditionId] = {
-              file: example.file,
-              marker: example.marker,
-              prompt: examplePrompt,
-            };
-          }
-
-          if (Object.keys(examples[role]).length === 0) {
-            delete examples[role];
-          }
-        }
-      }
       return {
         id,
         title: typeof entry.title === 'string' && entry.title ? entry.title : id,
         topic: typeof entry.topic === 'string' && entry.topic ? entry.topic : null,
         level: typeof entry.level === 'string' && entry.level ? entry.level : null,
         prompt,
-        ...(Object.keys(examples).length ? { examples } : {}),
       };
     })
   );
@@ -524,13 +410,9 @@ async function readTaskCardConfig(
   }
   const taskCardPrompt =
     taskCards.find((taskCard) => taskCard.id === selectedTaskCardId)?.prompt ?? '';
-  const conversationExamplePrompts = getTaskCardExamplePrompts(
-    taskCards.find((taskCard) => taskCard.id === selectedTaskCardId)
-  );
   return {
     taskCardId: selectedTaskCardId,
     taskCardPrompt,
-    conversationExamplePrompts,
     taskCards,
   };
 }
@@ -613,9 +495,6 @@ async function readPromptConfig(options?: {
         storedFeedbackPrompts[defaults.feedbackConditionId] ?? defaults.feedbackPrompt,
       taskCardId: defaults.taskCardId,
       taskCardPrompt: selectedTaskCard?.prompt ?? defaults.taskCardPrompt,
-      conversationExamplePrompts: selectedTaskCard
-        ? getTaskCardExamplePrompts(selectedTaskCard)
-        : defaults.conversationExamplePrompts,
     });
     if (result.ok) {
       return {
@@ -697,12 +576,6 @@ export async function POST(req: Request) {
         typeof body?.taskCardPrompt === 'string' && body.taskCardPrompt.trim()
           ? body.taskCardPrompt
           : defaults.taskCardPrompt,
-      conversationExamplePrompts:
-        body?.conversationExamplePrompts &&
-        typeof body.conversationExamplePrompts === 'object' &&
-        !Array.isArray(body.conversationExamplePrompts)
-          ? body.conversationExamplePrompts
-          : defaults.conversationExamplePrompts,
     });
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 400 });
