@@ -171,11 +171,16 @@ const SESSION_ROW = {
   room_name: '1반-1그룹',
   agent_mode: 'realtime',
   agent_role: 'collaborative',
+  activity_type: 'free_conversation',
+  evaluation_id: 'pretest_6_10',
+  evaluation_prompt_id: 'pretest_6_10',
+  evaluation_prompt_version: '2026-06-10',
   feedback_condition_id: 'explicit_correction',
   task_card_id: 'school_event_invitation',
   prompt_version_id: '22222222-2222-4222-8222-222222222222',
   egress_id: 'egress-123',
   recording_path: 'recordings/1.mp3',
+  session_purpose: 'evaluation',
   metadata: {
     prompt_source: 'custom',
   },
@@ -201,7 +206,13 @@ test('readConversationLogSessions maps Supabase sessions and aggregates event co
     },
   });
 
-  const sessions = await readConversationLogSessions({ agentMode: 'realtime', limit: 20 });
+  const sessions = await readConversationLogSessions({
+    agentMode: 'realtime',
+    activityType: 'free_conversation',
+    evaluationId: 'pretest_6_10',
+    limit: 20,
+    sessionPurpose: 'evaluation',
+  });
 
   assert.deepEqual(plain(sessions), [
     {
@@ -216,17 +227,25 @@ test('readConversationLogSessions maps Supabase sessions and aggregates event co
       metadata: {
         agent_mode: 'realtime',
         agent_role: 'collaborative',
+        activity_type: 'free_conversation',
+        evaluation_id: 'pretest_6_10',
+        evaluation_prompt_id: 'pretest_6_10',
+        evaluation_prompt_version: '2026-06-10',
         feedback_condition_id: 'explicit_correction',
         task_card_id: 'school_event_invitation',
         prompt_version_id: '22222222-2222-4222-8222-222222222222',
         egress_id: 'egress-123',
         recording_path: 'recordings/1.mp3',
+        session_purpose: 'evaluation',
         prompt_source: 'custom',
       },
     },
   ]);
   assert.deepEqual(plain(calls.filters), [
     { table: 'class_sessions', column: 'agent_mode', value: 'realtime' },
+    { table: 'class_sessions', column: 'activity_type', value: 'free_conversation' },
+    { table: 'class_sessions', column: 'evaluation_id', value: 'pretest_6_10' },
+    { table: 'class_sessions', column: 'session_purpose', value: 'evaluation' },
   ]);
   assert.deepEqual(plain(calls.inFilters), [
     {
@@ -462,16 +481,19 @@ test('parseConversationLogSessionFilters normalizes supported query filters', ()
     plain(
       parseConversationLogSessionFilters(
         new URLSearchParams(
-          'agentMode=realtime&agentRole=collaborative&feedbackConditionId=explicit_correction&promptVersionId=abc&room=1%EB%B0%98-1%EA%B7%B8%EB%A3%B9&limit=10'
+          'agentMode=realtime&agentRole=collaborative&activityType=free_conversation&evaluationId=pretest_6_10&feedbackConditionId=explicit_correction&promptVersionId=abc&room=1%EB%B0%98-1%EA%B7%B8%EB%A3%B9&sessionPurpose=evaluation&limit=10'
         )
       )
     ),
     {
       agentMode: 'realtime',
       agentRole: 'collaborative',
+      activityType: 'free_conversation',
+      evaluationId: 'pretest_6_10',
       feedbackConditionId: 'explicit_correction',
       promptVersionId: 'abc',
       room: '1반-1그룹',
+      sessionPurpose: 'evaluation',
       limit: 10,
     }
   );
