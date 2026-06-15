@@ -20,6 +20,7 @@ SESSION_ACTIVITY_COLUMNS = (
     "evaluation_prompt_id",
     "evaluation_prompt_version",
 )
+EVENT_OPTIONAL_COLUMNS = ("student_name",)
 
 log = logging.getLogger(__name__)
 
@@ -118,6 +119,7 @@ class SupabaseConversationWriter:
         self._session_ready = False
         self._last_metadata_json: str | None = None
         self._supports_session_activity_columns = True
+        self._supports_event_student_name_column = True
 
     @classmethod
     def from_env(
@@ -176,26 +178,7 @@ class SupabaseConversationWriter:
 
         with self._lock:
             self._ensure_session_locked()
-            payload = [
-                {
-                    "session_id": self._class_session_id,
-                    "sequence": entry["sequence"],
-                    "role": entry["role"],
-                    "text": entry["text"],
-                    "participant_identity": entry.get("participant_identity"),
-                    "participant_name": entry.get("participant_name"),
-                    "student_id": entry.get("student_id"),
-                    "student_name": entry.get("student_name"),
-                    "created_at": entry["timestamp"],
-                }
-                for entry in entries
-            ]
-            self._request(
-                "POST",
-                "conversation_events",
-                payload,
-                prefer="return=minimal",
-            )
+            self._write_events(entries)
             log.info(
                 "Supabase conversation events inserted: class_session_id=%s count=%s last_sequence=%s",
                 self._class_session_id,
@@ -320,6 +303,60 @@ class SupabaseConversationWriter:
             return False
         body = error.body.lower()
         return any(column in body for column in SESSION_ACTIVITY_COLUMNS)
+
+    def _event_payload(self, entries: list[dict], *, include_student_name: bool) -> list[dict]:
+        payload = []
+        for entry in entries:
+            row = {
+                "session_id": self._class_session_id,
+                "sequence": entry["sequence"],
+                "role": entry["role"],
+                "text": entry["text"],
+                "participant_identity": entry.get("participant_identity"),
+                "participant_name": entry.get("participant_name"),
+                "student_id": entry.get("student_id"),
+                "created_at": entry["timestamp"],
+            }
+            if include_student_name:
+                row["student_name"] = entry.get("student_name")
+            payload.append(row)
+        return payload
+
+    def _write_events(self, entries: list[dict]) -> None:
+        payload = self._event_payload(
+            entries,
+            include_student_name=self._supports_event_student_name_column,
+        )
+        try:
+            self._request(
+                "POST",
+                "conversation_events",
+                payload,
+                prefer="return=minimal",
+            )
+            return
+        except SupabaseRequestError as exc:
+            if not self._is_missing_event_optional_column_error(exc):
+                raise
+
+            self._supports_event_student_name_column = False
+            log.warning(
+                "Supabase conversation_events schema is missing student_name; "
+                "retrying event insert without that optional column. Apply the latest "
+                "migration to retain student name snapshots in event rows."
+            )
+            self._request(
+                "POST",
+                "conversation_events",
+                self._event_payload(entries, include_student_name=False),
+                prefer="return=minimal",
+            )
+
+    def _is_missing_event_optional_column_error(self, error: SupabaseRequestError) -> bool:
+        if error.status != 400 or "PGRST204" not in error.body:
+            return False
+        body = error.body.lower()
+        return any(column in body for column in EVENT_OPTIONAL_COLUMNS)
 
     def _request(
         self,

@@ -87,7 +87,9 @@ function createQuery(table, options, calls) {
       const result =
         table === 'class_sessions'
           ? (options.sessionResult ?? { data: [], error: null })
-          : (options.eventResult ?? { data: [], error: null });
+          : Array.isArray(options.eventResults)
+            ? (options.eventResults[options.eventResultIndex++] ?? { data: [], error: null })
+            : (options.eventResult ?? { data: [], error: null });
       if (table === 'conversation_events' && query.rangeValue && Array.isArray(result.data)) {
         return Promise.resolve({
           ...result,
@@ -111,6 +113,7 @@ function createSupabaseClient(options, calls) {
 }
 
 function loadConversationLogStore(options = {}) {
+  options.eventResultIndex = 0;
   const calls = {
     filters: [],
     inFilters: [],
@@ -370,6 +373,45 @@ test('readConversationLogData maps Supabase event stream payload ordered by sequ
     { table: 'conversation_events', column: 'sequence', options: { ascending: true } },
     { table: 'conversation_events', column: 'created_at', options: { ascending: true } },
   ]);
+});
+
+test('readConversationLogData retries without student_name when Supabase schema is stale', async () => {
+  const { calls, readConversationLogData } = loadConversationLogStore({
+    singleResult: { data: SESSION_ROW, error: null },
+    eventResults: [
+      {
+        data: null,
+        error: {
+          code: 'PGRST204',
+          message: "Could not find the 'student_name' column of 'conversation_events'",
+        },
+      },
+      {
+        data: [
+          {
+            session_id: SESSION_ROW.id,
+            sequence: 1,
+            role: 'user',
+            text: 'I am free.',
+            participant_identity: 'student-1',
+            participant_name: 'Minji',
+            student_id: '22222222-2222-4222-8222-222222222222',
+            metadata: {},
+            created_at: '2026-06-12T01:00:01.000Z',
+          },
+        ],
+        error: null,
+      },
+    ],
+  });
+
+  const log = await readConversationLogData({ sessionId: SESSION_ROW.id });
+
+  assert.equal(log.entries.length, 1);
+  assert.equal(log.entries[0].student_name, undefined);
+  const eventSelects = calls.selects.filter((select) => select.table === 'conversation_events');
+  assert.equal(eventSelects[0].columns.includes('student_name'), true);
+  assert.equal(eventSelects[1].columns.includes('student_name'), false);
 });
 
 test('readConversationLogData paginates Supabase events for long streams', async () => {
