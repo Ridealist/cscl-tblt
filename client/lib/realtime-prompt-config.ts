@@ -1,5 +1,3 @@
-import type { PromptVersionSummary } from '@/lib/prompt-version-store';
-
 export interface RealtimePromptConfig {
   basePrompt: string;
   dominantPrompt: string;
@@ -34,13 +32,7 @@ export interface RealtimePromptMetadata {
 
 export type RealtimePromptState = RealtimePromptConfig &
   RealtimePromptMetadata & {
-    activePromptVersionId: string | null;
     feedbackConditions: RealtimeFeedbackConditionSummary[];
-    promptVersionCreatedAt: string | null;
-    promptVersionHash: string | null;
-    promptVersionId: string | null;
-    promptVersionLabel: string | null;
-    promptVersions: PromptVersionSummary[];
     taskCards: RealtimeTaskCardSummary[];
     usingDefault: boolean;
   };

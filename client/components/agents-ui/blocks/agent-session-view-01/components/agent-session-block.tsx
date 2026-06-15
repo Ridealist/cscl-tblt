@@ -167,7 +167,7 @@ export function AgentSessionView_01({
   supportsScreenShare = true,
   isPreConnectBufferEnabled = true,
   agentDisplayName = 'Kate',
-  agentAvatarSrc = '/agents/kate_photo.png',
+  agentAvatarSrc = '/agents/kate_photo_20260615.png',
 
   audioVisualizerType,
   audioVisualizerColor,
@@ -219,9 +219,9 @@ export function AgentSessionView_01({
             >
               <AgentChatTranscript
                 agentState={agentState}
-                messages={messages}
                 agentDisplayName={agentDisplayName}
                 agentAvatarSrc={agentAvatarSrc}
+                messages={messages}
                 className="mx-auto w-full max-w-2xl [&_.is-user>div]:rounded-[22px] [&>div>div]:px-4 [&>div>div]:pt-40 md:[&>div>div]:px-6"
               />
             </motion.div>

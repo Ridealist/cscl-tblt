@@ -55,7 +55,7 @@ export function AgentChatTranscript({
   messages = [],
   className,
   agentDisplayName = 'Kate',
-  agentAvatarSrc = '/agents/kate_photo.png',
+  agentAvatarSrc = '/agents/kate_photo_20260615.png',
   ...props
 }: AgentChatTranscriptProps) {
   return (

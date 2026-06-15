@@ -71,10 +71,49 @@ _install_livekit_mocks()
 
 from main import (  # noqa: E402
     _metadata_activity_context,
+    _metadata_prompt_version_id,
+    _metadata_student_context,
     _normalize_activity_context,
     _realtime_tts_extra_kwargs_for_session_purpose,
     _realtime_tts_voice_for_session_purpose,
 )
+
+
+def test_metadata_prompt_version_id_prefers_explicit_version_id() -> None:
+    metadata = json.dumps(
+        {
+            "agentMode": "realtime",
+            "promptId": "legacy-custom-id",
+            "promptVersionId": "active-version-id",
+            "promptSource": "custom",
+        }
+    )
+
+    assert _metadata_prompt_version_id(metadata) == "active-version-id"
+
+
+def test_metadata_prompt_version_id_falls_back_to_custom_prompt_id() -> None:
+    metadata = json.dumps(
+        {
+            "agentMode": "realtime",
+            "promptId": "custom-prompt-id",
+            "promptSource": "custom",
+        }
+    )
+
+    assert _metadata_prompt_version_id(metadata) == "custom-prompt-id"
+
+
+def test_metadata_prompt_version_id_ignores_default_prompt_id() -> None:
+    metadata = json.dumps(
+        {
+            "agentMode": "realtime",
+            "promptId": "default",
+            "promptSource": "default",
+        }
+    )
+
+    assert _metadata_prompt_version_id(metadata) is None
 
 
 def test_metadata_activity_context_maps_evaluation_fields() -> None:
@@ -97,6 +136,28 @@ def test_metadata_activity_context_maps_evaluation_fields() -> None:
         "evaluation_prompt_id": "pretest_6_10",
         "evaluation_prompt_version": "2026-06-10",
         "session_purpose": "evaluation",
+    }
+
+
+def test_metadata_student_context_maps_student_fields() -> None:
+    metadata = json.dumps(
+        {
+            "studentId": "student-id-1",
+            "studentNumber": "20260001",
+            "studentName": "Kim Minji",
+            "studentDisplayName": "Minji",
+            "studentClassNumber": 9,
+            "studentRollNumber": 2,
+        }
+    )
+
+    assert _metadata_student_context(metadata) == {
+        "student_id": "student-id-1",
+        "student_number": "20260001",
+        "student_name": "Kim Minji",
+        "student_display_name": "Minji",
+        "student_class_number": 9,
+        "student_roll_number": 2,
     }
 
 

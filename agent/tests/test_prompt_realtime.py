@@ -1,22 +1,12 @@
 import json
 
 import prompt_realtime
-from prompt_realtime import build_prompt, get_opening_sentence, normalize_feedback_condition, normalize_role
-
-
-def _read_realtime_config(path):
-    with open(path, encoding="utf-8") as f:
-        config = json.load(f)["realtime"]
-    if "feedbackPrompt" not in config:
-        source_dir = prompt_realtime.DEFAULT_PROMPT_SOURCE_DIR
-        manifest = json.loads(prompt_realtime.PROMPT_SOURCE_MANIFEST_PATH.read_text(encoding="utf-8"))
-        feedbacks = json.loads((source_dir / manifest["feedbackConditionManifest"]).read_text(encoding="utf-8"))
-        feedback_id = config.get("feedbackConditionId", manifest["defaultFeedbackConditionId"])
-        config["feedbackConditionId"] = feedback_id
-        config["feedbackPrompt"] = (
-            source_dir / "feedbacks" / feedbacks[feedback_id]["file"]
-        ).read_text(encoding="utf-8").strip()
-    return config
+from prompt_realtime import (
+    build_prompt,
+    get_opening_sentence,
+    normalize_feedback_condition,
+    normalize_role,
+)
 
 
 def _read_default_prompt_sources():
@@ -26,13 +16,17 @@ def _read_default_prompt_sources():
         key: (source_dir / manifest[key]["file"]).read_text(encoding="utf-8").strip()
         for key in prompt_realtime.PROMPT_FIELDS
     }
-    feedbacks = json.loads((source_dir / manifest["feedbackConditionManifest"]).read_text(encoding="utf-8"))
+    feedbacks = json.loads(
+        (source_dir / manifest["feedbackConditionManifest"]).read_text(encoding="utf-8")
+    )
     feedback_id = manifest["defaultFeedbackConditionId"]
     config["feedbackConditionId"] = feedback_id
     config["feedbackPrompt"] = (
         source_dir / "feedbacks" / feedbacks[feedback_id]["file"]
     ).read_text(encoding="utf-8").strip()
-    task_cards = json.loads((source_dir / manifest["taskCardManifest"]).read_text(encoding="utf-8"))
+    task_cards = json.loads(
+        (source_dir / manifest["taskCardManifest"]).read_text(encoding="utf-8")
+    )
     task_card_id = manifest["defaultTaskCardId"]
     config["taskCardId"] = task_card_id
     config["taskCardPrompt"] = (
@@ -47,6 +41,28 @@ def _expected_prompt(config, role: str) -> str:
         f"{config['basePrompt']}\n\n{config[role_key]}\n\n"
         f"{config['feedbackPrompt']}\n\n{config['taskCardPrompt']}"
     )
+
+
+def _prompt_version_row(
+    *,
+    version_id: str = "00000000-0000-4000-8000-000000000035",
+    task_card_id: str = "morning_exercise_challenge",
+    feedback_condition_id: str = "explicit_correction",
+    task_card_prompt: str = "# TASK CARD: Runtime\n# Opening\nHi from runtime card.",
+):
+    return {
+        "id": version_id,
+        "base_prompt": "Runtime base prompt.",
+        "dominant_prompt": "Runtime dominant role.",
+        "collaborative_prompt": "Runtime collaborative role.",
+        "feedback_condition_id": feedback_condition_id,
+        "feedback_prompt": "Runtime feedback condition.",
+        "task_card_id": task_card_id,
+        "task_card_prompt": task_card_prompt,
+        "source": "custom",
+        "is_active": True,
+        "created_at": "2026-06-12T00:00:00.000Z",
+    }
 
 
 def _write_prompt_source(source_dir):
@@ -123,7 +139,6 @@ def _write_prompt_source(source_dir):
 def test_realtime_prompt_builds_dominant_from_markdown_sources(
     tmp_path, monkeypatch
 ) -> None:
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
     config = _read_default_prompt_sources()
 
     assert build_prompt(role="dominant") == _expected_prompt(config, "dominant")
@@ -132,29 +147,23 @@ def test_realtime_prompt_builds_dominant_from_markdown_sources(
 def test_realtime_prompt_builds_collaborative_from_markdown_sources(
     tmp_path, monkeypatch
 ) -> None:
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
     config = _read_default_prompt_sources()
 
     assert build_prompt(role="collaborative") == _expected_prompt(config, "collaborative")
 
 
 def test_realtime_prompt_defaults_to_dominant_role(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
-
     assert normalize_role("unknown") == "dominant"
     assert build_prompt(role="unknown") == build_prompt(role="dominant")
     assert normalize_feedback_condition("unknown") == "no_corrective"
 
 
 def test_realtime_prompt_maps_legacy_passive_to_collaborative(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
-
     assert normalize_role("passive") == "collaborative"
     assert build_prompt(role="passive") == build_prompt(role="collaborative")
 
 
-def test_realtime_prompt_adds_session_info_after_json_prompt(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
+def test_realtime_prompt_adds_session_info_after_markdown_prompt(tmp_path, monkeypatch) -> None:
     config = _read_default_prompt_sources()
     prompt_without_name = _expected_prompt(config, "collaborative")
     prompt_with_name = build_prompt("Junbo", role="collaborative")
@@ -167,209 +176,123 @@ def test_realtime_prompt_defaults_live_only_in_markdown_sources() -> None:
     assert not hasattr(prompt_realtime, "BASE_PROMPT")
     assert not hasattr(prompt_realtime, "ROLE_PROMPTS")
     assert not hasattr(prompt_realtime, "TASK_CARD_PROMPT")
+    assert not hasattr(prompt_realtime, "PROMPT_CONFIG_PATH")
+    assert not hasattr(prompt_realtime, "PROMPT_VERSIONS_DIR")
 
 
-def test_realtime_prompt_uses_runtime_config(tmp_path, monkeypatch) -> None:
-    config_path = tmp_path / "prompt_config.json"
-    config_path.write_text(
-        """
-        {
-          "realtime": {
-            "basePrompt": "Runtime base prompt.",
-            "dominantPrompt": "Runtime dominant role.",
-            "collaborativePrompt": "Runtime collaborative role.",
-            "feedbackPrompt": "Runtime feedback condition.",
-            "taskCardPrompt": "Runtime task card."
-          }
-        }
-        """,
-        encoding="utf-8",
+def test_realtime_default_prompt_source_records_default_task_card_id() -> None:
+    source = prompt_realtime.load_prompt_source()
+
+    assert source.source == "default"
+    assert source.task_card_id == "morning_exercise_challenge"
+    assert source.prompt_version_id is None
+
+
+def test_realtime_prompt_uses_supabase_prompt_version(monkeypatch) -> None:
+    row = _prompt_version_row(
+        task_card_id="custom_runtime_card",
+        task_card_prompt="# TASK CARD: Runtime\nRuntime task card.",
     )
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", config_path)
-    config = _read_realtime_config(config_path)
-
-    assert build_prompt(role="dominant") == _expected_prompt(config, "dominant")
-    assert build_prompt(role="collaborative") == _expected_prompt(config, "collaborative")
-
-
-def test_realtime_prompt_uses_runtime_task_card_id(tmp_path, monkeypatch) -> None:
-    config_path = tmp_path / "prompt_config.json"
-    config_path.write_text(
-        """
-        {
-          "realtime": {
-            "basePrompt": "Runtime base prompt.",
-            "dominantPrompt": "Runtime dominant role.",
-            "collaborativePrompt": "Runtime collaborative role.",
-            "taskCardId": "school_event_invitation"
-          }
-        }
-        """,
-        encoding="utf-8",
+    monkeypatch.setattr(
+        prompt_realtime,
+        "_fetch_prompt_version_row",
+        lambda prompt_version_id: row,
     )
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", config_path)
-    prompt = build_prompt(role="dominant")
+    config = {
+        "basePrompt": row["base_prompt"],
+        "dominantPrompt": row["dominant_prompt"],
+        "collaborativePrompt": row["collaborative_prompt"],
+        "feedbackConditionId": row["feedback_condition_id"],
+        "feedbackPrompt": row["feedback_prompt"],
+        "taskCardId": row["task_card_id"],
+        "taskCardPrompt": row["task_card_prompt"],
+    }
 
-    assert prompt.startswith(
+    assert build_prompt(role="dominant", prompt_version_id=row["id"]) == _expected_prompt(
+        config, "dominant"
+    )
+    assert build_prompt(role="collaborative", prompt_version_id=row["id"]) == _expected_prompt(
+        config, "collaborative"
+    )
+
+
+def test_realtime_prompt_source_maps_supabase_prompt_version_metadata(monkeypatch) -> None:
+    row = _prompt_version_row()
+    monkeypatch.setattr(
+        prompt_realtime,
+        "_fetch_prompt_version_row",
+        lambda prompt_version_id: row,
+    )
+
+    source = prompt_realtime.load_prompt_source(prompt_version_id=row["id"])
+
+    assert source.source == "custom"
+    assert source.prompt_version_id == row["id"]
+    assert source.saved_at == "2026-06-12T00:00:00.000Z"
+    assert source.task_card_id == "morning_exercise_challenge"
+    assert source.feedback_condition == "explicit_correction"
+
+
+def test_realtime_prompt_version_uses_task_card_snapshot_without_examples(
+    monkeypatch,
+) -> None:
+    row = _prompt_version_row(
+        task_card_id="morning_exercise_challenge",
+        feedback_condition_id="explicit_correction",
+        task_card_prompt="# TASK CARD: Runtime\nRuntime task card.",
+    )
+    monkeypatch.setattr(
+        prompt_realtime,
+        "_fetch_prompt_version_row",
+        lambda prompt_version_id: row,
+    )
+    prompt = build_prompt(role="dominant", prompt_version_id=row["id"])
+
+    assert prompt == (
         "Runtime base prompt.\n\nRuntime dominant role.\n\n"
-        "# FEEDBACK CONDITION PROMPT: No Corrective Feedback"
+        "Runtime feedback condition.\n\n# TASK CARD: Runtime\nRuntime task card."
     )
-    assert "# TASK CARD: Plan a School Event and Invite Friends" in prompt
-    assert "Runtime task card." not in prompt
+    assert "CONVERSATION EXAMPLE" not in prompt
 
 
-def test_realtime_prompt_uses_runtime_feedback_condition_id(
+def test_realtime_opening_comes_from_supabase_prompt_version(
+    monkeypatch,
+) -> None:
+    row = _prompt_version_row(
+        task_card_prompt="# TASK CARD: Runtime\n# Opening\nHi from runtime card.",
+    )
+    monkeypatch.setattr(
+        prompt_realtime,
+        "_fetch_prompt_version_row",
+        lambda prompt_version_id: row,
+    )
+
+    assert get_opening_sentence(prompt_version_id=row["id"]) == "Hi from runtime card."
+
+
+def test_realtime_prompt_call_feedback_condition_overrides_default_selection(
     tmp_path, monkeypatch
 ) -> None:
-    config_path = tmp_path / "prompt_config.json"
-    config_path.write_text(
-        """
-        {
-          "realtime": {
-            "basePrompt": "Runtime base prompt.",
-            "dominantPrompt": "Runtime dominant role.",
-            "collaborativePrompt": "Runtime collaborative role.",
-            "feedbackConditionId": "explicit_correction",
-            "taskCardId": "morning_exercise_challenge"
-          }
-        }
-        """,
-        encoding="utf-8",
+    prompt = build_prompt(
+        role="dominant",
+        task_card_id="morning_exercise_challenge",
+        feedback_condition_id="explicit_correction",
     )
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", config_path)
-    prompt = build_prompt(role="dominant")
 
     assert "# FEEDBACK CONDITION PROMPT: Explicit Correction" in prompt
     assert "# FEEDBACK CONDITION PROMPT: No Corrective Feedback" not in prompt
 
 
-def test_realtime_prompt_call_feedback_condition_overrides_runtime_selection(
+def test_realtime_prompt_call_task_card_id_overrides_default_selection(
     tmp_path, monkeypatch
 ) -> None:
-    config_path = tmp_path / "prompt_config.json"
-    config_path.write_text(
-        """
-        {
-          "realtime": {
-            "basePrompt": "Runtime base prompt.",
-            "dominantPrompt": "Runtime dominant role.",
-            "collaborativePrompt": "Runtime collaborative role.",
-            "feedbackConditionId": "explicit_correction",
-            "taskCardId": "morning_exercise_challenge"
-          }
-        }
-        """,
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", config_path)
-    prompt = build_prompt(
-        role="dominant",
-        feedback_condition_id="no_corrective",
-    )
+    prompt = build_prompt(role="dominant", task_card_id="school_event_invitation")
 
-    assert "# FEEDBACK CONDITION PROMPT: No Corrective Feedback" in prompt
-    assert "# FEEDBACK CONDITION PROMPT: Explicit Correction" not in prompt
-
-
-def test_realtime_prompt_uses_runtime_feedback_prompt_for_selected_condition(
-    tmp_path, monkeypatch
-) -> None:
-    config_path = tmp_path / "prompt_config.json"
-    config_path.write_text(
-        """
-        {
-          "realtime": {
-            "basePrompt": "Runtime base prompt.",
-            "dominantPrompt": "Runtime dominant role.",
-            "collaborativePrompt": "Runtime collaborative role.",
-            "feedbackConditionId": "explicit_correction",
-            "feedbackPrompts": {
-              "explicit_correction": "Runtime explicit feedback condition."
-            },
-            "taskCardId": "morning_exercise_challenge"
-          }
-        }
-        """,
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", config_path)
-    prompt = build_prompt(
-        role="dominant",
-        feedback_condition_id="explicit_correction",
-    )
-
-    assert "Runtime explicit feedback condition." in prompt
-    assert "# FEEDBACK CONDITION PROMPT: Explicit Correction" not in prompt
-    assert "# TASK CARD: Our Class Morning Exercise Challenge" in prompt
-
-
-def test_realtime_prompt_call_task_card_id_overrides_runtime_selection(
-    tmp_path, monkeypatch
-) -> None:
-    config_path = tmp_path / "prompt_config.json"
-    config_path.write_text(
-        """
-        {
-          "realtime": {
-            "basePrompt": "Runtime base prompt.",
-            "dominantPrompt": "Runtime dominant role.",
-            "collaborativePrompt": "Runtime collaborative role.",
-            "taskCardId": "school_event_invitation"
-          }
-        }
-        """,
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", config_path)
-    prompt = build_prompt(role="dominant", task_card_id="morning_exercise_challenge")
-
-    assert "# TASK CARD: Our Class Morning Exercise Challenge" in prompt
-    assert "# TASK CARD: Plan a School Event and Invite Friends" not in prompt
-
-
-def test_realtime_prompt_uses_runtime_task_card_for_selected_card(
-    tmp_path, monkeypatch
-) -> None:
-    config_path = tmp_path / "prompt_config.json"
-    config_path.write_text(
-        """
-        {
-          "realtime": {
-            "basePrompt": "Runtime base prompt.",
-            "dominantPrompt": "Runtime dominant role.",
-            "collaborativePrompt": "Runtime collaborative role.",
-            "feedbackPrompts": {
-              "no_corrective": "Runtime no-feedback condition."
-            },
-            "taskCardId": "morning_exercise_challenge",
-            "taskCards": {
-              "morning_exercise_challenge": {
-                "prompt": "# TASK CARD: Runtime Card\\n# Opening\\nRuntime opening.\\n# Details\\nruntime task."
-              }
-            }
-          }
-        }
-        """,
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", config_path)
-
-    prompt = build_prompt(
-        role="dominant",
-        task_card_id="morning_exercise_challenge",
-        feedback_condition_id="no_corrective",
-    )
-
-    assert "Runtime no-feedback condition." in prompt
-    assert "# TASK CARD: Runtime Card" in prompt
+    assert "# TASK CARD: Plan a School Event and Invite Friends" in prompt
     assert "# TASK CARD: Our Class Morning Exercise Challenge" not in prompt
-    assert prompt.endswith("# TASK CARD: Runtime Card\n# Opening\nRuntime opening.\n# Details\nruntime task.")
-    assert get_opening_sentence("morning_exercise_challenge", "no_corrective") == "Runtime opening."
 
 
 def test_realtime_opening_comes_from_selected_task_card(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
-
     assert get_opening_sentence("morning_exercise_challenge") == (
         "Hi, I'm Kate. Let's choose one morning exercise activity for our Class."
     )
@@ -386,124 +309,68 @@ def test_realtime_opening_falls_back_when_task_card_has_no_opening(
     _write_prompt_source(source_dir)
     monkeypatch.setattr(prompt_realtime, "DEFAULT_PROMPT_SOURCE_DIR", source_dir)
     monkeypatch.setattr(prompt_realtime, "PROMPT_SOURCE_MANIFEST_PATH", source_dir / "manifest.json")
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
 
     assert get_opening_sentence("example") == prompt_realtime.DEFAULT_OPENING_SENTENCE
 
 
-def test_realtime_prompt_uses_legacy_passive_prompt_runtime_config(
-    tmp_path, monkeypatch
+def test_realtime_prompt_uses_collaborative_prompt_from_supabase_version(
+    monkeypatch,
 ) -> None:
-    config_path = tmp_path / "prompt_config.json"
-    config_path.write_text(
-        """
-        {
-          "realtime": {
-            "basePrompt": "Runtime base prompt.",
-            "dominantPrompt": "Runtime dominant role.",
-            "passivePrompt": "Runtime passive role.",
-            "feedbackPrompt": "Runtime feedback condition.",
-            "taskCardPrompt": "Runtime task card."
-          }
-        }
-        """,
-        encoding="utf-8",
+    row = _prompt_version_row(
+        task_card_id="custom_runtime_card",
+        task_card_prompt="# TASK CARD: Runtime\nRuntime task card.",
     )
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", config_path)
+    monkeypatch.setattr(
+        prompt_realtime,
+        "_fetch_prompt_version_row",
+        lambda prompt_version_id: row,
+    )
 
-    assert build_prompt(role="collaborative") == (
-        "Runtime base prompt.\n\nRuntime passive role.\n\n"
-        "Runtime feedback condition.\n\nRuntime task card."
+    assert build_prompt(role="passive", prompt_version_id=row["id"]) == (
+        "Runtime base prompt.\n\nRuntime collaborative role.\n\n"
+        "Runtime feedback condition.\n\n# TASK CARD: Runtime\nRuntime task card."
     )
 
 
-def test_realtime_prompt_runtime_config_overrides_markdown_sources(
-    tmp_path, monkeypatch
+def test_realtime_prompt_version_fetch_failure_does_not_fallback(
+    monkeypatch,
 ) -> None:
-    config_path = tmp_path / "prompt_config.json"
-    config_path.write_text(
-        """
-        {
-          "realtime": {
-            "basePrompt": "Runtime base prompt.",
-            "dominantPrompt": "Runtime dominant role.",
-            "collaborativePrompt": "Runtime collaborative role.",
-            "feedbackPrompt": "Runtime feedback condition.",
-            "taskCardPrompt": "Runtime task card."
-          }
-        }
-        """,
-        encoding="utf-8",
+    def raise_fetch_error(prompt_version_id):
+        raise prompt_realtime.PromptVersionFetchError("database unavailable")
+
+    monkeypatch.setattr(
+        prompt_realtime,
+        "_fetch_prompt_version_row",
+        raise_fetch_error,
     )
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", config_path)
 
-    prompt = build_prompt(role="dominant")
-
-    assert prompt == (
-        "Runtime base prompt.\n\nRuntime dominant role.\n\n"
-        "Runtime feedback condition.\n\nRuntime task card."
-    )
-    assert prompt != _expected_prompt(_read_default_prompt_sources(), "dominant")
+    try:
+        build_prompt(role="dominant", prompt_version_id="custom-version")
+    except prompt_realtime.PromptVersionFetchError as exc:
+        assert "database unavailable" in str(exc)
+    else:
+        raise AssertionError("expected custom prompt version fetch failure to fail")
 
 
-def test_realtime_prompt_uses_prompt_version_snapshot(tmp_path, monkeypatch) -> None:
-    versions_dir = tmp_path / "prompt_versions"
-    realtime_versions_dir = versions_dir / "realtime"
-    realtime_versions_dir.mkdir(parents=True)
-    (realtime_versions_dir / "realtime-version.json").write_text(
-        """
-        {
-          "schemaVersion": 1,
-          "purpose": "realtime",
-          "id": "realtime-version",
-          "label": "Realtime version",
-          "createdAt": "2026-06-13T01:00:00.000Z",
-          "hash": "hash",
-          "config": {
-            "basePrompt": "Version base prompt.",
-            "dominantPrompt": "Version dominant role.",
-            "collaborativePrompt": "Version collaborative role.",
-            "feedbackConditionId": "no_corrective",
-            "feedbackPrompt": "Version feedback condition.",
-            "taskCardId": "school_event_invitation",
-            "taskCardPrompt": "# TASK CARD: Version Card\\n# Opening\\nVersion opening.\\n# Details\\nVersion task card."
-          }
-        }
-        """,
-        encoding="utf-8",
-    )
-    config_path = tmp_path / "prompt_config.json"
-    config_path.write_text(
-        """
-        {
-          "realtime": {
-            "basePrompt": "Runtime base prompt.",
-            "dominantPrompt": "Runtime dominant role.",
-            "collaborativePrompt": "Runtime collaborative role.",
-            "feedbackPrompt": "Runtime feedback condition.",
-            "taskCardPrompt": "Runtime task card."
-          }
-        }
-        """,
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(prompt_realtime, "PROMPT_VERSIONS_DIR", versions_dir)
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", config_path)
+def test_realtime_prompt_version_missing_env_does_not_fallback(monkeypatch) -> None:
+    for key in (
+        "SUPABASE_URL",
+        "NEXT_PUBLIC_SUPABASE_URL",
+        "SUPABASE_SECRET_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
 
-    prompt = build_prompt(role="dominant", prompt_version_id="realtime-version")
-
-    assert prompt == (
-        "Version base prompt.\n\nVersion dominant role.\n\n"
-        "Version feedback condition.\n\n"
-        "# TASK CARD: Version Card\n# Opening\nVersion opening.\n# Details\n"
-        "Version task card."
-    )
-    assert get_opening_sentence(prompt_version_id="realtime-version") == "Version opening."
+    try:
+        build_prompt(role="dominant", prompt_version_id="custom-version")
+    except prompt_realtime.PromptVersionFetchError as exc:
+        assert "not configured" in str(exc)
+    else:
+        raise AssertionError("expected missing Supabase prompt env to fail")
 
 
 def test_realtime_prompt_missing_default_source_fails(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(prompt_realtime, "DEFAULT_PROMPT_SOURCE_DIR", tmp_path / "missing")
-    monkeypatch.setattr(prompt_realtime, "PROMPT_CONFIG_PATH", tmp_path / "missing.json")
 
     try:
         build_prompt(role="dominant")

@@ -42,10 +42,26 @@ CSCL_TBLT/
 │   │   └── style.css
 │   └── .env.local        # Next.js용 환경변수 (git 추적 안 됨)
 │
-├── config.example.json   # 반/그룹/운영 모드 설정 예시
-├── config.json           # 반/그룹/운영 모드 설정 (git 추적 안 됨)
+├── config.example.json   # 로컬 fallback/import용 운영 설정 예시
+├── config.json           # 로컬 fallback 운영 설정 (git 추적 안 됨)
 └── logs/                 # 대화 로그 JSON (자동 생성, git 추적 안 됨)
 ```
+
+## 브랜치 전략
+
+이 저장소는 `main` / `develop` 기준으로 운영한다.
+
+| 브랜치    | 역할                                  | 운영 원칙                                                                         |
+| --------- | ------------------------------------- | --------------------------------------------------------------------------------- |
+| `main`    | 실제 서버 배포와 연결되는 안정 브랜치 | 배포 가능한 상태만 유지한다. 검증된 변경만 병합하고, 미완성 실험은 올리지 않는다. |
+| `develop` | 기능 개발과 실험 통합 브랜치          | 새 기능, UI/프롬프트 실험, 검증 전 변경의 기본 합류 지점으로 사용한다.            |
+
+기본 흐름:
+
+- 새 작업은 `develop`에서 `feature/...`, `issue-...`, `experiment/...` 브랜치를 만든다.
+- 일반 변경은 작업 브랜치에서 `develop`으로 PR을 열어 합친다.
+- 배포할 묶음이 안정화되면 `develop`에서 `main`으로 PR을 열어 합친 뒤 실제 서버에 배포한다.
+- 운영 장애나 긴급 수정은 `main`에서 `hotfix/...` 브랜치를 만들고, 배포 후 같은 수정이 `develop`에도 반영되도록 한다.
 
 ## 아키텍처
 
@@ -54,8 +70,8 @@ CSCL_TBLT/
 ```
 브라우저 클라이언트 (client/ Next.js)
     │
-    ├─[GET /api/rooms]──────────────► config.json + LiveKit room 조회
-    ├─[POST /api/admin/config]──────► 수업 운영 모드/반/그룹 설정 저장
+    ├─[GET /api/rooms]──────────────► Supabase app_settings + LiveKit room 조회
+    ├─[POST /api/admin/config]──────► Supabase app_settings에 운영 설정 저장
     ├─[POST /api/token]─────────────► LiveKit 참가자 토큰 발급
     │                                  room_config.agents로 agent 자동 배치
     │
@@ -91,6 +107,8 @@ cp .env.example .env
 cp config.example.json config.json
 ```
 
+`config.json`은 Supabase가 설정되지 않은 로컬 개발 fallback 및 초기 import 참고용이다. Production 운영 설정은 Supabase `app_settings`에 저장된다.
+
 `.env` 파일에 값 입력:
 
 ```env
@@ -111,7 +129,7 @@ OPENAI_API_KEY=
 DEEPGRAM_API_KEY=
 ```
 
-> Next.js 앱의 운영 모드는 `.env`가 아니라 `config.json`의 `agentMode`로 결정되며, `/admin`에서 변경한다. Realtime 상호작용 role은 관리자 전용 `agentRole` 설정으로만 노출된다.
+> Next.js 앱의 운영 모드는 `.env`가 아니라 Supabase `app_settings.agent_mode`로 결정되며, `/admin`에서 변경한다. Supabase가 없는 로컬 개발 환경에서는 `config.json` fallback을 사용할 수 있다. Realtime 상호작용 role은 관리자 전용 `agentRole` 설정으로만 노출된다.
 
 ### 3. 에이전트 모델 파일 다운로드 (최초 1회)
 
@@ -131,7 +149,7 @@ uv run python main.py download-files
 pnpm setup
 ```
 
-루트에서 다음 명령 하나로 `config.json`의 `agentMode`/`agentRole`에 맞는 agent worker와 Next.js 클라이언트를 함께 실행한다.
+루트에서 다음 명령 하나로 agent worker와 Next.js 클라이언트를 함께 실행한다. `pnpm dev`의 auto 모드는 로컬 프로세스 선택을 위해 `config.json`의 `agentMode`/`agentRole`을 읽는다. 앱 route의 런타임 운영 설정은 Supabase `app_settings`를 사용하며, Supabase가 없는 로컬 fallback 환경에서는 `config.json` 값을 사용한다.
 
 ```bash
 pnpm dev
@@ -234,8 +252,11 @@ uv run python main.py start
 LIVEKIT_URL=wss://your-project.livekit.cloud
 LIVEKIT_API_KEY=your_api_key
 LIVEKIT_API_SECRET=your_api_secret
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=strong_password_here
+
+# Supabase admin auth / persistent state migration
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+SUPABASE_SECRET_KEY=sb_secret_...
 ```
 
 Next.js API routes:
@@ -244,25 +265,119 @@ Next.js API routes:
 | --------------------------------------- | ------------------------------------------------------- |
 | `POST /api/token`                       | 참가자 토큰 발급, 현재 운영 모드에 맞는 agent 자동 배치 |
 | `GET /api/rooms`                        | 활성 반의 그룹 room과 realtime 개별 room 현황 조회      |
-| `GET/POST /api/admin/config`            | `config.json` 읽기/쓰기                                 |
+| `GET/POST /api/admin/config`            | Supabase `app_settings` 읽기/쓰기                       |
 | `GET/POST /api/dispatch`                | 그룹 대화 모드에서 `pipeline-agent` 수동 배치/존재 확인 |
 | `POST /api/rooms/terminate`             | room 강제 종료                                          |
 | `GET /api/logs`, `GET /api/logs/stream` | 대화 로그 목록/스트리밍                                 |
 
 > **주의:** Production에서 `/admin`, `/api/admin`, 관리자성 API(`/api/dispatch`, `/api/logs`, `/api/rooms/terminate`)는
-> `ADMIN_USERNAME`/`ADMIN_PASSWORD` Basic Auth로 보호된다.
+> Supabase Auth session과 `profiles.role = 'admin'` 권한으로 보호된다.
+> `ADMIN_USERNAME`/`ADMIN_PASSWORD` Basic Auth는 더 이상 사용하지 않는다.
+
+### Supabase runtime storage
+
+Supabase 도입은 GitHub issue #4의 단계별 작업으로 진행한다. 현재 admin auth와 수업 운영 설정은 Supabase를 사용한다.
+
+- `client/lib/supabase/client.ts`: browser/client component용 Supabase client
+- `client/lib/supabase/server.ts`: server component, route handler, server action용 cookie-aware client
+- `client/lib/supabase/admin.ts`: 서버 전용 secret-key client
+- `client/lib/supabase/proxy.ts`: Auth session refresh와 admin route guard용 proxy/middleware helper
+- `client/lib/settings-store.ts`: `app_settings` 기반 운영 설정 store와 local fallback adapter
+- `supabase/config.toml`: 로컬 Supabase CLI 실행 포트와 migration 설정
+- `supabase/migrations/20260611000000_foundation.sql`: 초기 schema와 RLS policy
+- `supabase/migrations/20260612000000_realtime_prompt_version_rpc.sql`: active prompt version 교체 RPC
+
+초기 schema는 다음 테이블을 만든다.
+
+| Table                      | 역할                                          |
+| -------------------------- | --------------------------------------------- |
+| `profiles`                 | Supabase Auth 사용자별 앱 권한 및 표시명      |
+| `app_settings`             | 수업 운영 설정 저장소                         |
+| `realtime_prompt_versions` | Realtime prompt override version 저장소       |
+
+최초 admin은 Supabase Auth 사용자 생성 후 SQL 또는 dashboard에서 `profiles.role = 'admin'`으로 부여한다.
+
+```sql
+insert into public.profiles (user_id, role, display_name)
+values ('<auth-user-id>', 'admin', 'Admin')
+on conflict (user_id) do update
+set role = 'admin',
+    display_name = excluded.display_name;
+```
+
+`SUPABASE_SECRET_KEY`는 RLS를 우회할 수 있으므로 server-only 코드에서만 사용한다. Next.js API routes는 `client/.env.local`에서 이 값을 읽고, Python realtime agent는 root `.env`에서 같은 URL/secret을 읽어 `promptVersionId`에 해당하는 `realtime_prompt_versions` row를 가져온다.
+
+관리자 로그인 화면은 `/admin/login`이다. 로그인은 Supabase email/password 계정을 사용하며, 계정의 `profiles.role`이 `admin`이어야 `/admin` 및 관리자성 API를 사용할 수 있다.
+
+기존 `config.json` 값을 Supabase로 옮길 때는 다음 형태로 `app_settings` 기본 row를 seed한다.
+
+```sql
+insert into public.app_settings (
+  id,
+  num_classes,
+  num_groups_per_class,
+  class_start,
+  active_class,
+  agent_mode,
+  agent_role,
+  feedback_condition_id,
+  realtime_resetting
+)
+values (
+  'default',
+  4,
+  12,
+  9,
+  9,
+  'realtime',
+  'collaborative',
+  'explicit_correction',
+  false
+)
+on conflict (id) do update
+set num_classes = excluded.num_classes,
+    num_groups_per_class = excluded.num_groups_per_class,
+    class_start = excluded.class_start,
+    active_class = excluded.active_class,
+    agent_mode = excluded.agent_mode,
+    agent_role = excluded.agent_role,
+    feedback_condition_id = excluded.feedback_condition_id,
+    realtime_resetting = excluded.realtime_resetting;
+```
+
+Production에서는 `client/.env.local`과 root `.env`에 Supabase 연결값이 필요하다. Next.js에는 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`가 필요하고, Python realtime agent에는 `NEXT_PUBLIC_SUPABASE_URL` 또는 `SUPABASE_URL`과 `SUPABASE_SECRET_KEY` 또는 `SUPABASE_SERVICE_ROLE_KEY`가 필요하다. Supabase가 미설정이거나 DB 장애가 있으면 운영 설정 route는 setup/runtime error를 반환한다. 로컬 개발에서는 Supabase가 없거나 일시적으로 실패할 때 `config.json` fallback을 사용한다.
+
+기존 `prompt_config.json` override는 `supabase/README.md`의 `realtime_prompt_versions Migration` 절차로 한 번만 active version row로 이관한다. 이관 후 Realtime custom prompt source of truth는 Supabase prompt version row다. `/api/token`은 active row의 `promptVersionId`를 LiveKit metadata에 넣고, Python realtime agent는 그 id로 같은 row를 fetch한다. `promptVersionId`가 없는 default session은 tracked markdown prompt를 사용한다.
+
+로컬 Supabase CLI는 기존 프로젝트와 기본 포트가 충돌하지 않도록 `5532x` 대역을 사용한다.
+
+```bash
+supabase start
+supabase db reset --no-seed
+supabase status
+```
+
+`client/.env.local`에서 로컬 Supabase를 사용할 때는 `supabase status` 출력의 key를 넣는다.
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:55321
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<publishable-key-from-supabase-status>
+SUPABASE_SECRET_KEY=<secret-key-from-supabase-status>
+```
+
+Studio는 `http://127.0.0.1:55323`, Postgres는 `postgresql://postgres:postgres@127.0.0.1:55322/postgres`에서 열린다.
 
 ## 관리자 설정
 
 `/admin`에서 다음 값을 관리한다.
 
-| 설정              | 저장 위치                       | 설명                              |
-| ----------------- | ------------------------------- | --------------------------------- |
-| 수업 운영 모드    | `config.json.agentMode`         | `pipeline` 또는 `realtime`        |
-| 현재 수업 중인 반 | `config.json.activeClass`       | 학생 로비에 표시되는 반           |
-| 반 번호 시작      | `config.json.classStart`        | 반 번호 범위의 시작               |
-| 전체 학급 수      | `config.json.numClasses`        | 관리자 화면에 표시할 반 개수      |
-| 반당 그룹 수      | `config.json.numGroupsPerClass` | 그룹 대화 모드에서 표시할 그룹 수 |
+| 설정              | 저장 위치                           | 설명                              |
+| ----------------- | ----------------------------------- | --------------------------------- |
+| 수업 운영 모드    | `app_settings.agent_mode`           | `pipeline` 또는 `realtime`        |
+| 현재 수업 중인 반 | `app_settings.active_class`         | 학생 로비에 표시되는 반           |
+| 반 번호 시작      | `app_settings.class_start`          | 반 번호 범위의 시작               |
+| 전체 학급 수      | `app_settings.num_classes`          | 관리자 화면에 표시할 반 개수      |
+| 반당 그룹 수      | `app_settings.num_groups_per_class` | 그룹 대화 모드에서 표시할 그룹 수 |
 
 예시:
 
@@ -351,13 +466,13 @@ logs/
 
 | 항목                             | 위치                                                                                                 |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Realtime AI 시스템 프롬프트 수정 | 기본값은 `prompts/realtime/*.md`, 런타임 수정은 `/admin` 또는 `prompt_config.json`                   |
-| 기본 AI 시스템 프롬프트 fallback | 그룹 대화는 `agent/prompt_pipeline.py`, 개별 대화는 `prompts/realtime/*.md`                         |
+| Realtime AI 시스템 프롬프트 수정 | 기본값은 `prompts/realtime/*.md`, 런타임 수정은 `/admin`에서 Supabase `realtime_prompt_versions`로 저장 |
+| 기본 AI 시스템 프롬프트 fallback | 그룹 대화는 `agent/prompt_pipeline.py`, 개별 대화는 `prompts/realtime/*.md`                          |
 | 그룹 대화 모드 모델 변경         | `agent/main.py` (STT `deepgram/nova-3`, LLM `openai/gpt-4.1-mini`, TTS `cartesia/sonic-3`)           |
 | 개별 대화 모드 모델 변경         | `agent/main.py` (`openai.realtime.RealtimeModel`)                                                    |
 | 실행할 worker 모드               | `AGENT_WORKER_MODE=pipeline` 또는 `AGENT_WORKER_MODE=realtime` + `AGENT_ROLE=dominant/collaborative` |
-| 수업 운영 모드 변경              | `/admin` 또는 `config.json`의 `agentMode`                                                            |
-| Realtime 상호작용 role 변경      | `/admin` 또는 `config.json`의 `agentRole`                                                            |
+| 수업 운영 모드 변경              | `/admin` 또는 Supabase `app_settings.agent_mode`                                                     |
+| Realtime 상호작용 role 변경      | `/admin` 또는 Supabase `app_settings.agent_role`                                                     |
 | 토큰 서버 포트 변경              | `server/main.py` + `client/static/app.js` 상단 `SERVER` 변수                                         |
 | legacy static Room 이름 변경     | `.env` → `ROOM_NAME`                                                                                 |
 | 에이전트 이름 변경               | `agent/main.py`, `client/lib/agent-role.ts` (`pipeline-agent`, `realtime-agent`)                     |
@@ -371,7 +486,7 @@ pnpm prompts:check
 
 원본 파일은 `base.md`, `roles/dominant.md`, `roles/collaborative.md`, `task-cards/*.md`입니다. `task-cards/manifest.json`에 등록된 주제별 task card 중 `/admin`에서 선택한 항목이 개별 Realtime 세션에 적용됩니다. `pnpm prompts:check`는 파일 누락이나 빈 파일 같은 기본 오류를 검사합니다.
 
-`/admin`에서 프롬프트를 저장하면 런타임 `prompt_config.json`이 생성되고, 이 사용자 설정이 `prompts/realtime/*.md` 기본값보다 우선합니다. task card는 파일 내용을 복사 저장하지 않고 `taskCardId` 선택값으로 저장됩니다. md 기본값을 다시 쓰려면 `/admin`에서 "기본값으로 복원"을 실행해 `prompt_config.json` override를 제거합니다.
+`/admin`에서 프롬프트를 저장하면 Supabase `realtime_prompt_versions`에 새 version row가 생성되고 해당 row만 active가 됩니다. active custom version은 `prompts/realtime/*.md` 기본값보다 우선하며, base/role prompt와 함께 `feedbackPrompt`, `feedbackConditionId`, `taskCardId`, `taskCardPrompt` snapshot을 보존합니다. md 기본값을 다시 쓰려면 `/admin`에서 "기본값으로 복원"을 실행해 active custom version을 비활성화합니다.
 
 단일 문서에서 복사한 프롬프트를 한 파일로 검사기에 넘길 수도 있습니다. 이 경우 검사기는 `# BASE PROMPT:`, `# INTERLOCUTOR ROLE PROMPT: Dominant`, `# INTERLOCUTOR ROLE PROMPT: Collaborative`, `# TASK CARD:` 헤딩을 기준으로 네 구간을 나눕니다.
 
@@ -400,7 +515,7 @@ pnpm prompts:check
 ```
 /opt/cscl-tblt/
 ├── .env                  # Agent 환경변수 (EnvironmentFile)
-├── config.json           # 반/그룹 설정 (Next.js API가 읽음)
+├── config.json           # 로컬 fallback/import용 운영 설정
 ├── logs/                 # 대화 로그 JSON (자동 생성)
 ├── agent/                # Python Agent
 │   └── .venv/            # uv로 생성된 가상환경
@@ -408,8 +523,10 @@ pnpm prompts:check
     └── .env.local        # Next.js 환경변수
 ```
 
-> `logs/`와 `config.json`은 `client/`의 API 라우트(`../logs`, `../config.json`)가 직접 참조하므로
-> Next.js와 Agent가 반드시 같은 서버에 있어야 합니다. Vercel 등 별도 호스팅 불가.
+> `logs/`는 agent 로컬 파일 출력이다. Realtime custom prompt는 Next.js admin/token 경로와 Python realtime agent 모두 Supabase `realtime_prompt_versions`를 사용한다. legacy `prompt_config.json`은 migration 참고용이며 runtime source로 사용하지 않는다.
+> 운영 설정은 Supabase `app_settings`를 사용하며, Supabase가 없는 로컬 개발 환경에서만 `config.json` fallback을 사용한다.
+
+기존 EC2 production 서버에 Supabase를 적용하는 절차는 [Production Supabase Runbook](docs/production-supabase-runbook.md)을 따른다.
 
 ---
 
@@ -465,20 +582,25 @@ S3_ENDPOINT=
 LIVEKIT_URL=wss://cscl-t8duxbt1.livekit.cloud
 LIVEKIT_API_KEY=<값>
 LIVEKIT_API_SECRET=<값>
-ADMIN_USERNAME=<관리자_아이디>
-ADMIN_PASSWORD=<관리자_비밀번호>
+NEXT_PUBLIC_SUPABASE_URL=<Supabase Project URL>
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<Supabase publishable key>
+SUPABASE_SECRET_KEY=<Supabase secret key>
+STUDENT_SESSION_SECRET=<long random server-only secret>
+CONVERSATION_LOG_FILE_FALLBACK=false
 ```
+
+Python realtime agent도 custom prompt version fetch를 위해 root **`/opt/cscl-tblt/.env`**에 Supabase URL과 secret을 읽을 수 있어야 한다. `NEXT_PUBLIC_SUPABASE_URL`/`SUPABASE_SECRET_KEY`를 같은 값으로 두거나, agent 전용으로 `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`를 둘 수 있다.
 
 > `S3_ENDPOINT`는 AWS S3 사용 시 반드시 비워두어야 합니다. 값을 넣으면 Egress 업로드 실패.
 > Cloudflare R2 등 S3 호환 스토리지 사용 시에만 `https://...` 형식으로 입력.
 
-#### 4. config.json 생성
+#### 4. app_settings 초기값 확인
 
 ```bash
 cp /opt/cscl-tblt/config.example.json /opt/cscl-tblt/config.json
 ```
 
-반/그룹 수와 수업 운영 모드 변경은 `https://tblt-agent.net/admin` 페이지 또는 이 파일 직접 수정.
+`config.json`은 로컬 fallback 및 import 참고용이다. Production에서는 Supabase `app_settings(id = 'default')` row가 운영 설정의 source of truth다. 반/그룹 수와 수업 운영 모드 변경은 `https://tblt-agent.net/admin` 페이지에서 수행한다.
 
 #### 5. Turn Detector 모델 다운로드 (최초 1회 필수)
 
@@ -641,11 +763,11 @@ pm2 restart cscl-client
 
 GitHub Actions는 세 종류로 구성한다.
 
-| Workflow            | Trigger                     | 역할                                  |
-| ------------------- | --------------------------- | ------------------------------------- |
-| `pre-commit`        | PR/push → `main`, 수동 실행 | 공통 파일 형식 및 repo guardrail 검사 |
-| `CI`                | PR → `main`                 | Client lint/format/build, Agent tests |
-| `Deploy Production` | `main` push 또는 수동 실행  | 검증 후 EC2 production 배포           |
+| Workflow            | Trigger                                | 역할                                  |
+| ------------------- | -------------------------------------- | ------------------------------------- |
+| `pre-commit`        | PR/push → `main`, `develop`, 수동 실행 | 공통 파일 형식 및 repo guardrail 검사 |
+| `CI`                | PR → `main`, `develop`, 수동 실행      | Client lint/format/build, Agent tests |
+| `Deploy Production` | `main` push 또는 수동 실행             | 검증 후 EC2 production 배포           |
 
 Production 배포는 GitHub Actions가 SSH로 EC2에 접속해 `scripts/deploy-production.sh`를 실행한다.
 
@@ -665,8 +787,10 @@ Production 배포는 GitHub Actions가 SSH로 EC2에 접속해 `scripts/deploy-p
 - 배포 사용자가 `systemctl restart/is-active cscl-agent-pipeline cscl-agent-realtime`를 password 없이 실행할 수 있어야 한다.
 - `pnpm`, `uv`, `pm2`, `curl`이 설치되어 있어야 한다.
 - 서버의 `.env`, `client/.env.local`, `config.json`, `prompt_config.json`은 배포 중 백업 후 복원된다.
-- `config.json`은 git 추적 대상이 아니며, 없으면 `config.example.json`에서 자동 생성된다.
-- Production에서는 `client/.env.local`에 `ADMIN_USERNAME`, `ADMIN_PASSWORD`가 있어야 한다.
+- `config.json`은 git 추적 대상이 아니며, Supabase가 없는 로컬 fallback/import 용도로만 사용한다.
+- Production에서는 `client/.env.local`에 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`가 있어야 한다. Realtime custom prompt를 쓰는 agent host의 root `.env`에도 Supabase URL과 server-only secret이 있어야 한다.
+- Production 운영 설정은 Supabase `app_settings(id = 'default')` row에 저장된다.
+- 최초 admin 계정은 Supabase Auth 사용자 생성 후 `profiles.role = 'admin'`으로 bootstrap해야 한다.
 
 배포 후 health check:
 
@@ -701,14 +825,14 @@ sudo nginx -t
 
 ### 현재 구현 메모
 
-| 항목                        | 내용                                                           |
-| --------------------------- | -------------------------------------------------------------- |
-| 운영 모드 저장              | `config.json.agentMode`에 `pipeline` 또는 `realtime` 저장      |
-| Realtime 상호작용 role 저장 | `config.json.agentRole`에 `dominant` 또는 `collaborative` 저장 |
-| Agent entrypoint            | `agent/main.py`에 `pipeline-agent`, `realtime-agent` 등록      |
+| 항목                        | 내용                                                                               |
+| --------------------------- | ---------------------------------------------------------------------------------- |
+| 운영 모드 저장              | Supabase `app_settings.agent_mode`에 `pipeline` 또는 `realtime` 저장               |
+| Realtime 상호작용 role 저장 | Supabase `app_settings.agent_role`에 `dominant` 또는 `collaborative` 저장          |
+| Agent entrypoint            | `agent/main.py`에 `pipeline-agent`, `realtime-agent` 등록                          |
 | 프롬프트 분리               | 그룹 대화는 `agent/prompt_pipeline.py`, 개별 대화 기본값은 `prompts/realtime/*.md` |
-| Realtime 의존성             | `livekit-agents[openai,silero,turn-detector]~=1.5`             |
-| Egress 업로드               | `S3_ENDPOINT` 값이 `http`로 시작하는 경우만 endpoint로 사용    |
+| Realtime 의존성             | `livekit-agents[openai,silero,turn-detector]~=1.5`                                 |
+| Egress 업로드               | `S3_ENDPOINT` 값이 `http`로 시작하는 경우만 endpoint로 사용                        |
 
 ---
 

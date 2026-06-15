@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { AdminLogoutButton } from '@/components/admin/admin-logout-button';
 import { PromptEditorView } from '@/components/admin/prompt-editor-view';
 import { type AgentMode, getAgentModeLabel } from '@/lib/agent-mode';
 import { type AgentRole, getAgentRoleLabel } from '@/lib/agent-role';
@@ -245,9 +246,7 @@ interface RealtimeRoomStatus {
   evaluationPromptVersion?: string;
   feedbackConditionId?: string;
   promptId?: string;
-  promptVersionCreatedAt?: string | null;
   promptVersionId?: string;
-  promptVersionLabel?: string;
   promptSavedAt?: string | null;
   promptSource?: RealtimePromptSource;
   sessionPurpose?: SessionPurpose;
@@ -341,22 +340,12 @@ function RealtimeSessionSection({
   }
 
   function formatPromptApplied(room: RealtimeRoomStatus) {
-    const sessionPurpose = inferRoomSessionPurpose(room);
-    const defaultLabel =
-      sessionPurpose === 'evaluation' ? '기본 Evaluation 프롬프트' : '기본 Realtime 프롬프트';
     if (!room.promptSource) return '미기록';
-    if (room.promptSource === 'default') return defaultLabel;
-
-    const label = room.promptVersionLabel?.trim();
-    const isGeneratedLabel = label
-      ? /^(realtime|evaluation) \d{4}-\d{2}-\d{2}T/.test(label)
-      : false;
-    if (label && !isGeneratedLabel) return label;
-
-    const savedAt = room.promptVersionCreatedAt ?? room.promptSavedAt;
-    if (savedAt) return new Date(savedAt).toLocaleString('ko-KR');
-
-    return room.promptVersionId ? `버전 ${room.promptVersionId}` : '수정 프롬프트';
+    if (room.promptSource === 'default') return '기본 프롬프트';
+    const savedAt = room.promptSavedAt
+      ? new Date(room.promptSavedAt).toLocaleString('ko-KR')
+      : '저장 시각 미기록';
+    return `수정 프롬프트 · ${room.promptId ?? 'ID 미기록'} · ${savedAt}`;
   }
 
   function formatFeedbackCondition(room: RealtimeRoomStatus) {
@@ -423,15 +412,13 @@ function RealtimeSessionSection({
                       <span className="text-foreground font-semibold">
                         {room.evaluationId ?? '미기록'}
                       </span>
-                    </span>
-                    <span className="text-muted-foreground text-xs">
-                      적용 프롬프트:{' '}
+                      {' · Prompt '}
                       <span className="text-foreground font-semibold">
-                        {formatPromptApplied(room)}
+                        {room.evaluationPromptId ?? '미기록'}
                       </span>
                     </span>
                     <span className="text-muted-foreground text-xs">
-                      Manifest Version:{' '}
+                      Version:{' '}
                       <span className="text-foreground font-semibold">
                         {room.evaluationPromptVersion ?? '미기록'}
                       </span>
@@ -763,12 +750,15 @@ export default function AdminPage() {
       {/* 헤더 */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold">관리자</h1>
-        <a
-          href="/admin/dashboard"
-          className="text-muted-foreground hover:text-foreground text-sm transition-colors"
-        >
-          대시보드 →
-        </a>
+        <div className="flex items-center gap-3">
+          <a
+            href="/admin/dashboard"
+            className="text-muted-foreground hover:text-foreground text-sm transition-colors"
+          >
+            대시보드 →
+          </a>
+          <AdminLogoutButton />
+        </div>
       </div>
 
       <div className="bg-muted grid grid-cols-2 rounded-lg p-1">

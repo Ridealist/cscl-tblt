@@ -10,6 +10,9 @@ AGENT_SERVICES=(
   "${PIPELINE_AGENT_SERVICE:-cscl-agent-pipeline}"
   "${REALTIME_AGENT_SERVICE:-cscl-agent-realtime}"
 )
+# Runtime state files restored after checkout. In production, config.json and
+# prompt_config.json are retained only for local fallback/import/reference; the
+# Supabase source of truth is app_settings and realtime_prompt_versions.
 STATE_FILES=(
   ".env"
   "client/.env.local"
