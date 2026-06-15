@@ -58,7 +58,7 @@ async def test_5_turn_conversation() -> None:
         await session.start(_make_assistant())
 
         # 턴 1: 인사 및 주말 계획 시작
-        result = await session.run(user_input="Hi Daisy! Are you free this weekend?")
+        result = await session.run(user_input="Hi Kate! Are you free this weekend?")
         await (
             result.expect.next_event()
             .is_message(role="assistant")
