@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, unlink, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
+import 'server-only';
 import {
   type PromptVersionFile,
   type PromptVersionSummary,
@@ -70,8 +71,8 @@ export type EvaluationPromptState = {
     }
   >;
   openingSentence: string;
-  promptVersionCreatedAt: string | null;
   prompt: string;
+  promptVersionCreatedAt: string | null;
   promptVersionHash: string | null;
   promptVersionId: string | null;
   promptVersionLabel: string | null;

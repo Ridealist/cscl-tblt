@@ -255,7 +255,7 @@
         // 참가자 맵 갱신 (기존 정보 유지)
         for (const entry of data.entries || []) {
           if (entry.role === 'user' && entry.participant_identity) {
-            const name = entry.participant_name || entry.participant_identity;
+            const name = entry.student_name || entry.participant_name || entry.participant_identity;
             getPalette(entry.participant_identity, name);
           }
         }
@@ -284,7 +284,7 @@
           </div>`;
           } else {
             const identity = entry.participant_identity || 'unknown';
-            const name = entry.participant_name || identity;
+            const name = entry.student_name || entry.participant_name || identity;
             const { palette, initial } = getPalette(identity, name);
 
             msg.innerHTML = `

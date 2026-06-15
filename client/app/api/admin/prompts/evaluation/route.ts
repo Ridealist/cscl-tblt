@@ -6,6 +6,7 @@ import {
   readEvaluationPromptState,
   writeEvaluationPromptOverride,
 } from '@/lib/evaluation-prompt-source';
+import { requireAdmin } from '@/lib/supabase/admin-auth';
 
 function statusForError(error: unknown) {
   return error instanceof EvaluationPromptSourceError ? error.status : 500;
@@ -25,6 +26,9 @@ function defaultRequestedFromRequest(req: Request) {
 }
 
 export async function GET(req: Request) {
+  const adminError = await requireAdmin();
+  if (adminError) return adminError;
+
   try {
     return NextResponse.json(
       await readEvaluationPromptState({
@@ -42,6 +46,9 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const adminError = await requireAdmin();
+  if (adminError) return adminError;
+
   try {
     const body = await req.json();
     if (body?.action === 'activate') {
@@ -70,6 +77,9 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+  const adminError = await requireAdmin();
+  if (adminError) return adminError;
+
   try {
     return NextResponse.json(
       await deleteEvaluationPromptOverride({

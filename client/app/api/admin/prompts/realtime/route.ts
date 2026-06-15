@@ -1,47 +1,28 @@
 import { NextResponse } from 'next/server';
-import { readFile, unlink } from 'fs/promises';
+import { readFile } from 'fs/promises';
 import { join } from 'path';
-import {
-  type PromptVersionFile,
-  type PromptVersionSummary,
-  activatePromptVersion,
-  clearActivePromptVersion,
-  createPromptVersion,
-  deletePromptVersion,
-  readActivePromptVersion,
-  readPromptVersion,
-  readPromptVersionIndex,
-} from '@/lib/prompt-version-store';
 import {
   DEFAULT_REALTIME_PROMPT_METADATA,
   type RealtimeFeedbackConditionSummary,
   type RealtimePromptConfig,
-  type RealtimePromptMetadata,
   type RealtimePromptState,
   type RealtimeTaskCardSummary,
   validateRealtimePromptConfig,
 } from '@/lib/realtime-prompt-config';
+import {
+  RealtimePromptStoreError,
+  type RealtimePromptVersion,
+  deactivateActiveRealtimePromptVersion,
+  readActiveRealtimePromptVersion,
+  saveRealtimePromptVersion,
+} from '@/lib/realtime-prompt-store';
+import { readSettings } from '@/lib/settings-store';
+import { getAdminAuthResult, requireAdmin } from '@/lib/supabase/admin-auth';
 
-const PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.json');
-const RUNTIME_CONFIG_PATH = join(process.cwd(), '..', 'config.json');
 const DEFAULT_PROMPT_SOURCE_DIR = join(process.cwd(), '..', 'prompts', 'realtime');
 const PROMPT_SOURCE_MANIFEST_PATH = join(DEFAULT_PROMPT_SOURCE_DIR, 'manifest.json');
 const PROMPT_FIELDS = ['basePrompt', 'dominantPrompt', 'collaborativePrompt'] as const;
 
-type PromptFileShape = {
-  realtime?: unknown;
-};
-
-type StoredTaskCardPrompt = {
-  prompt?: unknown;
-};
-type StoredRealtimePrompt = Partial<RealtimePromptConfig> &
-  Partial<RealtimePromptMetadata> & {
-    passivePrompt?: unknown;
-    feedbackPrompts?: unknown;
-    taskCardPrompts?: unknown;
-    taskCards?: unknown;
-  };
 type PromptManifest = Record<(typeof PROMPT_FIELDS)[number], { file: string; marker: string }> & {
   feedbackConditionManifest?: string;
   defaultFeedbackConditionId?: string;
@@ -72,171 +53,30 @@ type PromptDefaults = RealtimePromptConfig & {
   taskCards: RealtimeTaskCardSummary[];
 };
 
-function readStringMap(value: unknown): Record<string, string> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(
-        (entry): entry is [string, string] => typeof entry[1] === 'string' && !!entry[1].trim()
-      )
-      .map(([key, text]) => [key, text.trim()])
-  );
-}
-
-function readStoredFeedbackPrompts(
-  source: StoredRealtimePrompt | undefined,
-  fallbackFeedbackConditionId?: string
-): Record<string, string> {
-  const prompts = readStringMap(source?.feedbackPrompts);
-  const legacyFeedbackConditionId =
-    typeof source?.feedbackConditionId === 'string' && source.feedbackConditionId.trim()
-      ? source.feedbackConditionId.trim()
-      : fallbackFeedbackConditionId;
-  if (
-    legacyFeedbackConditionId &&
-    prompts[legacyFeedbackConditionId] === undefined &&
-    typeof source?.feedbackPrompt === 'string' &&
-    source.feedbackPrompt.trim()
-  ) {
-    prompts[legacyFeedbackConditionId] = source.feedbackPrompt.trim();
-  }
-  return prompts;
-}
-
-function readStoredTaskCards(
-  source: StoredRealtimePrompt | undefined,
-  fallbackTaskCardId?: string
-): Record<string, { prompt?: string }> {
-  const stored: Record<string, { prompt?: string }> = {};
-
-  if (
-    source?.taskCards &&
-    typeof source.taskCards === 'object' &&
-    !Array.isArray(source.taskCards)
-  ) {
-    for (const [taskCardId, value] of Object.entries(source.taskCards)) {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
-      const taskCard = value as StoredTaskCardPrompt;
-      const prompt =
-        typeof taskCard.prompt === 'string' && taskCard.prompt.trim()
-          ? taskCard.prompt.trim()
-          : undefined;
-      if (prompt) {
-        stored[taskCardId] = { prompt };
-      }
-    }
-  }
-
-  if (
-    fallbackTaskCardId &&
-    stored[fallbackTaskCardId] === undefined &&
-    typeof source?.taskCardPrompt === 'string' &&
-    source.taskCardPrompt.trim()
-  ) {
-    stored[fallbackTaskCardId] = {
-      prompt: source.taskCardPrompt.trim(),
-    };
-  }
-
-  return stored;
-}
-
-function applyTaskCardOverrides(
-  taskCards: RealtimeTaskCardSummary[],
-  storedTaskCards: Record<string, { prompt?: string }>
-): RealtimeTaskCardSummary[] {
-  return taskCards.map((taskCard) => {
-    const stored = storedTaskCards[taskCard.id];
-    if (!stored) return taskCard;
-
-    return {
-      ...taskCard,
-      prompt: stored.prompt ?? taskCard.prompt,
-    };
-  });
-}
-
-function applyFeedbackPromptOverrides(
-  feedbackConditions: RealtimeFeedbackConditionSummary[],
-  feedbackPrompts: Record<string, string>
-): RealtimeFeedbackConditionSummary[] {
-  return feedbackConditions.map((condition) => ({
-    ...condition,
-    prompt: feedbackPrompts[condition.id] ?? condition.prompt,
-  }));
-}
-
-async function readRealtimeVersionMetadata(): Promise<{
-  activePromptVersionId: string | null;
-  promptVersions: PromptVersionSummary[];
-}> {
-  const index = await readPromptVersionIndex();
+function versionToPromptState(
+  version: RealtimePromptVersion,
+  defaults: PromptDefaults
+): RealtimePromptState {
   return {
-    activePromptVersionId: index.active.realtime ?? null,
-    promptVersions: index.versions.realtime,
-  };
-}
-
-async function stateFromRealtimeVersion(
-  version: PromptVersionFile<RealtimePromptConfig>
-): Promise<RealtimePromptState> {
-  const result = validateRealtimePromptConfig(version.config);
-  if (!result.ok) {
-    throw new Error(result.error);
-  }
-  const config = result.config;
-  const defaults = await readDefaultPromptConfigForTask(
-    config.taskCardId,
-    config.feedbackConditionId
-  );
-  const feedbackConditions = applyFeedbackPromptOverrides(defaults.feedbackConditions, {
-    [config.feedbackConditionId]: config.feedbackPrompt,
-  });
-  const taskCards = applyTaskCardOverrides(defaults.taskCards, {
-    [config.taskCardId]: {
-      prompt: config.taskCardPrompt,
-    },
-  });
-  const versionMetadata = await readRealtimeVersionMetadata();
-
-  return {
-    ...config,
-    feedbackConditions,
-    taskCards,
-    promptId: version.id,
-    savedAt: version.createdAt,
-    source: 'custom',
-    activePromptVersionId: versionMetadata.activePromptVersionId,
-    promptVersionCreatedAt: version.createdAt,
-    promptVersionHash: version.hash,
-    promptVersionId: version.id,
-    promptVersionLabel: version.label,
-    promptVersions: versionMetadata.promptVersions,
+    basePrompt: version.basePrompt,
+    dominantPrompt: version.dominantPrompt,
+    collaborativePrompt: version.collaborativePrompt,
+    feedbackConditionId: version.feedbackConditionId,
+    feedbackPrompt: version.feedbackPrompt,
+    taskCardId: version.taskCardId,
+    taskCardPrompt: version.taskCardPrompt,
+    promptId: version.promptId,
+    savedAt: version.savedAt,
+    source: version.source,
+    feedbackConditions: defaults.feedbackConditions,
+    taskCards: defaults.taskCards,
     usingDefault: false,
-  };
-}
-
-function readPromptMetadata(value: unknown): RealtimePromptMetadata {
-  if (!value || typeof value !== 'object') {
-    return { promptId: 'custom-unknown', savedAt: null, source: 'custom' };
-  }
-  const source = value as Partial<StoredRealtimePrompt>;
-  return {
-    promptId:
-      typeof source.promptId === 'string' && source.promptId ? source.promptId : 'custom-unknown',
-    savedAt: typeof source.savedAt === 'string' && source.savedAt ? source.savedAt : null,
-    source: 'custom',
   };
 }
 
 async function readRuntimeFeedbackConditionId(): Promise<string | undefined> {
   try {
-    const raw = JSON.parse(await readFile(RUNTIME_CONFIG_PATH, 'utf-8')) as {
-      feedbackConditionId?: unknown;
-    };
-    return typeof raw.feedbackConditionId === 'string' && raw.feedbackConditionId.trim()
-      ? raw.feedbackConditionId.trim()
-      : undefined;
+    return (await readSettings()).feedbackConditionId;
   } catch {
     return undefined;
   }
@@ -417,148 +257,59 @@ async function readTaskCardConfig(
   };
 }
 
-async function readDefaultPromptState(
-  versionMetadata?: Awaited<ReturnType<typeof readRealtimeVersionMetadata>>
-): Promise<RealtimePromptState> {
-  const metadata = versionMetadata ?? (await readRealtimeVersionMetadata());
+async function readPromptConfig(): Promise<RealtimePromptState> {
+  const activeVersion = await readActiveRealtimePromptVersion();
+  if (activeVersion) {
+    const defaults = await readDefaultPromptConfigForTask(
+      activeVersion.taskCardId,
+      activeVersion.feedbackConditionId
+    );
+    return versionToPromptState(activeVersion, defaults);
+  }
+
   return {
     ...(await readDefaultPromptConfigForTask(undefined, await readRuntimeFeedbackConditionId())),
     ...DEFAULT_REALTIME_PROMPT_METADATA,
-    activePromptVersionId: metadata.activePromptVersionId,
-    promptVersionCreatedAt: null,
-    promptVersionHash: null,
-    promptVersionId: null,
-    promptVersionLabel: null,
-    promptVersions: metadata.promptVersions,
     usingDefault: true,
   };
 }
 
-async function readPromptConfig(options?: {
-  useDefault?: boolean;
-  versionId?: string;
-}): Promise<RealtimePromptState> {
-  const requestedVersion = options?.useDefault
-    ? null
-    : options?.versionId
-      ? await readPromptVersion<RealtimePromptConfig>('realtime', options.versionId)
-      : await readActivePromptVersion<RealtimePromptConfig>('realtime');
-  if (requestedVersion) {
-    return stateFromRealtimeVersion(requestedVersion);
-  }
-
-  const versionMetadata = await readRealtimeVersionMetadata();
-  if (options?.useDefault) {
-    return readDefaultPromptState(versionMetadata);
-  }
-
-  let source: StoredRealtimePrompt | null = null;
-  try {
-    const raw = JSON.parse(await readFile(PROMPT_CONFIG_PATH, 'utf-8')) as PromptFileShape;
-    source =
-      raw.realtime && typeof raw.realtime === 'object' && !Array.isArray(raw.realtime)
-        ? (raw.realtime as StoredRealtimePrompt)
-        : null;
-  } catch {
-    // Fall back to the tracked prompt defaults.
-  }
-
-  if (!source) {
-    return readDefaultPromptState(versionMetadata);
-  }
-
-  try {
-    const runtimeFeedbackConditionId = await readRuntimeFeedbackConditionId();
-    const sourceTaskCardId =
-      typeof source?.taskCardId === 'string' && source.taskCardId.trim()
-        ? source.taskCardId.trim()
-        : undefined;
-    const defaults = await readDefaultPromptConfigForTask(
-      sourceTaskCardId,
-      runtimeFeedbackConditionId
-    );
-    const storedFeedbackPrompts = readStoredFeedbackPrompts(source, defaults.feedbackConditionId);
-    const storedTaskCards = readStoredTaskCards(source, defaults.taskCardId);
-    const feedbackConditions = applyFeedbackPromptOverrides(
-      defaults.feedbackConditions,
-      storedFeedbackPrompts
-    );
-    const taskCards = applyTaskCardOverrides(defaults.taskCards, storedTaskCards);
-    const selectedTaskCard = taskCards.find((taskCard) => taskCard.id === defaults.taskCardId);
-    const result = validateRealtimePromptConfig({
-      basePrompt: source?.basePrompt ?? defaults.basePrompt,
-      dominantPrompt: source?.dominantPrompt ?? defaults.dominantPrompt,
-      collaborativePrompt:
-        source?.collaborativePrompt ?? source?.passivePrompt ?? defaults.collaborativePrompt,
-      feedbackConditionId: defaults.feedbackConditionId,
-      feedbackPrompt:
-        storedFeedbackPrompts[defaults.feedbackConditionId] ?? defaults.feedbackPrompt,
-      taskCardId: defaults.taskCardId,
-      taskCardPrompt: selectedTaskCard?.prompt ?? defaults.taskCardPrompt,
-    });
-    if (result.ok) {
-      return {
-        ...result.config,
-        feedbackConditions,
-        taskCards,
-        ...readPromptMetadata(source),
-        activePromptVersionId: versionMetadata.activePromptVersionId,
-        promptVersionCreatedAt: null,
-        promptVersionHash: null,
-        promptVersionId: null,
-        promptVersionLabel: null,
-        promptVersions: versionMetadata.promptVersions,
-        usingDefault: false,
-      };
-    }
-  } catch {
-    // Fall back to the tracked prompt defaults.
-  }
-
-  return readDefaultPromptState(versionMetadata);
+function getRequestPromptText(body: unknown, key: keyof RealtimePromptConfig, fallback: string) {
+  if (!body || typeof body !== 'object') return fallback;
+  const value = (body as Partial<Record<keyof RealtimePromptConfig, unknown>>)[key];
+  return typeof value === 'string' && value.trim() ? value : fallback;
 }
 
-function versionIdFromRequest(req: Request) {
-  return new URL(req.url).searchParams.get('versionId') ?? undefined;
+function promptStoreErrorResponse(error: unknown, fallbackMessage: string) {
+  if (error instanceof RealtimePromptStoreError) {
+    return NextResponse.json({ error: error.message }, { status: error.status });
+  }
+  return NextResponse.json({ error: fallbackMessage }, { status: 500 });
 }
 
-function defaultRequestedFromRequest(req: Request) {
-  const value = new URL(req.url).searchParams.get('default');
-  return value === '1' || value === 'true';
-}
+export async function GET() {
+  const adminError = await requireAdmin();
+  if (adminError) return adminError;
 
-export async function GET(req: Request) {
   try {
-    return NextResponse.json(
-      await readPromptConfig({
-        useDefault: defaultRequestedFromRequest(req),
-        versionId: versionIdFromRequest(req),
-      })
-    );
-  } catch {
-    return NextResponse.json(
-      { error: '기본 프롬프트 파일을 불러오지 못했습니다.' },
-      { status: 500 }
-    );
+    return NextResponse.json(await readPromptConfig());
+  } catch (error) {
+    return promptStoreErrorResponse(error, '기본 프롬프트 파일을 불러오지 못했습니다.');
   }
 }
 
 export async function POST(req: Request) {
+  const auth = await getAdminAuthResult();
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
   try {
     const body = await req.json();
-    if (body?.action === 'activate') {
-      const versionId = typeof body.versionId === 'string' ? body.versionId : '';
-      const version = await activatePromptVersion('realtime', versionId);
-      if (!version) {
-        return NextResponse.json({ error: '프롬프트 버전을 찾을 수 없습니다.' }, { status: 404 });
-      }
-      return NextResponse.json(await readPromptConfig({ versionId }));
-    }
-
     const runtimeFeedbackConditionId = await readRuntimeFeedbackConditionId();
     const requestedFeedbackConditionId =
       typeof body?.feedbackConditionId === 'string' && body.feedbackConditionId.trim()
-        ? body.feedbackConditionId.trim()
+        ? body.feedbackConditionId
         : runtimeFeedbackConditionId;
     const defaults = await readDefaultPromptConfigForTask(
       typeof body?.taskCardId === 'string' ? body.taskCardId : undefined,
@@ -567,58 +318,33 @@ export async function POST(req: Request) {
     const result = validateRealtimePromptConfig({
       ...body,
       feedbackConditionId: defaults.feedbackConditionId,
+      feedbackPrompt: getRequestPromptText(body, 'feedbackPrompt', defaults.feedbackPrompt),
       taskCardId: defaults.taskCardId,
-      feedbackPrompt:
-        typeof body?.feedbackPrompt === 'string' && body.feedbackPrompt.trim()
-          ? body.feedbackPrompt
-          : defaults.feedbackPrompt,
-      taskCardPrompt:
-        typeof body?.taskCardPrompt === 'string' && body.taskCardPrompt.trim()
-          ? body.taskCardPrompt
-          : defaults.taskCardPrompt,
+      taskCardPrompt: getRequestPromptText(body, 'taskCardPrompt', defaults.taskCardPrompt),
     });
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
 
-    const version = await createPromptVersion({
-      purpose: 'realtime',
-      label: typeof body?.versionLabel === 'string' ? body.versionLabel : undefined,
-      config: result.config,
-      activate: true,
-    });
-    return NextResponse.json(await readPromptConfig({ versionId: version.id }));
-  } catch {
-    return NextResponse.json({ error: '프롬프트 저장 실패' }, { status: 500 });
+    const version = await saveRealtimePromptVersion(result.config, { createdBy: auth.user.id });
+    return NextResponse.json(versionToPromptState(version, defaults));
+  } catch (error) {
+    return promptStoreErrorResponse(error, '프롬프트 저장 실패');
   }
 }
 
-export async function DELETE(req: Request) {
-  const versionId = versionIdFromRequest(req);
-  if (versionId) {
-    try {
-      await deletePromptVersion('realtime', versionId);
-      return NextResponse.json(await readPromptConfig());
-    } catch {
-      return NextResponse.json({ error: '프롬프트 버전 삭제 실패' }, { status: 500 });
-    }
-  }
+export async function DELETE() {
+  const adminError = await requireAdmin();
+  if (adminError) return adminError;
 
   try {
-    await clearActivePromptVersion('realtime');
-    await unlink(PROMPT_CONFIG_PATH);
+    await deactivateActiveRealtimePromptVersion();
+    return NextResponse.json({
+      ...(await readDefaultPromptConfigForTask(undefined, await readRuntimeFeedbackConditionId())),
+      ...DEFAULT_REALTIME_PROMPT_METADATA,
+      usingDefault: true,
+    });
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      return NextResponse.json({ error: '기본값 복원 실패' }, { status: 500 });
-    }
-  }
-
-  try {
-    return NextResponse.json(await readPromptConfig());
-  } catch {
-    return NextResponse.json(
-      { error: '기본 프롬프트 파일을 불러오지 못했습니다.' },
-      { status: 500 }
-    );
+    return promptStoreErrorResponse(error, '기본값 복원 실패');
   }
 }

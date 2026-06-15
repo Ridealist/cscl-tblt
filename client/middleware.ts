@@ -1,52 +1,65 @@
 import { type NextRequest, NextResponse } from 'next/server';
+import { getAdminAuthFromRequest, updateSupabaseSession } from '@/lib/supabase/proxy';
 
-function unauthorized() {
-  return new NextResponse('Authentication required', {
-    status: 401,
-    headers: {
-      'WWW-Authenticate': 'Basic realm="CSCL TBLT Admin"',
-    },
+const PUBLIC_ADMIN_PATHS = new Set(['/admin/login', '/admin/forbidden']);
+
+function isProtectedApiPath(pathname: string) {
+  return (
+    pathname === '/api/dispatch' ||
+    pathname.startsWith('/api/dispatch/') ||
+    pathname === '/api/logs' ||
+    pathname.startsWith('/api/logs/') ||
+    pathname === '/api/rooms/terminate' ||
+    pathname.startsWith('/api/admin/')
+  );
+}
+
+function copyCookies(source: NextResponse, target: NextResponse) {
+  source.cookies.getAll().forEach((cookie) => {
+    target.cookies.set(cookie.name, cookie.value);
   });
+  return target;
 }
 
-function readBasicAuth(header: string | null): { username: string; password: string } | null {
-  if (!header) return null;
-
-  const [scheme, encoded] = header.split(' ');
-  if (scheme !== 'Basic' || !encoded) return null;
-
-  try {
-    const decoded = atob(encoded);
-    const separatorIndex = decoded.indexOf(':');
-    if (separatorIndex < 0) return null;
-
-    return {
-      username: decoded.slice(0, separatorIndex),
-      password: decoded.slice(separatorIndex + 1),
-    };
-  } catch {
-    return null;
-  }
+function redirectToLogin(request: NextRequest, response: NextResponse) {
+  const loginUrl = new URL('/admin/login', request.url);
+  loginUrl.searchParams.set('next', `${request.nextUrl.pathname}${request.nextUrl.search}`);
+  return copyCookies(response, NextResponse.redirect(loginUrl));
 }
 
-export function middleware(request: NextRequest) {
-  const adminUsername = process.env.ADMIN_USERNAME;
-  const adminPassword = process.env.ADMIN_PASSWORD;
+function redirectToForbidden(request: NextRequest, response: NextResponse) {
+  return copyCookies(response, NextResponse.redirect(new URL('/admin/forbidden', request.url)));
+}
 
-  if (!adminUsername || !adminPassword) {
-    if (process.env.NODE_ENV !== 'production') {
-      return NextResponse.next();
-    }
+function jsonError(message: string, status: number, response: NextResponse) {
+  return copyCookies(response, NextResponse.json({ error: message }, { status }));
+}
 
-    return new NextResponse('Admin credentials not configured', { status: 503 });
+export async function middleware(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+
+  if (PUBLIC_ADMIN_PATHS.has(pathname)) {
+    return updateSupabaseSession(request);
   }
 
-  const credentials = readBasicAuth(request.headers.get('authorization'));
-  if (credentials?.username === adminUsername && credentials.password === adminPassword) {
-    return NextResponse.next();
+  const auth = await getAdminAuthFromRequest(request);
+  if (auth.ok) {
+    return auth.response;
   }
 
-  return unauthorized();
+  if (isProtectedApiPath(pathname)) {
+    return jsonError(auth.error, auth.status, auth.response);
+  }
+
+  if (auth.status === 401) {
+    return redirectToLogin(request, auth.response);
+  }
+
+  if (auth.status === 403) {
+    return redirectToForbidden(request, auth.response);
+  }
+
+  return new NextResponse(auth.error, { status: auth.status });
 }
 
 export const config = {

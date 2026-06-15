@@ -1,15 +1,14 @@
 import { NextResponse } from 'next/server';
-import { readFileSync } from 'fs';
-import { AccessToken, type AccessTokenOptions, type VideoGrant } from 'livekit-server-sdk';
-import { join } from 'path';
+import {
+  AccessToken,
+  type AccessTokenOptions,
+  AgentDispatchClient,
+  RoomServiceClient,
+  type VideoGrant,
+} from 'livekit-server-sdk';
 import { RoomConfiguration } from '@livekit/protocol';
 import { type AgentMode, normalizeAgentMode } from '@/lib/agent-mode';
-import {
-  type AgentRole,
-  DEFAULT_AGENT_ROLE,
-  getAgentNameForConfig,
-  normalizeAgentRole,
-} from '@/lib/agent-role';
+import { type AgentRole, getAgentNameForConfig } from '@/lib/agent-role';
 import {
   EvaluationPromptSourceError,
   readEvaluationPromptState,
@@ -19,12 +18,18 @@ import {
   type RealtimePromptMetadata,
 } from '@/lib/realtime-prompt-config';
 import {
+  RealtimePromptStoreError,
+  readActiveRealtimePromptVersion,
+} from '@/lib/realtime-prompt-store';
+import {
   type ActivityType,
   type SessionPurpose,
   getActivityTypeForSessionPurpose,
   getSessionPurposeForActivity,
-  normalizeSessionPurpose,
 } from '@/lib/session-activity';
+import { type AppSettings, SettingsStoreError, readSettings } from '@/lib/settings-store';
+import { studentDefaultDisplayName } from '@/lib/student';
+import { type StudentSession, getStudentSession } from '@/lib/student-auth';
 
 type ConnectionDetails = {
   serverUrl: string;
@@ -37,12 +42,6 @@ type ConnectionDetails = {
 const API_KEY = process.env.LIVEKIT_API_KEY;
 const API_SECRET = process.env.LIVEKIT_API_SECRET;
 const LIVEKIT_URL = process.env.LIVEKIT_URL;
-const CONFIG_PATH = join(process.cwd(), '..', 'config.json');
-const PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.json');
-const PROMPT_VERSIONS_DIR = join(process.cwd(), '..', 'prompt_versions');
-const PROMPT_VERSIONS_INDEX_PATH = join(PROMPT_VERSIONS_DIR, 'index.json');
-const PROMPT_VERSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
-const DEFAULT_FEEDBACK_CONDITION_ID = 'no_corrective';
 
 type RuntimeConfig = {
   agentMode: AgentMode;
@@ -54,11 +53,13 @@ type RuntimeConfig = {
 
 type RealtimePromptSnapshot = RealtimePromptMetadata & {
   feedbackConditionId?: string;
-  promptVersionCreatedAt?: string | null;
-  promptVersionHash?: string;
   promptVersionId?: string;
-  promptVersionLabel?: string;
   taskCardId?: string;
+};
+
+type StudentTokenContext = {
+  displayName: string;
+  student: StudentSession;
 };
 
 type SessionActivityContext = {
@@ -67,11 +68,9 @@ type SessionActivityContext = {
   evaluationId?: string;
   evaluationPromptId?: string;
   evaluationPromptVersion?: string;
-  promptSource?: RealtimePromptMetadata['source'];
-  promptVersionCreatedAt?: string | null;
-  promptVersionId?: string;
-  promptVersionHash?: string;
-  promptVersionLabel?: string;
+  evaluationPromptVersionId?: string;
+  promptSavedAt?: string | null;
+  promptSource?: string;
   sessionPurpose: SessionPurpose;
 };
 
@@ -116,24 +115,28 @@ export async function POST(req: Request) {
 
     const body = (await req.json()) as Record<string, unknown>;
 
-    const participantName = text(body?.participant_name);
-    const roomName = text(body?.room_name);
-    const requestedAgentMode = parseBodyAgentMode(body?.agent_mode);
-    if (!participantName || !roomName || !requestedAgentMode) {
-      logTokenEvent('rejected incomplete token request', {
-        participantNameSet: Boolean(participantName),
-        roomNameSet: Boolean(roomName),
-        requestedAgentMode: body?.agent_mode ?? null,
-      });
+    const student = await getStudentSession();
+    if (!student) {
       return NextResponse.json(
-        { error: '세션 정보가 누락되었습니다. 활동 선택 화면에서 다시 입장해주세요.' },
-        { status: 400, headers: { 'Cache-Control': 'no-store' } }
+        { error: '학생 로그인이 필요합니다.' },
+        { status: 401, headers: { 'Cache-Control': 'no-store' } }
       );
     }
 
-    const participantIdentity = `${participantName}_${Math.floor(Math.random() * 10_000)}`;
-    const config = readRuntimeConfig();
-    const agentMode = inferAgentMode(requestedAgentMode, roomName, config.agentMode);
+    const displayName =
+      typeof body?.display_name === 'string' && body.display_name.trim()
+        ? body.display_name.trim()
+        : studentDefaultDisplayName(student);
+    const roomName = typeof body?.room_name === 'string' ? body.room_name.trim() : '';
+    if (!displayName || !roomName) {
+      return NextResponse.json(
+        { error: 'display_name and room_name are required.' },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+    const participantIdentity = createStudentParticipantIdentity(student);
+    const config = await readRuntimeConfig();
+    const agentMode = inferAgentMode(body?.agent_mode, roomName, config.agentMode);
     const sessionActivity =
       agentMode === 'realtime'
         ? await readSessionActivityContext(body, roomName, config.sessionPurpose)
@@ -141,7 +144,7 @@ export async function POST(req: Request) {
     if (agentMode === 'realtime' && config.realtimeResetting) {
       logTokenEvent('rejected realtime token during reset', {
         roomName,
-        participantName,
+        studentNumber: student.studentNumber,
         requestedAgentMode: body?.agent_mode ?? null,
         requestedActivityType: body?.activity_type ?? null,
         requestedSessionPurpose: body?.session_purpose ?? null,
@@ -155,14 +158,16 @@ export async function POST(req: Request) {
     const agentName = getAgentNameForConfig(agentMode, config.agentRole);
     const promptSnapshot =
       agentMode === 'realtime' && sessionActivity?.sessionPurpose !== 'evaluation'
-        ? readRealtimePromptSnapshot()
+        ? await readRealtimePromptSnapshot()
         : undefined;
     const roomConfig = buildRoomConfig(
+      roomName,
       agentName,
       agentMode,
       config.agentRole,
-      promptSnapshot?.feedbackConditionId ?? config.feedbackConditionId,
+      config.feedbackConditionId,
       promptSnapshot,
+      { displayName, student },
       sessionActivity
     );
     const roomMetadata = JSON.parse(roomConfig.metadata);
@@ -173,7 +178,9 @@ export async function POST(req: Request) {
 
     logTokenEvent('issuing participant token', {
       roomName,
-      participantName,
+      displayName,
+      studentId: student.id,
+      studentNumber: student.studentNumber,
       participantIdentity,
       requestedAgentMode: body?.agent_mode ?? null,
       requestedActivityType: body?.activity_type ?? null,
@@ -191,16 +198,25 @@ export async function POST(req: Request) {
     });
 
     const participantToken = await createParticipantToken(
-      { identity: participantIdentity, name: participantName },
+      { identity: participantIdentity, name: displayName },
       roomName,
       roomConfig
     );
+    if (agentMode === 'pipeline') {
+      await ensureAgentDispatchRoom(roomName, agentName, roomConfig);
+    } else {
+      logTokenEvent('using token roomConfig for realtime agent dispatch', {
+        roomName,
+        agentName,
+        sessionActivity: sessionActivity ?? null,
+      });
+    }
 
     // Return connection details
     const data: ConnectionDetails = {
       serverUrl: LIVEKIT_URL,
       roomName,
-      participantName,
+      participantName: displayName,
       participantToken,
     };
     logTokenEvent('participant token issued', {
@@ -225,7 +241,11 @@ export async function POST(req: Request) {
       );
     }
 
-    if (error instanceof EvaluationPromptSourceError) {
+    if (
+      error instanceof SettingsStoreError ||
+      error instanceof RealtimePromptStoreError ||
+      error instanceof EvaluationPromptSourceError
+    ) {
       return NextResponse.json(
         { error: error.message },
         { status: error.status, headers: { 'Cache-Control': 'no-store' } }
@@ -250,29 +270,28 @@ function safeParseJson(value: string): unknown {
   }
 }
 
-function readRuntimeConfig(): RuntimeConfig {
-  try {
-    const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
-    return {
-      agentMode: normalizeAgentMode(raw.agentMode),
-      agentRole: normalizeAgentRole(raw.agentRole ?? raw.agentStance),
-      feedbackConditionId: normalizeFeedbackConditionId(raw.feedbackConditionId),
-      sessionPurpose: normalizeSessionPurpose(raw.sessionPurpose),
-      realtimeResetting: raw.realtimeResetting === true,
-    };
-  } catch {
-    return {
-      agentMode: 'pipeline',
-      agentRole: DEFAULT_AGENT_ROLE,
-      feedbackConditionId: DEFAULT_FEEDBACK_CONDITION_ID,
-      sessionPurpose: 'practice',
-      realtimeResetting: false,
-    };
-  }
+function safeIdentityPart(value: string) {
+  return (
+    value
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]+/g, '_')
+      .slice(0, 64) || 'student'
+  );
 }
 
-function normalizeFeedbackConditionId(value: unknown): string {
-  return typeof value === 'string' && value.trim() ? value.trim() : DEFAULT_FEEDBACK_CONDITION_ID;
+function createStudentParticipantIdentity(student: StudentSession) {
+  return `student-${safeIdentityPart(student.studentNumber)}-${Math.floor(Math.random() * 10_000)}`;
+}
+
+async function readRuntimeConfig(): Promise<RuntimeConfig> {
+  const settings: AppSettings = await readSettings();
+  return {
+    agentMode: settings.agentMode,
+    agentRole: settings.agentRole,
+    feedbackConditionId: settings.feedbackConditionId,
+    sessionPurpose: settings.sessionPurpose,
+    realtimeResetting: settings.realtimeResetting,
+  };
 }
 
 function inferAgentMode(value: unknown, roomName: string, fallback: AgentMode): AgentMode {
@@ -298,11 +317,6 @@ function parseRoomSessionPurpose(roomName: string): SessionPurpose | undefined {
 
 function parseBodyActivityType(value: unknown): ActivityType | undefined {
   return value === 'free_conversation' || value === 'task_solution' ? value : undefined;
-}
-
-function parseBodyAgentMode(value: unknown): AgentMode | undefined {
-  if (value === 'pipeline' || value === 'realtime') return value;
-  return undefined;
 }
 
 function parseBodySessionPurpose(value: unknown): SessionPurpose | undefined {
@@ -393,96 +407,52 @@ async function readSessionActivityContext(
     evaluationId: evaluationPrompt.evaluationId,
     evaluationPromptId: evaluationPrompt.evaluationPromptId,
     evaluationPromptVersion: evaluationPrompt.evaluationPromptVersion,
-    promptSource: evaluationPrompt.usingDefault ? 'default' : 'custom',
-    promptVersionCreatedAt: evaluationPrompt.promptVersionCreatedAt ?? undefined,
-    promptVersionId: evaluationPrompt.promptVersionId ?? undefined,
-    promptVersionHash: evaluationPrompt.promptVersionHash ?? undefined,
-    promptVersionLabel: evaluationPrompt.promptVersionLabel ?? undefined,
+    evaluationPromptVersionId: evaluationPrompt.promptVersionId ?? undefined,
+    promptSavedAt: evaluationPrompt.savedAt,
+    promptSource: evaluationPrompt.usingDefault ? 'evaluation' : 'custom',
     sessionPurpose,
   };
 }
 
-function readRealtimePromptSnapshot(): RealtimePromptSnapshot {
-  try {
-    const index = JSON.parse(readFileSync(PROMPT_VERSIONS_INDEX_PATH, 'utf-8')) as {
-      active?: { realtime?: unknown };
-    };
-    const versionId =
-      typeof index.active?.realtime === 'string' &&
-      PROMPT_VERSION_ID_PATTERN.test(index.active.realtime)
-        ? index.active.realtime
-        : null;
-    if (versionId) {
-      const version = JSON.parse(
-        readFileSync(join(PROMPT_VERSIONS_DIR, 'realtime', `${versionId}.json`), 'utf-8')
-      ) as {
-        createdAt?: unknown;
-        hash?: unknown;
-        id?: unknown;
-        purpose?: unknown;
-        label?: unknown;
-        config?: {
-          feedbackConditionId?: unknown;
-          taskCardId?: unknown;
-        };
-      };
-      if (version.purpose === 'realtime' && typeof version.id === 'string') {
-        return {
-          promptId: version.id,
-          savedAt: typeof version.createdAt === 'string' ? version.createdAt : null,
-          source: 'custom',
-          promptVersionCreatedAt: typeof version.createdAt === 'string' ? version.createdAt : null,
-          feedbackConditionId:
-            typeof version.config?.feedbackConditionId === 'string'
-              ? version.config.feedbackConditionId
-              : undefined,
-          promptVersionHash: typeof version.hash === 'string' ? version.hash : undefined,
-          promptVersionId: version.id,
-          promptVersionLabel: typeof version.label === 'string' ? version.label : undefined,
-          taskCardId:
-            typeof version.config?.taskCardId === 'string' ? version.config.taskCardId : undefined,
-        };
-      }
-    }
-  } catch {
-    // Fall back to legacy prompt_config.json metadata.
-  }
-
-  try {
-    const raw = JSON.parse(readFileSync(PROMPT_CONFIG_PATH, 'utf-8')) as { realtime?: unknown };
-    if (!raw.realtime || typeof raw.realtime !== 'object') {
-      return DEFAULT_REALTIME_PROMPT_METADATA;
-    }
-    const realtime = raw.realtime as Partial<RealtimePromptMetadata> & {
-      taskCardId?: unknown;
-    };
-    return {
-      promptId:
-        typeof realtime.promptId === 'string' && realtime.promptId
-          ? realtime.promptId
-          : 'custom-unknown',
-      savedAt: typeof realtime.savedAt === 'string' && realtime.savedAt ? realtime.savedAt : null,
-      source: 'custom',
-      taskCardId:
-        typeof realtime.taskCardId === 'string' && realtime.taskCardId
-          ? realtime.taskCardId
-          : undefined,
-    };
-  } catch {
+async function readRealtimePromptSnapshot(): Promise<RealtimePromptSnapshot> {
+  const activeVersion = await readActiveRealtimePromptVersion();
+  if (!activeVersion) {
     return DEFAULT_REALTIME_PROMPT_METADATA;
   }
+
+  return {
+    promptId: activeVersion.promptId,
+    promptVersionId: activeVersion.promptId,
+    savedAt: activeVersion.savedAt,
+    source: activeVersion.source,
+    feedbackConditionId: activeVersion.feedbackConditionId,
+    taskCardId: activeVersion.taskCardId,
+  };
 }
 
 function buildRoomConfig(
+  roomName: string,
   agentName: string,
   agentMode: AgentMode,
   agentRole: AgentRole,
   feedbackConditionId: string,
   promptSnapshot?: RealtimePromptSnapshot,
+  studentContext?: StudentTokenContext,
   sessionActivity?: SessionActivityContext
 ): RoomConfiguration {
+  const studentMetadata = studentContext
+    ? {
+        studentId: studentContext.student.id,
+        studentNumber: studentContext.student.studentNumber,
+        studentName: studentContext.student.name,
+        studentDisplayName: studentContext.displayName,
+        studentClassNumber: studentContext.student.classNumber,
+        studentRollNumber: studentContext.student.rollNumber,
+      }
+    : {};
   const metadata = JSON.stringify({
     agentMode,
+    ...studentMetadata,
     ...(agentMode === 'realtime'
       ? {
           sessionPurpose: sessionActivity?.sessionPurpose ?? 'practice',
@@ -493,39 +463,23 @@ function buildRoomConfig(
                 evaluationId: sessionActivity.evaluationId,
                 evaluationPromptId: sessionActivity.evaluationPromptId,
                 evaluationPromptVersion: sessionActivity.evaluationPromptVersion,
-                promptSource:
-                  sessionActivity.promptSource ?? DEFAULT_REALTIME_PROMPT_METADATA.source,
-                ...(sessionActivity.promptVersionId
-                  ? { promptVersionId: sessionActivity.promptVersionId }
+                ...(sessionActivity.evaluationPromptVersionId
+                  ? { promptVersionId: sessionActivity.evaluationPromptVersionId }
                   : {}),
-                ...(sessionActivity.promptVersionLabel
-                  ? { promptVersionLabel: sessionActivity.promptVersionLabel }
+                ...(sessionActivity.promptSavedAt
+                  ? { promptSavedAt: sessionActivity.promptSavedAt }
                   : {}),
-                ...(sessionActivity.promptVersionCreatedAt
-                  ? { promptVersionCreatedAt: sessionActivity.promptVersionCreatedAt }
-                  : {}),
-                ...(sessionActivity.promptVersionHash
-                  ? { promptVersionHash: sessionActivity.promptVersionHash }
-                  : {}),
+                promptSource: sessionActivity.promptSource ?? 'evaluation',
               }
             : {
                 agentRole,
                 promptId: promptSnapshot?.promptId ?? DEFAULT_REALTIME_PROMPT_METADATA.promptId,
-                promptSavedAt: promptSnapshot?.savedAt ?? DEFAULT_REALTIME_PROMPT_METADATA.savedAt,
-                promptSource: promptSnapshot?.source ?? DEFAULT_REALTIME_PROMPT_METADATA.source,
                 ...(promptSnapshot?.promptVersionId
                   ? { promptVersionId: promptSnapshot.promptVersionId }
                   : {}),
-                ...(promptSnapshot?.promptVersionLabel
-                  ? { promptVersionLabel: promptSnapshot.promptVersionLabel }
-                  : {}),
-                ...(promptSnapshot?.promptVersionCreatedAt
-                  ? { promptVersionCreatedAt: promptSnapshot.promptVersionCreatedAt }
-                  : {}),
-                ...(promptSnapshot?.promptVersionHash
-                  ? { promptVersionHash: promptSnapshot.promptVersionHash }
-                  : {}),
-                feedbackConditionId,
+                promptSavedAt: promptSnapshot?.savedAt ?? DEFAULT_REALTIME_PROMPT_METADATA.savedAt,
+                promptSource: promptSnapshot?.source ?? DEFAULT_REALTIME_PROMPT_METADATA.source,
+                feedbackConditionId: promptSnapshot?.feedbackConditionId ?? feedbackConditionId,
                 ...(promptSnapshot?.taskCardId ? { taskCardId: promptSnapshot.taskCardId } : {}),
               }),
         }
@@ -533,6 +487,7 @@ function buildRoomConfig(
   });
 
   return new RoomConfiguration({
+    name: roomName,
     metadata,
     agents: [
       {
@@ -543,11 +498,72 @@ function buildRoomConfig(
   });
 }
 
+function isAlreadyExistsError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = 'code' in error ? String(error.code) : '';
+  return code === 'already_exists' || /already exists|already_exists|exists/i.test(error.message);
+}
+
+async function ensureAgentDispatchRoom(
+  roomName: string,
+  agentName: string,
+  roomConfig: RoomConfiguration
+): Promise<void> {
+  if (!LIVEKIT_URL || !API_KEY || !API_SECRET) {
+    throw new Error('LiveKit credentials are not configured.');
+  }
+  const roomSvc = new RoomServiceClient(LIVEKIT_URL, API_KEY, API_SECRET);
+  const roomOptions: Parameters<RoomServiceClient['createRoom']>[0] = {
+    name: roomName,
+    metadata: roomConfig.metadata,
+  };
+
+  try {
+    await roomSvc.createRoom(roomOptions);
+    logTokenEvent('created room before agent dispatch', {
+      roomName,
+      agentName,
+    });
+  } catch (error) {
+    if (!isAlreadyExistsError(error)) {
+      throw error;
+    }
+    logTokenEvent('room already exists before agent dispatch', {
+      roomName,
+      agentName,
+    });
+  }
+
+  const dispatchClient = new AgentDispatchClient(LIVEKIT_URL, API_KEY, API_SECRET);
+  const dispatches = await dispatchClient.listDispatch(roomName).catch(() => []);
+  const hasDispatch = dispatches.some((dispatch) => dispatch.agentName === agentName);
+  if (hasDispatch) {
+    logTokenEvent('agent dispatch already exists', { roomName, agentName });
+    return;
+  }
+
+  try {
+    await dispatchClient.createDispatch(roomName, agentName, {
+      metadata: roomConfig.agents[0]?.metadata || roomConfig.metadata,
+    });
+    logTokenEvent('created explicit agent dispatch', { roomName, agentName });
+  } catch (error) {
+    if (isAlreadyExistsError(error)) {
+      logTokenEvent('agent dispatch already exists after create attempt', { roomName, agentName });
+      return;
+    }
+    throw error;
+  }
+}
+
 function createParticipantToken(
   userInfo: AccessTokenOptions,
   roomName: string,
   roomConfig: RoomConfiguration
 ): Promise<string> {
+  if (!API_KEY || !API_SECRET) {
+    throw new Error('LiveKit credentials are not configured.');
+  }
   const at = new AccessToken(API_KEY, API_SECRET, {
     ...userInfo,
     ttl: '15m',

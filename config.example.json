@@ -5,6 +5,7 @@
   "activeClass": 1,
   "agentMode": "pipeline",
   "agentRole": "dominant",
+  "feedbackConditionId": "no_corrective",
   "sessionPurpose": "practice",
   "realtimeResetting": false
 }

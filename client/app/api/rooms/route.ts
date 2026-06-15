@@ -1,50 +1,14 @@
 import { NextResponse } from 'next/server';
-import { readFileSync } from 'fs';
 import { RoomServiceClient } from 'livekit-server-sdk';
-import { join } from 'path';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
-import { type AgentMode, normalizeAgentMode } from '@/lib/agent-mode';
 import { type AgentRole, normalizeAgentRole } from '@/lib/agent-role';
 import type { RealtimePromptSource } from '@/lib/realtime-prompt-config';
-import {
-  type ActivityType,
-  type SessionPurpose,
-  normalizeActivityType,
-  normalizeSessionPurpose,
-} from '@/lib/session-activity';
+import type { ActivityType, SessionPurpose } from '@/lib/session-activity';
+import { SettingsStoreError, readSettings } from '@/lib/settings-store';
 
 const API_KEY = process.env.LIVEKIT_API_KEY;
 const API_SECRET = process.env.LIVEKIT_API_SECRET;
 const LIVEKIT_URL = process.env.LIVEKIT_URL;
-
-const CONFIG_PATH = join(process.cwd(), '..', 'config.json');
-const PROMPT_VERSIONS_DIR = join(process.cwd(), '..', 'prompt_versions');
-const PROMPT_VERSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
-
-function readConfig() {
-  try {
-    const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
-    return {
-      numClasses: typeof raw.numClasses === 'number' ? raw.numClasses : 4,
-      numGroupsPerClass: typeof raw.numGroupsPerClass === 'number' ? raw.numGroupsPerClass : 4,
-      classStart: typeof raw.classStart === 'number' ? raw.classStart : 1,
-      activeClass: typeof raw.activeClass === 'number' ? raw.activeClass : 1,
-      agentMode: normalizeAgentMode(raw.agentMode),
-      sessionPurpose: normalizeSessionPurpose(raw.sessionPurpose),
-      realtimeResetting: raw.realtimeResetting === true,
-    };
-  } catch {
-    return {
-      numClasses: 4,
-      numGroupsPerClass: 4,
-      classStart: 1,
-      activeClass: 1,
-      agentMode: 'pipeline' as AgentMode,
-      sessionPurpose: 'practice' as SessionPurpose,
-      realtimeResetting: false,
-    };
-  }
-}
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -65,9 +29,7 @@ function parseRealtimeRoomMetadata(metadata?: string): {
   evaluationPromptVersion?: string;
   feedbackConditionId?: string;
   promptId?: string;
-  promptVersionCreatedAt?: string | null;
   promptVersionId?: string;
-  promptVersionLabel?: string;
   promptSavedAt?: string | null;
   promptSource?: RealtimePromptSource;
   sessionPurpose?: SessionPurpose;
@@ -77,33 +39,29 @@ function parseRealtimeRoomMetadata(metadata?: string): {
   try {
     const parsed = JSON.parse(metadata) as {
       agentMode?: unknown;
-      activityType?: unknown;
       agentRole?: unknown;
       agentStance?: unknown;
+      activityType?: unknown;
       evaluationCharacter?: unknown;
       evaluationId?: unknown;
       evaluationPromptId?: unknown;
       evaluationPromptVersion?: unknown;
       feedbackConditionId?: unknown;
       promptId?: unknown;
-      promptVersionCreatedAt?: unknown;
       promptVersionId?: unknown;
-      promptVersionLabel?: unknown;
       promptSavedAt?: unknown;
       promptSource?: unknown;
       sessionPurpose?: unknown;
       taskCardId?: unknown;
     };
-    if (parsed.agentMode !== 'realtime') return {};
-    const sessionPurpose = normalizeSessionPurpose(
-      parsed.sessionPurpose,
-      normalizeActivityType(parsed.activityType)
-    );
-    const activityType = normalizeActivityType(parsed.activityType);
     const rawRole = parsed.agentRole ?? parsed.agentStance;
+    if (parsed.agentMode !== 'realtime') return {};
     return {
-      activityType,
-      agentRole: rawRole ? normalizeAgentRole(rawRole) : undefined,
+      ...(rawRole ? { agentRole: normalizeAgentRole(rawRole) } : {}),
+      activityType:
+        parsed.activityType === 'free_conversation' || parsed.activityType === 'task_solution'
+          ? parsed.activityType
+          : undefined,
       evaluationCharacter:
         typeof parsed.evaluationCharacter === 'string' ? parsed.evaluationCharacter : undefined,
       evaluationId: typeof parsed.evaluationId === 'string' ? parsed.evaluationId : undefined,
@@ -116,14 +74,8 @@ function parseRealtimeRoomMetadata(metadata?: string): {
       feedbackConditionId:
         typeof parsed.feedbackConditionId === 'string' ? parsed.feedbackConditionId : undefined,
       promptId: typeof parsed.promptId === 'string' ? parsed.promptId : undefined,
-      promptVersionCreatedAt:
-        typeof parsed.promptVersionCreatedAt === 'string' || parsed.promptVersionCreatedAt === null
-          ? parsed.promptVersionCreatedAt
-          : undefined,
       promptVersionId:
         typeof parsed.promptVersionId === 'string' ? parsed.promptVersionId : undefined,
-      promptVersionLabel:
-        typeof parsed.promptVersionLabel === 'string' ? parsed.promptVersionLabel : undefined,
       promptSavedAt:
         typeof parsed.promptSavedAt === 'string' || parsed.promptSavedAt === null
           ? parsed.promptSavedAt
@@ -132,7 +84,10 @@ function parseRealtimeRoomMetadata(metadata?: string): {
         parsed.promptSource === 'custom' || parsed.promptSource === 'default'
           ? parsed.promptSource
           : undefined,
-      sessionPurpose,
+      sessionPurpose:
+        parsed.sessionPurpose === 'evaluation' || parsed.sessionPurpose === 'practice'
+          ? parsed.sessionPurpose
+          : undefined,
       taskCardId: typeof parsed.taskCardId === 'string' ? parsed.taskCardId : undefined,
     };
   } catch {
@@ -140,49 +95,8 @@ function parseRealtimeRoomMetadata(metadata?: string): {
   }
 }
 
-function readPromptVersionSummary(
-  purpose: 'evaluation' | 'realtime',
-  versionId?: string
-): { label?: string; createdAt?: string | null } {
-  if (!versionId || !PROMPT_VERSION_ID_PATTERN.test(versionId)) return {};
-  try {
-    const version = JSON.parse(
-      readFileSync(join(PROMPT_VERSIONS_DIR, purpose, `${versionId}.json`), 'utf-8')
-    ) as {
-      createdAt?: unknown;
-      id?: unknown;
-      label?: unknown;
-      purpose?: unknown;
-    };
-    if (version.purpose !== purpose || version.id !== versionId) return {};
-    return {
-      label: typeof version.label === 'string' ? version.label : undefined,
-      createdAt: typeof version.createdAt === 'string' ? version.createdAt : null,
-    };
-  } catch {
-    return {};
-  }
-}
-
-function enrichPromptVersionMetadata(
-  room: ReturnType<typeof parseRealtimeRoomMetadata>
-): ReturnType<typeof parseRealtimeRoomMetadata> {
-  if (!room.promptVersionId || (room.promptVersionLabel && room.promptVersionCreatedAt)) {
-    return room;
-  }
-  const purpose = room.sessionPurpose === 'evaluation' ? 'evaluation' : 'realtime';
-  const summary = readPromptVersionSummary(purpose, room.promptVersionId);
-  return {
-    ...room,
-    promptVersionLabel: room.promptVersionLabel ?? summary.label,
-    promptVersionCreatedAt: room.promptVersionCreatedAt ?? summary.createdAt,
-  };
-}
-
-function isRealtimeRoomName(roomName: string): boolean {
-  return (
-    roomName.startsWith('realtime-') || roomName.startsWith('eval-') || roomName.startsWith('task-')
-  );
+function isRealtimeRoomName(name: string) {
+  return name.startsWith('realtime-') || name.startsWith('eval-') || name.startsWith('task-');
 }
 
 async function getRoomCounts(svc: RoomServiceClient, roomName: string): Promise<RoomCounts> {
@@ -209,8 +123,19 @@ export async function GET() {
     return NextResponse.json({ error: 'LiveKit credentials not configured' }, { status: 500 });
   }
 
-  const { activeClass, numGroupsPerClass, agentMode, sessionPurpose, realtimeResetting } =
-    readConfig();
+  let settings: Awaited<ReturnType<typeof readSettings>>;
+  try {
+    settings = await readSettings();
+  } catch (error) {
+    const status = error instanceof SettingsStoreError ? error.status : 500;
+    const message = error instanceof Error ? error.message : 'Settings store is unavailable.';
+    return NextResponse.json(
+      { error: message },
+      { status, headers: { 'Cache-Control': 'no-store' } }
+    );
+  }
+
+  const { activeClass, numGroupsPerClass, agentMode, realtimeResetting, sessionPurpose } = settings;
 
   const predefinedNames: string[] = Array.from(
     { length: numGroupsPerClass },
@@ -238,23 +163,20 @@ export async function GET() {
 
   const realtimeRooms = activeRooms
     .filter((room) => isRealtimeRoomName(room.name) && activeRoomNames.has(room.name))
-    .map((room) => {
-      const metadata = enrichPromptVersionMetadata(parseRealtimeRoomMetadata(room.metadata));
-      return {
-        name: room.name,
-        ...metadata,
-        ...(countMap.get(room.name) ?? {
-          numParticipants: 0,
-          totalParticipants: room.numParticipants,
-          numAgents: 0,
-          numEgress: 0,
-        }),
-      };
-    })
+    .map((room) => ({
+      name: room.name,
+      ...parseRealtimeRoomMetadata(room.metadata),
+      ...(countMap.get(room.name) ?? {
+        numParticipants: 0,
+        totalParticipants: room.numParticipants,
+        numAgents: 0,
+        numEgress: 0,
+      }),
+    }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   return NextResponse.json(
-    { rooms, activeClass, agentMode, sessionPurpose, realtimeResetting, realtimeRooms },
+    { rooms, activeClass, agentMode, realtimeResetting, sessionPurpose, realtimeRooms },
     { headers: { 'Cache-Control': 'no-store' } }
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AdminLogoutButton } from '@/components/admin/admin-logout-button';
 import {
   Conversation,
   ConversationContent,
@@ -8,6 +9,15 @@ import {
   ConversationScrollButton,
 } from '@/components/ai-elements/conversation';
 import { type AgentRole, getAgentRoleLabel, normalizeAgentRole } from '@/lib/agent-role';
+import {
+  buildLogSessionsQuery,
+  filterDashboardSessions,
+  getDashboardStudentLabel,
+  groupDashboardSessions,
+  inferDashboardActivityType,
+  inferDashboardSessionPurpose,
+} from '@/lib/conversation-dashboard';
+import { getActivityTypeLabel, getSessionPurposeLabel } from '@/lib/session-activity';
 
 // ─── 색상 팔레트 ────────────────────────────────────────────────────────────
 
@@ -24,31 +34,61 @@ const AGENT_PALETTE = { bg: '#f1f5f9', text: '#475569', border: '#94a3b8' };
 // ─── 타입 ────────────────────────────────────────────────────────────────────
 
 interface SessionMeta {
-  filename: string;
+  id: string;
+  source: 'supabase' | 'file';
+  filename?: string;
   room: string;
   session_id: string;
   entry_count: number;
   last_modified: number;
+  started_at?: string;
+  ended_at?: string | null;
+  metadata?: SessionMetadata;
 }
 
 interface LogEntry {
   timestamp: string;
+  sequence?: number;
   role: 'user' | 'agent';
   text: string;
   participant_identity?: string;
   participant_name?: string;
+  student_id?: string;
+  student_name?: string;
+}
+
+interface SessionMetadata extends Record<string, unknown> {
+  activity_type?: string;
+  agent_mode?: string;
+  agent_role?: AgentRole;
+  agent_stance?: AgentRole;
+  evaluation_character?: string;
+  evaluation_id?: string;
+  evaluation_prompt_id?: string;
+  evaluation_prompt_version?: string;
+  feedback_condition_id?: string;
+  task_card_id?: string;
+  prompt_id?: string;
+  prompt_source?: string;
+  prompt_version_id?: string;
+  prompt_saved_at?: string;
+  egress_id?: string;
+  recording_path?: string;
+  session_purpose?: string;
+  student_class_number?: string | number;
+  student_display_name?: string;
+  student_name?: string;
+  student_number?: string;
 }
 
 interface LogData {
+  id: string;
+  source: 'supabase' | 'file';
   session_id: string;
   room: string;
-  metadata?: {
-    agent_mode?: string;
-    agent_role?: AgentRole;
-    agent_stance?: AgentRole;
-  };
+  metadata?: SessionMetadata;
   entries: LogEntry[];
-  _filename?: string;
+  filename?: string;
 }
 
 // ─── 유틸 ────────────────────────────────────────────────────────────────────
@@ -68,7 +108,26 @@ function formatDate(ms: number) {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    second: '2-digit',
   });
+}
+
+function formatAgentMode(mode?: string) {
+  return mode === 'realtime' ? 'Realtime' : 'Pipeline';
+}
+
+function shortId(value?: string) {
+  if (!value) return null;
+  return value.length > 12 ? `${value.slice(0, 8)}...` : value;
+}
+
+function promptLabel(metadata?: SessionMetadata) {
+  if (!metadata) return null;
+  const promptId = metadata.prompt_version_id ?? metadata.prompt_id;
+  if (promptId && promptId !== 'default') return `Prompt ${shortId(promptId)}`;
+  if (metadata.prompt_source === 'default' || metadata.prompt_id === 'default')
+    return 'Default prompt';
+  return null;
 }
 
 function useParticipantColors() {
@@ -90,99 +149,219 @@ function useParticipantColors() {
 
 function SessionList({ onSelect }: { onSelect: (s: SessionMeta) => void }) {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sessionPurposeFilter, setSessionPurposeFilter] = useState<
+    'all' | 'evaluation' | 'practice'
+  >('all');
+  const [activityTypeFilter, setActivityTypeFilter] = useState<
+    'all' | 'free_conversation' | 'task_solution'
+  >('all');
+  const [evaluationIdFilter, setEvaluationIdFilter] = useState('');
+  const [searchFilter, setSearchFilter] = useState('');
 
-  const fetchSessions = async () => {
+  const fetchSessions = useCallback(async () => {
     try {
-      const res = await fetch('/api/logs');
+      const query = buildLogSessionsQuery({
+        activityType: activityTypeFilter,
+        evaluationId: evaluationIdFilter,
+        sessionPurpose: sessionPurposeFilter,
+      });
+      const res = await fetch(`/api/logs${query}`, { cache: 'no-store' });
       const data = await res.json();
+      if (!res.ok) {
+        const message = typeof data.error === 'string' ? data.error : '대화 기록 불러오기 실패';
+        throw new Error(message);
+      }
       setSessions(data.sessions ?? []);
-    } catch {
+      setError(null);
+    } catch (err) {
       setSessions([]);
+      setError(err instanceof Error ? err.message : '대화 기록 불러오기 실패');
     } finally {
       setLoading(false);
     }
-  };
+  }, [activityTypeFilter, evaluationIdFilter, sessionPurposeFilter]);
 
   useEffect(() => {
     fetchSessions();
     const id = setInterval(fetchSessions, 5000);
     return () => clearInterval(id);
-  }, []);
+  }, [fetchSessions]);
 
-  // "9반-1그룹" → { class: "9반", group: "1그룹" }
-  const parseRoom = (room: string) => {
-    const idx = room.lastIndexOf('-');
-    return idx !== -1
-      ? { cls: room.slice(0, idx), grp: room.slice(idx + 1) }
-      : { cls: room, grp: '' };
-  };
-
-  // 반 → 그룹 → 세션 2단 구조로 그룹화
-  const byClass: Record<string, Record<string, SessionMeta[]>> = {};
-  for (const s of sessions) {
-    const { cls, grp } = parseRoom(s.room);
-    ((byClass[cls] ??= {})[grp] ??= []).push(s);
-  }
-
-  // 반 번호 기준 정렬 (숫자 추출)
-  const sortedClasses = Object.keys(byClass).sort((a, b) => parseInt(a) - parseInt(b));
-
-  if (loading) return <p className="text-muted-foreground text-sm">불러오는 중...</p>;
-  if (sessions.length === 0)
-    return <p className="text-muted-foreground text-sm">저장된 세션이 없습니다.</p>;
+  const visibleSessions = filterDashboardSessions(sessions, searchFilter);
+  const sessionGroups = groupDashboardSessions(visibleSessions);
+  const evaluationOptions = Array.from(
+    new Set(
+      sessions.flatMap((session) =>
+        typeof session.metadata?.evaluation_id === 'string' ? [session.metadata.evaluation_id] : []
+      )
+    )
+  ).sort();
 
   return (
-    <div className="flex flex-1 flex-col gap-8 overflow-y-auto">
-      {sortedClasses.map((cls) => {
-        const groups = byClass[cls];
-        const sortedGroups = Object.keys(groups).sort((a, b) => parseInt(a) - parseInt(b));
-        const totalSessions = sortedGroups.reduce((n, g) => n + groups[g].length, 0);
+    <div className="flex flex-1 flex-col gap-4 overflow-hidden">
+      <div className="grid gap-2 rounded-lg border p-3 sm:grid-cols-2 lg:grid-cols-4">
+        <label className="flex flex-col gap-1 text-xs font-semibold">
+          Session Purpose
+          <select
+            value={sessionPurposeFilter}
+            onChange={(event) =>
+              setSessionPurposeFilter(event.target.value as 'all' | 'evaluation' | 'practice')
+            }
+            className="border-input bg-background rounded-md border px-2 py-1.5 text-xs font-normal"
+          >
+            <option value="all">All</option>
+            <option value="evaluation">Evaluation</option>
+            <option value="practice">Practice</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-semibold">
+          Activity
+          <select
+            value={activityTypeFilter}
+            onChange={(event) =>
+              setActivityTypeFilter(
+                event.target.value as 'all' | 'free_conversation' | 'task_solution'
+              )
+            }
+            className="border-input bg-background rounded-md border px-2 py-1.5 text-xs font-normal"
+          >
+            <option value="all">All</option>
+            <option value="free_conversation">자유 대화</option>
+            <option value="task_solution">과제 해결</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-semibold">
+          Evaluation ID
+          <input
+            list="evaluation-id-options"
+            value={evaluationIdFilter}
+            onChange={(event) => setEvaluationIdFilter(event.target.value)}
+            placeholder="all"
+            className="border-input bg-background rounded-md border px-2 py-1.5 text-xs font-normal"
+          />
+          <datalist id="evaluation-id-options">
+            {evaluationOptions.map((evaluationId) => (
+              <option key={evaluationId} value={evaluationId} />
+            ))}
+          </datalist>
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-semibold">
+          Search
+          <input
+            value={searchFilter}
+            onChange={(event) => setSearchFilter(event.target.value)}
+            placeholder="room, student, session"
+            className="border-input bg-background rounded-md border px-2 py-1.5 text-xs font-normal"
+          />
+        </label>
+      </div>
 
-        return (
-          <div key={cls} className="rounded-xl border p-4">
-            {/* 반 헤더 */}
-            <div className="mb-4 flex items-center gap-2">
-              <span className="text-foreground text-base font-bold">{cls}</span>
-              <span className="text-muted-foreground text-xs">{totalSessions}개 세션</span>
-            </div>
+      {loading && <p className="text-muted-foreground text-sm">불러오는 중...</p>}
+      {error && <p className="text-destructive text-sm">{error}</p>}
+      {!loading && !error && sessions.length === 0 && (
+        <p className="text-muted-foreground text-sm">저장된 세션이 없습니다.</p>
+      )}
+      {!loading && !error && sessions.length > 0 && visibleSessions.length === 0 && (
+        <p className="text-muted-foreground text-sm">필터에 맞는 세션이 없습니다.</p>
+      )}
 
-            {/* 그룹별 세션 */}
-            <div className="flex flex-col gap-4">
-              {sortedGroups.map((grp) => (
-                <div key={grp}>
-                  <div className="mb-1.5 flex items-center gap-1.5">
-                    <span className="bg-muted rounded px-2 py-0.5 font-mono text-xs font-semibold">
-                      {grp}
-                    </span>
-                    <span className="text-muted-foreground text-xs">{groups[grp].length}개</span>
-                  </div>
-                  <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-                    {groups[grp].map((s) => (
-                      <li key={s.filename}>
-                        <button
-                          onClick={() => onSelect(s)}
-                          className="border-border hover:bg-muted flex h-full w-full flex-col rounded-lg border bg-white p-3 text-left transition-colors dark:bg-neutral-900"
-                        >
-                          <span className="text-muted-foreground mb-2 block truncate font-mono text-xs">
-                            {s.session_id}
-                          </span>
-                          <span className="text-foreground mt-auto text-sm font-semibold">
-                            대화 {s.entry_count}개
-                          </span>
-                          <span className="text-muted-foreground mt-1 block text-xs">
-                            {formatDate(s.last_modified)}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
+      {!loading && !error && sessionGroups.length > 0 && (
+        <div className="flex flex-1 flex-col gap-8 overflow-y-auto">
+          {sessionGroups.map((group) => {
+            const totalSessions = group.sections.reduce(
+              (count, section) => count + section.sessions.length,
+              0
+            );
+            return (
+              <div key={group.key} className="rounded-xl border p-4">
+                {/* 목적 헤더 */}
+                <div className="mb-4 flex items-center gap-2">
+                  <span className="text-foreground text-base font-bold">{group.label}</span>
+                  <span className="text-muted-foreground text-xs">{totalSessions}개 세션</span>
                 </div>
-              ))}
-            </div>
-          </div>
-        );
-      })}
+
+                {/* metadata 기반 섹션 */}
+                <div className="flex flex-col gap-4">
+                  {group.sections.map((section) => (
+                    <div key={section.key}>
+                      <div className="mb-1.5 flex items-center gap-1.5">
+                        <span className="bg-muted rounded px-2 py-0.5 font-mono text-xs font-semibold">
+                          {section.label}
+                        </span>
+                        <span className="text-muted-foreground text-xs">
+                          {section.sessions.length}개
+                        </span>
+                      </div>
+                      <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                        {section.sessions.map((s) => {
+                          const purpose = inferDashboardSessionPurpose(s);
+                          const activityType = inferDashboardActivityType(s);
+                          return (
+                            <li key={s.id}>
+                              <button
+                                onClick={() => onSelect(s)}
+                                className="border-border hover:bg-muted flex h-full w-full flex-col rounded-lg border bg-white p-3 text-left transition-colors dark:bg-neutral-900"
+                              >
+                                <span className="text-foreground mb-1 block truncate text-sm font-semibold">
+                                  {getDashboardStudentLabel(s)}
+                                </span>
+                                <span className="text-muted-foreground mb-2 block truncate font-mono text-xs">
+                                  {s.session_id}
+                                </span>
+                                <span className="text-muted-foreground mb-2 block truncate font-mono text-[11px]">
+                                  {s.source === 'supabase' ? s.id : `file:${s.filename}`}
+                                </span>
+                                <span className="text-muted-foreground mb-2 flex flex-wrap gap-1 text-xs">
+                                  <span>{s.source === 'supabase' ? 'DB' : 'File'}</span>
+                                  <span>·</span>
+                                  <span>{formatAgentMode(s.metadata?.agent_mode)}</span>
+                                  {purpose && <span>· {getSessionPurposeLabel(purpose)}</span>}
+                                  {activityType && (
+                                    <span>· {getActivityTypeLabel(activityType)}</span>
+                                  )}
+                                  {s.metadata?.evaluation_id && (
+                                    <span>· Eval {s.metadata.evaluation_id}</span>
+                                  )}
+                                  {s.metadata?.agent_mode === 'realtime' &&
+                                    purpose !== 'evaluation' &&
+                                    (s.metadata.agent_role || s.metadata.agent_stance) && (
+                                      <span>
+                                        ·{' '}
+                                        {getAgentRoleLabel(
+                                          normalizeAgentRole(
+                                            s.metadata.agent_role ?? s.metadata.agent_stance
+                                          )
+                                        )}
+                                      </span>
+                                    )}
+                                  {purpose !== 'evaluation' && promptLabel(s.metadata) && (
+                                    <span>· {promptLabel(s.metadata)}</span>
+                                  )}
+                                  {purpose === 'evaluation' && s.metadata?.evaluation_prompt_id && (
+                                    <span>· Prompt {shortId(s.metadata.evaluation_prompt_id)}</span>
+                                  )}
+                                </span>
+                                <span className="text-foreground mt-auto text-sm font-semibold">
+                                  대화 {s.entry_count}개
+                                </span>
+                                <span className="text-muted-foreground mt-1 block text-xs">
+                                  {formatDate(s.last_modified)}
+                                </span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -195,7 +374,13 @@ function ConversationView({ session, onBack }: { session: SessionMeta; onBack: (
   const getColor = useParticipantColors();
 
   useEffect(() => {
-    const es = new EventSource(`/api/logs/stream?filename=${encodeURIComponent(session.filename)}`);
+    const params = new URLSearchParams();
+    if (session.source === 'file' && session.filename) {
+      params.set('filename', session.filename);
+    } else {
+      params.set('sessionId', session.id);
+    }
+    const es = new EventSource(`/api/logs/stream?${params.toString()}`);
     es.onopen = () => setConnected(true);
     es.onerror = () => setConnected(false);
     es.onmessage = (e) => {
@@ -206,7 +391,12 @@ function ConversationView({ session, onBack }: { session: SessionMeta; onBack: (
       }
     };
     return () => es.close();
-  }, [session.filename]);
+  }, [session.filename, session.id, session.source]);
+
+  const metadata = log?.metadata ?? session.metadata;
+  const role = metadata?.agent_role ?? metadata?.agent_stance;
+  const purpose = inferDashboardSessionPurpose({ metadata, room: session.room });
+  const activityType = inferDashboardActivityType({ metadata, room: session.room });
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -222,15 +412,44 @@ function ConversationView({ session, onBack }: { session: SessionMeta; onBack: (
           {session.room}
         </span>
         <span className="text-muted-foreground font-mono text-xs">{session.session_id}</span>
-        {log?.metadata?.agent_mode === 'realtime' &&
-          (log.metadata.agent_role || log.metadata.agent_stance) && (
-            <span className="bg-muted rounded px-2 py-0.5 text-xs font-semibold">
-              {getAgentRoleLabel(
-                normalizeAgentRole(log.metadata.agent_role ?? log.metadata.agent_stance)
-              )}{' '}
-              에이전트
-            </span>
-          )}
+        <span className="bg-muted rounded px-2 py-0.5 text-xs font-semibold">
+          {formatAgentMode(metadata?.agent_mode)}
+        </span>
+        {purpose && (
+          <span className="bg-muted rounded px-2 py-0.5 text-xs font-semibold">
+            {getSessionPurposeLabel(purpose)}
+          </span>
+        )}
+        {activityType && (
+          <span className="bg-muted rounded px-2 py-0.5 text-xs font-semibold">
+            {getActivityTypeLabel(activityType)}
+          </span>
+        )}
+        {metadata?.agent_mode === 'realtime' && purpose !== 'evaluation' && role && (
+          <span className="bg-muted rounded px-2 py-0.5 text-xs font-semibold">
+            {getAgentRoleLabel(normalizeAgentRole(role))} 에이전트
+          </span>
+        )}
+        {purpose !== 'evaluation' && metadata?.feedback_condition_id && (
+          <span className="bg-muted rounded px-2 py-0.5 text-xs font-semibold">
+            {metadata.feedback_condition_id}
+          </span>
+        )}
+        {purpose !== 'evaluation' && promptLabel(metadata) && (
+          <span className="bg-muted rounded px-2 py-0.5 text-xs font-semibold">
+            {promptLabel(metadata)}
+          </span>
+        )}
+        {purpose === 'evaluation' && metadata?.evaluation_id && (
+          <span className="bg-muted rounded px-2 py-0.5 text-xs font-semibold">
+            Eval {metadata.evaluation_id}
+          </span>
+        )}
+        {purpose === 'evaluation' && metadata?.evaluation_prompt_id && (
+          <span className="bg-muted rounded px-2 py-0.5 text-xs font-semibold">
+            Prompt {shortId(metadata.evaluation_prompt_id)}
+          </span>
+        )}
         <span className="ml-auto flex items-center gap-1.5 text-xs">
           <span
             className={`inline-block size-2 rounded-full ${connected ? 'bg-green-500' : 'bg-gray-400'}`}
@@ -251,11 +470,14 @@ function ConversationView({ session, onBack }: { session: SessionMeta; onBack: (
                 const isAgent = entry.role === 'agent';
                 const speakerName = isAgent
                   ? '에이전트'
-                  : (entry.participant_name ?? entry.participant_identity ?? '참가자');
+                  : (entry.student_name ??
+                    entry.participant_name ??
+                    entry.participant_identity ??
+                    '참가자');
                 const palette = isAgent ? AGENT_PALETTE : getColor(speakerName);
                 return (
                   <div
-                    key={i}
+                    key={entry.sequence ?? `${entry.timestamp}-${i}`}
                     className={`flex items-start gap-3 px-2 py-1 ${isAgent ? 'flex-row' : 'flex-row-reverse'}`}
                   >
                     <div
@@ -313,6 +535,9 @@ export default function DashboardPage() {
         <h1 className="text-center text-lg font-semibold">
           {selected ? '대화 기록' : '세션 목록'}
         </h1>
+        <div className="flex justify-end">
+          <AdminLogoutButton />
+        </div>
       </div>
       {selected ? (
         <ConversationView session={selected} onBack={() => setSelected(null)} />

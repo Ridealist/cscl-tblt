@@ -46,6 +46,7 @@ def test_evaluation_prompt_uses_runtime_override(tmp_path, monkeypatch) -> None:
     source = prompt_evaluation.load_prompt_source("pretest_6_10")
 
     assert source.source == "custom"
+    assert source.evaluation_id == "pretest_6_10"
     assert source.evaluation_prompt_id == "custom-eval"
     assert source.prompt_version_id == "custom-eval"
     assert source.saved_at == "2026-06-13T00:00:00.000Z"

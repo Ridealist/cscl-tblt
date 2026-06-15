@@ -12,7 +12,7 @@ import type {
 } from '@/lib/realtime-prompt-config';
 import { type SessionPurpose, getSessionPurposeLabel } from '@/lib/session-activity';
 
-type PromptField = 'basePrompt' | 'dominantPrompt' | 'collaborativePrompt' | 'feedbackPrompt';
+type PromptField = keyof RealtimePromptConfig;
 
 type PromptResponse = RealtimePromptState;
 type EvaluationPromptResponse = {
@@ -156,14 +156,6 @@ function evaluationPromptUrl(evaluationId?: string, versionId?: string, useDefau
   return `/api/admin/prompts/evaluation${query ? `?${query}` : ''}`;
 }
 
-function realtimePromptUrl(versionId?: string, useDefault = false) {
-  const params = new URLSearchParams();
-  if (versionId) params.set('versionId', versionId);
-  if (useDefault) params.set('default', '1');
-  const query = params.toString();
-  return `/api/admin/prompts/realtime${query ? `?${query}` : ''}`;
-}
-
 function isGeneratedVersionLabel(version: PromptVersionSummary) {
   return /^(realtime|evaluation) \d{4}-\d{2}-\d{2}T/.test(version.label);
 }
@@ -174,92 +166,6 @@ function formatVersionOption(version: PromptVersionSummary, activeVersionId: str
   return [version.id === activeVersionId ? '활성' : null, savedAt, customLabel]
     .filter(Boolean)
     .join(' · ');
-}
-
-function VersionSaveDialog({
-  disabled,
-  onCancel,
-  onSubmit,
-  open,
-  promptName,
-}: {
-  disabled: boolean;
-  onCancel: () => void;
-  onSubmit: (versionLabel?: string) => void;
-  open: boolean;
-  promptName: string;
-}) {
-  const [label, setLabel] = useState('');
-
-  useEffect(() => {
-    if (open) setLabel('');
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') onCancel();
-    }
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onCancel, open]);
-
-  if (!open) return null;
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
-      role="presentation"
-    >
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSubmit(label.trim() || undefined);
-        }}
-        className="bg-background border-border text-foreground w-full max-w-md rounded-lg border p-5 shadow-xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="prompt-version-save-title"
-      >
-        <div className="flex flex-col gap-1">
-          <h2 id="prompt-version-save-title" className="text-base font-semibold">
-            새 프롬프트 버전 저장
-          </h2>
-          <p className="text-muted-foreground text-sm">
-            {promptName}의 현재 내용을 immutable snapshot으로 저장합니다.
-          </p>
-        </div>
-        <label className="mt-4 flex flex-col gap-2 text-sm font-medium">
-          버전 이름
-          <input
-            autoFocus
-            value={label}
-            onChange={(event) => setLabel(event.target.value)}
-            disabled={disabled}
-            placeholder="비워두면 저장 시각만 표시됩니다"
-            className="border-input bg-background text-foreground focus:ring-primary w-full rounded-md border px-3 py-2 text-sm font-normal outline-none focus:ring-2 disabled:opacity-50"
-          />
-        </label>
-        <p className="text-muted-foreground mt-3 text-xs">
-          저장된 변경사항은 현재 진행 중인 세션에는 적용되지 않고, 다음에 새로 생성되는 개별
-          세션부터 반영됩니다.
-        </p>
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={disabled}
-            className="border-border hover:bg-muted text-foreground rounded-md border px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            취소
-          </button>
-          <Button type="submit" disabled={disabled}>
-            {disabled ? '저장 중...' : '저장'}
-          </Button>
-        </div>
-      </form>
-    </div>
-  );
 }
 
 export function PromptEditorView({ sessionPurpose }: { sessionPurpose: SessionPurpose }) {
@@ -276,7 +182,9 @@ function EvaluationPromptView() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
-  const [versionDialogOpen, setVersionDialogOpen] = useState(false);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
+  const [versionLabel, setVersionLabel] = useState('');
   const hasChanges = Boolean(
     promptState &&
       savedPromptState &&
@@ -307,6 +215,7 @@ function EvaluationPromptView() {
         }
         setPromptState(data as EvaluationPromptResponse);
         setSavedPromptState(data as EvaluationPromptResponse);
+        setVersionLabel('');
       } catch {
         setMessage({ text: 'Evaluation 프롬프트를 불러오지 못했습니다.', ok: false });
         setPromptState(null);
@@ -322,7 +231,7 @@ function EvaluationPromptView() {
     loadPrompt();
   }, [loadPrompt]);
 
-  async function savePrompt(versionLabel?: string) {
+  async function savePrompt() {
     if (!promptState) return;
 
     setSaving(true);
@@ -334,7 +243,7 @@ function EvaluationPromptView() {
         body: JSON.stringify({
           evaluationId: promptState.evaluationId,
           prompt: promptState.prompt,
-          versionLabel,
+          versionLabel: versionLabel.trim() || undefined,
         }),
       });
       const data = await res.json();
@@ -345,7 +254,8 @@ function EvaluationPromptView() {
       const saved = data as EvaluationPromptResponse;
       setPromptState(saved);
       setSavedPromptState(saved);
-      setVersionDialogOpen(false);
+      setSaveDialogOpen(false);
+      setVersionLabel('');
       setSavedAt(new Date().toLocaleTimeString('ko-KR'));
       setMessage({ text: 'Evaluation 프롬프트 새 버전을 저장했습니다.', ok: true });
     } catch {
@@ -356,7 +266,7 @@ function EvaluationPromptView() {
   }
 
   async function resetPrompt() {
-    if (!promptState || !confirmPromptChange('Evaluation 프롬프트를 기본값으로 불러옵니다.')) {
+    if (!promptState || !confirmPromptChange('Evaluation 프롬프트를 기본값으로 복원합니다.')) {
       return;
     }
 
@@ -372,8 +282,9 @@ function EvaluationPromptView() {
       const restored = data as EvaluationPromptResponse;
       setPromptState(restored);
       setSavedPromptState(restored);
+      setVersionLabel('');
       setSavedAt(new Date().toLocaleTimeString('ko-KR'));
-      setMessage({ text: '기본 Evaluation 프롬프트를 불러왔습니다.', ok: true });
+      setMessage({ text: '기본 Evaluation 프롬프트로 복원했습니다.', ok: true });
     } catch {
       setMessage({ text: '기본값 복원 중 오류가 발생했습니다.', ok: false });
     } finally {
@@ -439,19 +350,12 @@ function EvaluationPromptView() {
 
   return (
     <div className="flex flex-col gap-6">
-      <VersionSaveDialog
-        disabled={saving}
-        onCancel={() => setVersionDialogOpen(false)}
-        onSubmit={savePrompt}
-        open={versionDialogOpen}
-        promptName="Evaluation 프롬프트"
-      />
       <section className="flex flex-col gap-2">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-foreground text-sm font-semibold">Evaluation 프롬프트</h2>
             <p className="text-muted-foreground text-xs">
-              자유 대화 평가 세션에서 사용하는 manifest 기반 프롬프트입니다.
+              자유 대화 평가 세션에서 Kate가 사용하는 manifest 기반 프롬프트입니다.
             </p>
             <p className="text-muted-foreground text-xs">
               운영 설정: {getSessionPurposeLabel('evaluation')}
@@ -515,28 +419,26 @@ function EvaluationPromptView() {
                 저장된 버전은 immutable snapshot이며, 수정 후 저장하면 새 버전이 생성됩니다.
               </p>
             </div>
-            <div>
-              <select
-                value={promptState.promptVersionId ?? 'default'}
-                disabled={saving}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (value === 'default') {
-                    loadPrompt(promptState.evaluationId, undefined, true);
-                  } else {
-                    loadPrompt(undefined, value);
-                  }
-                }}
-                className="border-input bg-background text-foreground focus:ring-primary w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 disabled:opacity-50"
-              >
-                <option value="default">기본값</option>
-                {promptState.promptVersions.map((version) => (
-                  <option key={version.id} value={version.id}>
-                    {formatVersionOption(version, promptState.activePromptVersionId)}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <select
+              value={promptState.promptVersionId ?? 'default'}
+              disabled={saving}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === 'default') {
+                  loadPrompt(promptState.evaluationId, undefined, true);
+                } else {
+                  loadPrompt(undefined, value);
+                }
+              }}
+              className="border-input bg-background text-foreground focus:ring-primary w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 disabled:opacity-50"
+            >
+              <option value="default">기본값</option>
+              {promptState.promptVersions.map((version) => (
+                <option key={version.id} value={version.id}>
+                  {formatVersionOption(version, promptState.activePromptVersionId)}
+                </option>
+              ))}
+            </select>
             <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={activateVersion}
@@ -620,7 +522,7 @@ function EvaluationPromptView() {
                 )
               }
               disabled={saving}
-              className="border-input bg-muted/40 text-foreground min-h-96 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none"
+              className="border-input bg-background text-foreground focus:ring-primary min-h-96 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none focus:ring-2 disabled:opacity-50"
             />
           </section>
         </>
@@ -634,7 +536,10 @@ function EvaluationPromptView() {
 
       <div className="flex flex-wrap items-center gap-2">
         <Button
-          onClick={() => setVersionDialogOpen(true)}
+          onClick={() => {
+            setVersionLabel('');
+            setSaveDialogOpen(true);
+          }}
           disabled={loading || saving || !hasChanges}
         >
           {saving ? '저장 중...' : '새 버전으로 저장'}
@@ -646,11 +551,138 @@ function EvaluationPromptView() {
         >
           기본값으로 복원
         </button>
+        <button
+          onClick={() => setDiscardDialogOpen(true)}
+          disabled={loading || saving || !hasChanges}
+          className="text-muted-foreground hover:text-foreground px-2 py-2 text-sm underline underline-offset-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          변경 사항 되돌리기
+        </button>
         {hasChanges && (
           <span className="text-muted-foreground text-xs">저장되지 않은 변경사항</span>
         )}
         {savedAt && <span className="text-muted-foreground text-xs">마지막 저장: {savedAt}</span>}
       </div>
+
+      {saveDialogOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !saving) {
+              setSaveDialogOpen(false);
+            }
+          }}
+        >
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="evaluation-save-dialog-title"
+            className="bg-background text-foreground border-border w-full max-w-md rounded-lg border p-5 shadow-xl"
+            onSubmit={(event) => {
+              event.preventDefault();
+              savePrompt();
+            }}
+          >
+            <div className="flex flex-col gap-1">
+              <h3 id="evaluation-save-dialog-title" className="text-base font-semibold">
+                새 프롬프트 버전 저장
+              </h3>
+              <p className="text-muted-foreground text-sm">
+                Evaluation 프롬프트의 현재 내용을 immutable snapshot으로 저장합니다.
+              </p>
+            </div>
+
+            <div className="mt-5 flex flex-col gap-2">
+              <label className="text-sm font-medium" htmlFor="evaluation-version-label">
+                버전 이름
+              </label>
+              <input
+                id="evaluation-version-label"
+                value={versionLabel}
+                onChange={(event) => setVersionLabel(event.target.value)}
+                disabled={saving}
+                autoFocus
+                placeholder="비워두면 저장 시각만 표시됩니다"
+                className="border-input bg-background text-foreground focus:ring-primary w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 disabled:opacity-50"
+              />
+            </div>
+
+            <p className="text-muted-foreground mt-4 text-xs leading-5">
+              저장된 변경사항은 현재 진행 중인 세션에는 적용되지 않고, 다음에 새로 생성되는 개별
+              세션부터 반영됩니다.
+            </p>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setSaveDialogOpen(false)}
+                disabled={saving}
+                className="border-border hover:bg-muted text-foreground rounded-md border px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                취소
+              </button>
+              <Button type="submit" disabled={saving}>
+                {saving ? '저장 중...' : '저장'}
+              </Button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {discardDialogOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !loading && !saving) {
+              setDiscardDialogOpen(false);
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="evaluation-discard-dialog-title"
+            className="bg-background text-foreground border-border w-full max-w-md rounded-lg border p-5 shadow-xl"
+          >
+            <div className="flex flex-col gap-1">
+              <h3 id="evaluation-discard-dialog-title" className="text-base font-semibold">
+                변경 사항 되돌리기
+              </h3>
+              <p className="text-muted-foreground text-sm">
+                저장하지 않은 Evaluation 프롬프트 편집 내용이 삭제되고, 마지막으로 화면에 불러온
+                프롬프트 상태로 돌아갑니다.
+              </p>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDiscardDialogOpen(false)}
+                disabled={loading || saving}
+                className="border-border hover:bg-muted text-foreground rounded-md border px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                취소
+              </button>
+              <Button
+                type="button"
+                disabled={loading || saving}
+                onClick={() => {
+                  if (savedPromptState) {
+                    setPromptState(savedPromptState);
+                    setVersionLabel('');
+                    setMessage({ text: '저장되지 않은 변경 사항을 되돌렸습니다.', ok: true });
+                  }
+                  setDiscardDialogOpen(false);
+                }}
+              >
+                확인
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -662,9 +694,6 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
   const [usingDefault, setUsingDefault] = useState(false);
   const [promptId, setPromptId] = useState('default');
   const [promptSavedAt, setPromptSavedAt] = useState<string | null>(null);
-  const [activePromptVersionId, setActivePromptVersionId] = useState<string | null>(null);
-  const [promptVersionHash, setPromptVersionHash] = useState<string | null>(null);
-  const [promptVersions, setPromptVersions] = useState<PromptVersionSummary[]>([]);
   const [feedbackConditions, setFeedbackConditions] = useState<RealtimeFeedbackConditionSummary[]>(
     []
   );
@@ -673,7 +702,6 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
-  const [versionDialogOpen, setVersionDialogOpen] = useState(false);
 
   const hasChanges = useMemo(() => !samePrompt(prompt, savedPrompt), [prompt, savedPrompt]);
   const selectedRolePromptKey: PromptField =
@@ -704,6 +732,7 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
       ),
     [selectedFeedbackCondition, selectedRoleLabel, selectedRolePromptKey]
   );
+
   function formatPromptSavedAt(value: string | null) {
     return value ? new Date(value).toLocaleString('ko-KR') : '저장 이력 없음';
   }
@@ -726,12 +755,12 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
     );
   }
 
-  const loadPrompt = useCallback(async (versionId?: string, useDefault = false) => {
+  async function loadPrompt() {
     setLoading(true);
     setMessage(null);
     try {
       const [res, settingsRes] = await Promise.all([
-        fetch(realtimePromptUrl(versionId, useDefault), { cache: 'no-store' }),
+        fetch('/api/admin/prompts/realtime', { cache: 'no-store' }),
         fetch('/api/admin/config', { cache: 'no-store' }),
       ]);
       const data: PromptResponse = await res.json();
@@ -759,29 +788,28 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
       setUsingDefault(data.usingDefault);
       setPromptId(data.promptId);
       setPromptSavedAt(data.savedAt);
-      setActivePromptVersionId(data.activePromptVersionId);
-      setPromptVersionHash(data.promptVersionHash);
-      setPromptVersions(data.promptVersions);
       setSelectedAgentRole(normalizeAgentRole(settings.agentRole));
     } catch {
       setMessage({ text: '프롬프트를 불러오지 못했습니다.', ok: false });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }
 
   useEffect(() => {
     loadPrompt();
-  }, [loadPrompt]);
+  }, []);
 
-  async function savePrompt(versionLabel?: string) {
+  async function savePrompt() {
+    if (!confirmPromptChange('Realtime 프롬프트 변경사항을 저장합니다.')) return;
+
     setSaving(true);
     setMessage(null);
     try {
       const res = await fetch('/api/admin/prompts/realtime', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...prompt, versionLabel }),
+        body: JSON.stringify(prompt),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -805,12 +833,8 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
       setUsingDefault(saved.usingDefault);
       setPromptId(saved.promptId);
       setPromptSavedAt(saved.savedAt);
-      setActivePromptVersionId(saved.activePromptVersionId);
-      setPromptVersionHash(saved.promptVersionHash);
-      setPromptVersions(saved.promptVersions);
-      setVersionDialogOpen(false);
       setSavedAt(new Date().toLocaleTimeString('ko-KR'));
-      setMessage({ text: 'Realtime 프롬프트 새 버전을 저장했습니다.', ok: true });
+      setMessage({ text: '프롬프트를 저장했습니다.', ok: true });
     } catch {
       setMessage({ text: '프롬프트 저장 중 오류가 발생했습니다.', ok: false });
     } finally {
@@ -819,7 +843,7 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
   }
 
   async function resetPrompt() {
-    if (!confirmPromptChange('Realtime 프롬프트를 기본값으로 불러옵니다.')) return;
+    if (!confirmPromptChange('Realtime 프롬프트를 기본값으로 복원합니다.')) return;
 
     setSaving(true);
     setMessage(null);
@@ -847,11 +871,8 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
       setUsingDefault(saved.usingDefault);
       setPromptId(saved.promptId);
       setPromptSavedAt(saved.savedAt);
-      setActivePromptVersionId(saved.activePromptVersionId);
-      setPromptVersionHash(saved.promptVersionHash);
-      setPromptVersions(saved.promptVersions);
       setSavedAt(new Date().toLocaleTimeString('ko-KR'));
-      setMessage({ text: '기본 Realtime 프롬프트를 불러왔습니다.', ok: true });
+      setMessage({ text: '기본 프롬프트로 복원했습니다.', ok: true });
     } catch {
       setMessage({ text: '기본값 복원 중 오류가 발생했습니다.', ok: false });
     } finally {
@@ -859,88 +880,8 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
     }
   }
 
-  function applyRealtimePromptState(state: PromptResponse) {
-    const next = {
-      basePrompt: state.basePrompt,
-      dominantPrompt: state.dominantPrompt,
-      collaborativePrompt: state.collaborativePrompt,
-      feedbackConditionId: state.feedbackConditionId,
-      feedbackPrompt: state.feedbackPrompt,
-      taskCardId: state.taskCardId,
-      taskCardPrompt: state.taskCardPrompt,
-    };
-    setPrompt(next);
-    setSavedPrompt(next);
-    setFeedbackConditions(state.feedbackConditions);
-    setTaskCards(state.taskCards);
-    setUsingDefault(state.usingDefault);
-    setPromptId(state.promptId);
-    setPromptSavedAt(state.savedAt);
-    setActivePromptVersionId(state.activePromptVersionId);
-    setPromptVersionHash(state.promptVersionHash);
-    setPromptVersions(state.promptVersions);
-  }
-
-  async function activateVersion() {
-    if (!promptId || promptId === 'default') return;
-    setSaving(true);
-    setMessage(null);
-    try {
-      const res = await fetch('/api/admin/prompts/realtime', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'activate', versionId: promptId }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setMessage({ text: data.error ?? '버전 활성화 실패', ok: false });
-        return;
-      }
-      applyRealtimePromptState(data as PromptResponse);
-      setMessage({ text: 'Realtime 프롬프트 버전을 활성화했습니다.', ok: true });
-    } catch {
-      setMessage({ text: '버전 활성화 중 오류가 발생했습니다.', ok: false });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function deleteVersion() {
-    if (
-      !promptId ||
-      promptId === 'default' ||
-      !confirmPromptChange('선택한 Realtime 프롬프트 버전을 삭제합니다.')
-    ) {
-      return;
-    }
-
-    setSaving(true);
-    setMessage(null);
-    try {
-      const res = await fetch(realtimePromptUrl(promptId), { method: 'DELETE' });
-      const data = await res.json();
-      if (!res.ok) {
-        setMessage({ text: data.error ?? '버전 삭제 실패', ok: false });
-        return;
-      }
-      applyRealtimePromptState(data as PromptResponse);
-      setMessage({ text: 'Realtime 프롬프트 버전을 삭제했습니다.', ok: true });
-    } catch {
-      setMessage({ text: '버전 삭제 중 오류가 발생했습니다.', ok: false });
-    } finally {
-      setSaving(false);
-    }
-  }
-
   return (
     <div className="flex flex-col gap-6">
-      <VersionSaveDialog
-        disabled={saving}
-        onCancel={() => setVersionDialogOpen(false)}
-        onSubmit={savePrompt}
-        open={versionDialogOpen}
-        promptName="Realtime 프롬프트"
-      />
       <section className="flex flex-col gap-2">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -954,7 +895,7 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
             <p className="text-muted-foreground text-xs">
               {usingDefault
                 ? '현재 prompts/realtime/*.md 기본값을 사용합니다.'
-                : '현재 prompt_versions 사용자 버전이 md 기본값보다 우선합니다.'}
+                : '현재 Supabase active prompt version이 md 기본값보다 우선합니다.'}
             </p>
           </div>
           <span className="bg-muted text-muted-foreground shrink-0 rounded px-2 py-1 text-xs">
@@ -963,10 +904,7 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
         </div>
         <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs">
           <span>
-            Version ID:{' '}
-            <span className="text-foreground font-mono font-semibold">
-              {promptId === 'default' ? '기본값' : promptId}
-            </span>
+            프롬프트 ID: <span className="text-foreground font-mono font-semibold">{promptId}</span>
           </span>
           <span>
             저장 시각:{' '}
@@ -988,58 +926,6 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
         <p className="text-muted-foreground text-sm">프롬프트를 불러오는 중...</p>
       ) : (
         <>
-          <section className="flex flex-col gap-3">
-            <div>
-              <h3 className="text-foreground text-sm font-semibold">Prompt Version</h3>
-              <p className="text-muted-foreground text-xs">
-                저장된 버전은 immutable snapshot이며, 수정 후 저장하면 새 버전이 생성됩니다.
-              </p>
-            </div>
-            <div>
-              <select
-                value={promptId === 'default' ? 'default' : promptId}
-                disabled={saving}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (value === 'default') {
-                    loadPrompt(undefined, true);
-                  } else {
-                    loadPrompt(value);
-                  }
-                }}
-                className="border-input bg-background text-foreground focus:ring-primary w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 disabled:opacity-50"
-              >
-                <option value="default">기본값</option>
-                {promptVersions.map((version) => (
-                  <option key={version.id} value={version.id}>
-                    {formatVersionOption(version, activePromptVersionId)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={activateVersion}
-                disabled={saving || promptId === 'default' || promptId === activePromptVersionId}
-                className="border-border hover:bg-muted text-foreground rounded-md border px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                이 버전 활성화
-              </button>
-              <button
-                onClick={deleteVersion}
-                disabled={saving || promptId === 'default'}
-                className="border-border hover:bg-muted text-foreground rounded-md border px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                이 버전 삭제
-              </button>
-              {promptVersionHash && (
-                <span className="text-muted-foreground font-mono text-xs">
-                  hash {promptVersionHash.slice(0, 12)}
-                </span>
-              )}
-            </div>
-          </section>
-
           {visiblePromptGroups.map((group) => {
             const singleField = group.fields.length === 1 ? group.fields[0] : null;
 
@@ -1119,14 +1005,8 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
             <textarea
               value={prompt.taskCardPrompt}
               rows={18}
+              readOnly
               spellCheck={false}
-              onChange={(e) =>
-                setPrompt((current) => ({
-                  ...current,
-                  taskCardPrompt: e.target.value,
-                }))
-              }
-              disabled={saving}
               className="border-input bg-muted/40 text-foreground min-h-32 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none"
             />
             {selectedFeedbackCondition && (
@@ -1148,11 +1028,8 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button
-          onClick={() => setVersionDialogOpen(true)}
-          disabled={loading || saving || !hasChanges}
-        >
-          {saving ? '저장 중...' : '새 버전으로 저장'}
+        <Button onClick={savePrompt} disabled={loading || saving || !hasChanges}>
+          {saving ? '저장 중...' : '저장'}
         </Button>
         <button
           onClick={resetPrompt}
@@ -1160,6 +1037,13 @@ function PracticePromptEditorView({ sessionPurpose }: { sessionPurpose: SessionP
           className="border-border hover:bg-muted text-foreground rounded-md border px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
         >
           기본값으로 복원
+        </button>
+        <button
+          onClick={loadPrompt}
+          disabled={loading || saving}
+          className="text-muted-foreground hover:text-foreground px-2 py-2 text-sm underline underline-offset-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          다시 불러오기
         </button>
         {hasChanges && (
           <span className="text-muted-foreground text-xs">저장되지 않은 변경사항</span>

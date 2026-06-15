@@ -13,6 +13,7 @@ import { useAgentErrors } from '@/hooks/useAgentErrors';
 import { useDebugMode } from '@/hooks/useDebug';
 import type { AgentMode } from '@/lib/agent-mode';
 import type { ActivityType, SessionPurpose } from '@/lib/session-activity';
+import type { StudentProfile } from '@/lib/student';
 import { getSandboxTokenSource } from '@/lib/utils';
 
 const IN_DEVELOPMENT = process.env.NODE_ENV !== 'production';
@@ -30,7 +31,7 @@ interface AppProps {
 
 export function App({ appConfig }: AppProps) {
   const sessionInfoRef = useRef<{
-    participantName: string;
+    displayName: string;
     roomName: string;
     agentMode: AgentMode;
     activityType?: ActivityType;
@@ -41,6 +42,28 @@ export function App({ appConfig }: AppProps) {
   const [, forceRender] = useState(0);
   const [room, setRoom] = useState(() => new Room());
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
+  const [student, setStudent] = useState<StudentProfile | null>(null);
+  const [checkingStudent, setCheckingStudent] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadStudent() {
+      try {
+        const res = await fetch('/api/student/me', { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && data.student) setStudent(data.student);
+      } catch {
+        // ignore; the login screen handles missing sessions
+      } finally {
+        if (!cancelled) setCheckingStudent(false);
+      }
+    }
+    void loadStudent();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const tokenSource = useMemo(() => {
     if (typeof process.env.NEXT_PUBLIC_CONN_DETAILS_ENDPOINT === 'string') {
@@ -48,17 +71,14 @@ export function App({ appConfig }: AppProps) {
     }
     return TokenSource.custom(async () => {
       const info = sessionInfoRef.current;
-      if (!info) {
-        throw new Error(
-          '세션 정보가 아직 준비되지 않았습니다. 활동 선택 화면에서 다시 입장해주세요.'
-        );
+      if (!student || !info?.displayName || !info.roomName) {
+        throw new Error('세션 정보가 준비되지 않았습니다.');
       }
-
       const res = await fetch('/api/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          participant_name: info.participantName,
+          display_name: info.displayName,
           room_name: info.roomName,
           agent_mode: info.agentMode,
           ...(info.activityType ? { activity_type: info.activityType } : {}),
@@ -74,7 +94,7 @@ export function App({ appConfig }: AppProps) {
       }
       return res.json();
     });
-  }, [appConfig]);
+  }, [appConfig, student]);
 
   const sessionOptions = useMemo(
     () => ({
@@ -102,7 +122,7 @@ export function App({ appConfig }: AppProps) {
 
   const handleJoin = useCallback(
     (
-      participantName: string,
+      displayName: string,
       roomName: string,
       agentMode: AgentMode,
       options?: {
@@ -111,7 +131,7 @@ export function App({ appConfig }: AppProps) {
         sessionPurpose?: SessionPurpose;
       }
     ) => {
-      sessionInfoRef.current = { participantName, roomName, agentMode, ...options };
+      sessionInfoRef.current = { displayName, roomName, agentMode, ...options };
       setSessionNotice(null);
       forceRender((n) => n + 1);
       void session.start({ tracks: { microphone: { enabled: false } } }).catch((error) => {
@@ -125,15 +145,29 @@ export function App({ appConfig }: AppProps) {
     [session]
   );
 
+  const handleStudentLogout = useCallback(() => {
+    void fetch('/api/student/logout', { method: 'POST' }).finally(() => {
+      sessionInfoRef.current = null;
+      setStudent(null);
+      setSessionNotice(null);
+      setRoom(new Room());
+      forceRender((n) => n + 1);
+    });
+  }, []);
+
   return (
     <AgentSessionProvider session={session}>
       <AppSetup />
-      <main className="grid h-svh grid-cols-1 place-content-center">
+      <main className="grid h-svh grid-cols-1 place-content-center place-items-center">
         <ViewController
           appConfig={appConfig}
+          checkingStudent={checkingStudent}
           onJoin={handleJoin}
+          onStudentLogin={setStudent}
+          onStudentLogout={handleStudentLogout}
           sessionActivityType={sessionInfoRef.current?.activityType}
           sessionNotice={sessionNotice}
+          student={student}
         />
       </main>
       <StartAudioButton label="Start Audio" />

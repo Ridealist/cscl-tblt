@@ -1,17 +1,17 @@
 'use client';
 
-import { useState } from 'react';
 import { useTheme } from 'next-themes';
 import { AnimatePresence, motion } from 'motion/react';
 import { useSessionContext } from '@livekit/components-react';
 import type { AppConfig } from '@/app-config';
 import { AgentSessionView_01 } from '@/components/agents-ui/blocks/agent-session-view-01';
 import { LobbyView } from '@/components/app/lobby-view';
-import { WelcomeView } from '@/components/app/welcome-view';
+import { StudentLoginView } from '@/components/app/student-login-view';
 import type { AgentMode } from '@/lib/agent-mode';
 import type { ActivityType, SessionPurpose } from '@/lib/session-activity';
+import type { StudentProfile } from '@/lib/student';
 
-const MotionWelcomeView = motion.create(WelcomeView);
+const MotionStudentLoginView = motion.create(StudentLoginView);
 const MotionLobbyView = motion.create(LobbyView);
 const MotionSessionView = motion.create(AgentSessionView_01);
 
@@ -31,8 +31,9 @@ const VIEW_MOTION_PROPS = {
 
 interface ViewControllerProps {
   appConfig: AppConfig;
+  checkingStudent: boolean;
   onJoin: (
-    participantName: string,
+    displayName: string,
     roomName: string,
     agentMode: AgentMode,
     options?: {
@@ -41,38 +42,55 @@ interface ViewControllerProps {
       sessionPurpose?: SessionPurpose;
     }
   ) => void;
+  onStudentLogin: (student: StudentProfile) => void;
+  onStudentLogout: () => void;
   sessionActivityType?: ActivityType;
   sessionNotice?: string | null;
+  student: StudentProfile | null;
 }
 
-export function ViewController({ appConfig, onJoin, sessionNotice }: ViewControllerProps) {
+export function ViewController({
+  appConfig,
+  checkingStudent,
+  onJoin,
+  onStudentLogin,
+  onStudentLogout,
+  sessionNotice,
+  student,
+}: ViewControllerProps) {
   const { isConnected } = useSessionContext();
   const { resolvedTheme } = useTheme();
-  const [showLobby, setShowLobby] = useState(false);
   const agentDisplayName = 'Kate';
-  const agentAvatarSrc = '/agents/kate_photo.png';
+  const agentAvatarSrc = '/agents/kate_photo_20260615.png';
 
   return (
     <AnimatePresence mode="wait">
-      {/* Welcome view */}
-      {!isConnected && !showLobby && (
-        <MotionWelcomeView
-          key="welcome"
+      {!isConnected && checkingStudent && (
+        <motion.div
+          key="student-check"
           {...VIEW_MOTION_PROPS}
-          startButtonText={appConfig.startButtonText}
-          onStartCall={() => setShowLobby(true)}
+          className="text-muted-foreground text-sm"
+        >
+          불러오는 중...
+        </motion.div>
+      )}
+      {!isConnected && !checkingStudent && !student && (
+        <MotionStudentLoginView
+          key="student-login"
+          {...VIEW_MOTION_PROPS}
+          onLogin={onStudentLogin}
         />
       )}
-      {/* Lobby view */}
-      {!isConnected && showLobby && (
+      {!isConnected && !checkingStudent && student && (
         <MotionLobbyView
           key="lobby"
           {...VIEW_MOTION_PROPS}
           onJoin={onJoin}
+          onLogout={onStudentLogout}
           sessionNotice={sessionNotice}
+          student={student}
         />
       )}
-      {/* Session view */}
       {isConnected && (
         <MotionSessionView
           key="session-view"

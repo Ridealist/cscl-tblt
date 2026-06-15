@@ -11,10 +11,11 @@ import {
   getSessionPurposeForActivity,
   normalizeSessionPurpose,
 } from '@/lib/session-activity';
+import { type StudentProfile, studentDefaultDisplayName } from '@/lib/student';
 
 interface LobbyViewProps {
   onJoin: (
-    participantName: string,
+    displayName: string,
     roomName: string,
     agentMode: AgentMode,
     options?: {
@@ -23,16 +24,19 @@ interface LobbyViewProps {
       sessionPurpose?: SessionPurpose;
     }
   ) => void;
+  onLogout: () => void;
   sessionNotice?: string | null;
+  student: StudentProfile;
 }
 
 export function LobbyView({
   onJoin,
+  onLogout,
   sessionNotice,
+  student,
   ref,
 }: React.ComponentProps<'div'> & LobbyViewProps) {
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
+  const [displayName, setDisplayName] = useState(studentDefaultDisplayName(student));
   const [selectedGroup, setSelectedGroup] = useState<number | null>(null);
   const [availableActivity, setAvailableActivity] = useState<ActivityType>('task_solution');
   const [selectedActivity, setSelectedActivity] = useState<ActivityType | null>(null);
@@ -41,10 +45,10 @@ export function LobbyView({
   const [realtimeResetting, setRealtimeResetting] = useState(false);
   const [rooms, setRooms] = useState<{ name: string; numParticipants: number }[]>([]);
   const [error, setError] = useState('');
-  const firstNameRef = useRef<HTMLInputElement>(null);
+  const displayNameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    firstNameRef.current?.focus();
+    displayNameRef.current?.focus();
     fetchRooms();
     const interval = window.setInterval(fetchRooms, 2_000);
     const refreshOnVisible = () => {
@@ -56,6 +60,10 @@ export function LobbyView({
       document.removeEventListener('visibilitychange', refreshOnVisible);
     };
   }, []);
+
+  useEffect(() => {
+    setDisplayName(studentDefaultDisplayName(student));
+  }, [student]);
 
   async function fetchRooms() {
     try {
@@ -77,7 +85,7 @@ export function LobbyView({
           : null
       );
     } catch {
-      // 무시
+      // ignore
     }
   }
 
@@ -104,49 +112,44 @@ export function LobbyView({
 
   function makeActivityRoomName(name: string, activityType: ActivityType) {
     const prefix = activityType === 'free_conversation' ? 'eval' : 'task';
-    const slug = makeStudentSlug(name);
+    const slug = name ? makeStudentSlug(name) : 'student';
     return `${prefix}-${activeClass ?? 'class'}-${slug}-${makeRoomSuffix()}`;
   }
 
   function handleJoin() {
-    if (!firstName.trim()) {
-      setError('이름(First Name)을 입력해주세요.');
-      return;
-    }
-    if (!lastName.trim()) {
-      setError('성(Last Name)을 입력해주세요.');
+    const normalizedDisplayName = displayName.trim();
+    if (!normalizedDisplayName) {
+      setError('에이전트가 부를 이름을 입력해주세요.');
       return;
     }
     if (agentMode === 'pipeline' && !selectedRoomName) {
       setError('그룹을 선택해주세요.');
       return;
     }
-    if (agentMode === 'realtime' && realtimeResetting) {
-      setError('개별 세션 초기화 중입니다. 잠시 후 다시 입장해주세요.');
-      return;
-    }
-    const participantName = `${firstName.trim()} ${lastName.trim()}`;
     if (agentMode === 'realtime') {
-      if (!selectedActivity) {
+      if (realtimeResetting) {
+        setError('개별 세션 초기화 중입니다. 잠시 후 다시 입장해주세요.');
+        return;
+      }
+      const activityType = selectedActivity;
+      if (!activityType) {
         setError('활동을 선택해주세요.');
         return;
       }
-      const roomName = makeActivityRoomName(participantName, selectedActivity);
-      onJoin(participantName, roomName, 'realtime', {
-        activityType: selectedActivity,
-        sessionPurpose: getSessionPurposeForActivity(selectedActivity),
+      const roomName = makeActivityRoomName(normalizedDisplayName, activityType);
+      onJoin(normalizedDisplayName, roomName, 'realtime', {
+        activityType,
+        sessionPurpose: getSessionPurposeForActivity(activityType),
       });
       return;
     }
     const roomName = selectedRoomName;
     if (!roomName) return;
-    onJoin(participantName, roomName, agentMode);
+    onJoin(normalizedDisplayName, roomName, agentMode);
   }
 
-  const previewName = [firstName.trim(), lastName.trim()].filter(Boolean).join(' ');
   const joinDisabled =
-    !firstName.trim() ||
-    !lastName.trim() ||
+    !displayName.trim() ||
     (agentMode === 'pipeline' && !selectedRoomName) ||
     (agentMode === 'realtime' && (!selectedActivity || realtimeResetting));
 
@@ -165,50 +168,41 @@ export function LobbyView({
         </p>
       )}
 
-      {/* 이름 입력 */}
-      <div className="flex flex-col gap-1.5">
-        <label className="text-foreground text-sm font-semibold">이름</label>
-        <div className="flex gap-2">
-          <div className="flex flex-1 flex-col gap-1">
-            <span className="text-muted-foreground text-xs">이름 (First Name)</span>
-            <input
-              ref={firstNameRef}
-              type="text"
-              value={firstName}
-              onChange={(e) => {
-                setFirstName(e.target.value);
-                setError('');
-              }}
-              onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
-              placeholder="예: Jungkook"
-              maxLength={20}
-              className="border-input bg-background text-foreground placeholder:text-muted-foreground focus:ring-primary rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2"
-            />
-          </div>
-          <div className="flex flex-1 flex-col gap-1">
-            <span className="text-muted-foreground text-xs">성 (Last Name)</span>
-            <input
-              type="text"
-              value={lastName}
-              onChange={(e) => {
-                setLastName(e.target.value);
-                setError('');
-              }}
-              onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
-              placeholder="예: Jeon"
-              maxLength={20}
-              className="border-input bg-background text-foreground placeholder:text-muted-foreground focus:ring-primary rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2"
-            />
-          </div>
+      <div className="bg-muted flex items-center justify-between rounded-lg px-3 py-2">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-foreground text-xs font-semibold">{student.name}</span>
+          <span className="text-muted-foreground text-xs">
+            {student.classNumber}반 · {student.rollNumber}번 · {student.studentNumber}
+          </span>
         </div>
-        {previewName && (
-          <p className="text-muted-foreground text-xs">
-            에이전트가 부를 이름: <span className="text-foreground font-medium">{previewName}</span>
-          </p>
-        )}
+        <button
+          onClick={onLogout}
+          className="text-muted-foreground hover:text-foreground text-xs underline underline-offset-2 transition-colors"
+        >
+          다시 로그인
+        </button>
       </div>
 
-      {/* 그룹 선택 */}
+      <div className="flex flex-col gap-1.5">
+        <label className="text-foreground text-sm font-semibold">에이전트가 부를 이름</label>
+        <input
+          ref={displayNameRef}
+          type="text"
+          value={displayName}
+          onChange={(e) => {
+            setDisplayName(e.target.value);
+            setError('');
+          }}
+          onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
+          placeholder="예: Minji Kim"
+          maxLength={40}
+          className="border-input bg-background text-foreground placeholder:text-muted-foreground focus:ring-primary rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2"
+        />
+        <p className="text-muted-foreground text-xs">
+          영어 이름 표기가 다르면 이곳에서 수정한 뒤 입장하세요.
+        </p>
+      </div>
+
       {agentMode === 'pipeline' && (
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
@@ -315,7 +309,7 @@ export function LobbyView({
 
       {agentMode === 'realtime' && !realtimeResetting && (
         <p className="text-muted-foreground text-xs">
-          활동을 선택하면 학생별 개별 대화방이 자동으로 생성됩니다.
+          입장하면 학생별 개별 대화방이 자동으로 생성됩니다.
         </p>
       )}
 
