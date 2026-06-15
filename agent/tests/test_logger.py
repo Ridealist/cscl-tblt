@@ -423,7 +423,7 @@ def test_supabase_writer_retries_without_evaluation_columns_when_schema_is_stale
                 "timestamp": "2026-06-12T01:02:03.000000Z",
                 "sequence": 1,
                 "role": "agent",
-                "text": "Hi, I’m Kate. I’m new here. Nice to meet you!",
+                "text": "Hi, I’m Kate. I just moved to Korea. Nice to meet you!",
             }
         ]
     )
@@ -438,7 +438,10 @@ def test_supabase_writer_retries_without_evaluation_columns_when_schema_is_stale
     assert "activity_type" not in calls[2]["body"]
     assert calls[2]["body"]["egress_id"] == "egress-123"
     assert calls[3]["url"].endswith("/rest/v1/conversation_events")
-    assert calls[3]["body"][0]["text"] == "Hi, I’m Kate. I’m new here. Nice to meet you!"
+    assert (
+        calls[3]["body"][0]["text"]
+        == "Hi, I’m Kate. I just moved to Korea. Nice to meet you!"
+    )
     assert "schema is missing evaluation/session columns" in caplog.text
 
 

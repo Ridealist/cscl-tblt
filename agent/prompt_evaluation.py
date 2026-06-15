@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 DEFAULT_EVALUATION_ID = "pretest_6_10"
-DEFAULT_OPENING_SENTENCE = "Hi, I’m Kate. I’m new here. Nice to meet you!"
+DEFAULT_OPENING_SENTENCE = "Hi, I’m Kate. I just moved to Korea. Nice to meet you!"
 DEFAULT_PROMPT_SOURCE_DIR = Path(__file__).parent.parent / "prompts" / "evaluation"
 PROMPT_SOURCE_MANIFEST_PATH = DEFAULT_PROMPT_SOURCE_DIR / "manifest.json"
 PROMPT_CONFIG_PATH = Path(__file__).parent.parent / "prompt_config.json"

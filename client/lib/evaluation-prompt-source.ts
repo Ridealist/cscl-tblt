@@ -189,7 +189,8 @@ async function readEvaluationSummaries(): Promise<{
         prompt,
         promptId: text(entry.promptId) ?? id,
         version: text(entry.version) ?? undefined,
-        openingSentence: extractOpening(prompt) ?? 'Hi, I’m Kate. I’m new here. Nice to meet you!',
+        openingSentence:
+          extractOpening(prompt) ?? 'Hi, I’m Kate. I just moved to Korea. Nice to meet you!',
       };
     })
   );
