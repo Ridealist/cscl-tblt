@@ -282,6 +282,53 @@ def test_supabase_writer_posts_session_and_events_payloads() -> None:
     assert calls[1]["timeout"] == 7
 
 
+def test_supabase_writer_retries_events_without_student_name_when_schema_is_stale() -> None:
+    calls: list[dict] = []
+
+    def opener(request, timeout):
+        body = request.data.decode("utf-8") if request.data else ""
+        payload = json.loads(body) if body else None
+        calls.append(
+            {
+                "method": request.get_method(),
+                "url": request.full_url,
+                "body": payload,
+            }
+        )
+        if "class_sessions" in request.full_url and request.get_method() == "POST":
+            return FakeResponse(f'[{{"id":"{payload["id"]}"}}]')
+        if "conversation_events" in request.full_url and len(calls) == 2:
+            raise missing_column_error(request, "student_name")
+        return FakeResponse()
+
+    writer = SupabaseConversationWriter(
+        "livekit-room-sid",
+        "9-1",
+        {"agent_mode": "realtime"},
+        SupabaseConversationConfig(url="http://supabase.test", key="secret"),
+        opener=opener,
+        class_session_id="11111111-1111-4111-8111-111111111111",
+    )
+
+    writer.write_events(
+        [
+            {
+                "timestamp": "2026-06-12T01:02:03.000000Z",
+                "sequence": 1,
+                "role": "user",
+                "text": "I am free.",
+                "student_name": "Minji",
+            }
+        ]
+    )
+
+    assert len(calls) == 3
+    assert calls[1]["url"].endswith("/rest/v1/conversation_events")
+    assert calls[1]["body"][0]["student_name"] == "Minji"
+    assert calls[2]["url"].endswith("/rest/v1/conversation_events")
+    assert "student_name" not in calls[2]["body"][0]
+
+
 def test_supabase_writer_posts_evaluation_session_fields() -> None:
     calls: list[dict] = []
 
