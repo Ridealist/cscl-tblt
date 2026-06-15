@@ -89,7 +89,7 @@ function createQuery(table, options, calls) {
           ? (options.sessionResult ?? { data: [], error: null })
           : Array.isArray(options.eventResults)
             ? (options.eventResults[options.eventResultIndex++] ?? { data: [], error: null })
-          : (options.eventResult ?? { data: [], error: null });
+            : (options.eventResult ?? { data: [], error: null });
       if (table === 'conversation_events' && query.rangeValue && Array.isArray(result.data)) {
         return Promise.resolve({
           ...result,
