@@ -11,7 +11,10 @@ def test_evaluation_prompt_loads_default_source() -> None:
     assert source.evaluation_prompt_version == "2026-06-10"
     assert source.evaluation_character == "Kate"
     assert source.prompt.startswith("# PRE-TEST INTERACTION PROMPT: Kate")
-    assert get_opening_sentence_from_source(source) == "Hi, I’m Kate. I’m new here. Nice to meet you!"
+    assert (
+        get_opening_sentence_from_source(source)
+        == "Hi, I’m Kate. I just moved to Korea. Nice to meet you!"
+    )
 
 
 def test_evaluation_prompt_adds_session_info() -> None:
