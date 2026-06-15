@@ -104,6 +104,31 @@ def test_metadata_prompt_version_id_falls_back_to_custom_prompt_id() -> None:
     assert _metadata_prompt_version_id(metadata) == "custom-prompt-id"
 
 
+def test_metadata_prompt_version_id_reads_evaluation_version_id() -> None:
+    metadata = json.dumps(
+        {
+            "agentMode": "realtime",
+            "evaluationPromptVersionId": "eval-version-id",
+            "sessionPurpose": "evaluation",
+        }
+    )
+
+    assert _metadata_prompt_version_id(metadata) == "eval-version-id"
+
+
+def test_metadata_prompt_version_id_falls_back_to_evaluation_prompt_id() -> None:
+    metadata = json.dumps(
+        {
+            "agentMode": "realtime",
+            "evaluationId": "pretest_6_10",
+            "evaluationPromptId": "20260615144023-d871b1c2",
+            "sessionPurpose": "evaluation",
+        }
+    )
+
+    assert _metadata_prompt_version_id(metadata) == "20260615144023-d871b1c2"
+
+
 def test_metadata_prompt_version_id_ignores_default_prompt_id() -> None:
     metadata = json.dumps(
         {

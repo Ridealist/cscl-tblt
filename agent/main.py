@@ -167,9 +167,19 @@ def _metadata_prompt_version_id(metadata) -> str | None:
         return None
     if not isinstance(parsed, dict):
         return None
-    version_id = parsed.get("promptVersionId")
+    version_id = parsed.get("promptVersionId") or parsed.get("evaluationPromptVersionId")
     if not isinstance(version_id, str) or not version_id.strip():
         version_id = parsed.get("promptId") if parsed.get("promptSource") == "custom" else None
+    if not isinstance(version_id, str) or not version_id.strip():
+        evaluation_prompt_id = parsed.get("evaluationPromptId")
+        evaluation_id = parsed.get("evaluationId")
+        if (
+            parsed.get("sessionPurpose") == "evaluation"
+            and isinstance(evaluation_prompt_id, str)
+            and evaluation_prompt_id.strip()
+            and evaluation_prompt_id != evaluation_id
+        ):
+            version_id = evaluation_prompt_id
     if not isinstance(version_id, str):
         return None
     version_id = version_id.strip()
@@ -651,10 +661,13 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
     activity_context = _resolve_realtime_activity_context(ctx)
     is_evaluation = activity_context.get("session_purpose") == "evaluation"
     if is_evaluation:
+        evaluation_prompt_version_id = (
+            activity_context.get("evaluation_prompt_version_id") or prompt_version_id
+        )
         prompt_source = await asyncio.to_thread(
             load_evaluation_prompt_source,
             activity_context.get("evaluation_id"),
-            activity_context.get("evaluation_prompt_version_id"),
+            evaluation_prompt_version_id,
         )
         activity_context = {
             **activity_context,
