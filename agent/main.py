@@ -223,6 +223,8 @@ def _metadata_activity_context(metadata) -> dict:
         "evaluation_id": parsed.get("evaluationId"),
         "evaluation_prompt_id": parsed.get("evaluationPromptId"),
         "evaluation_prompt_version": parsed.get("evaluationPromptVersion"),
+        "evaluation_prompt_version_id": parsed.get("evaluationPromptVersionId")
+        or parsed.get("promptVersionId"),
         "evaluation_character": parsed.get("evaluationCharacter"),
     }
     return {
@@ -365,7 +367,7 @@ class Assistant(Agent):
         self._get_speaker = get_speaker_fn  # () -> str | None
 
     async def on_enter(self) -> None:
-        """채팅방 입장 직후 호출 — 참가자 연결 대기 후 Daisy의 첫 인사 1문장 생성."""
+        """채팅방 입장 직후 호출 — 참가자 연결 대기 후 Kate의 첫 인사 1문장 생성."""
         await asyncio.sleep(1.0)
 
         names = _clean_names(self._get_names())
@@ -652,12 +654,14 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
         prompt_source = await asyncio.to_thread(
             load_evaluation_prompt_source,
             activity_context.get("evaluation_id"),
+            activity_context.get("evaluation_prompt_version_id"),
         )
         activity_context = {
             **activity_context,
             "evaluation_id": prompt_source.evaluation_id,
             "evaluation_prompt_id": prompt_source.evaluation_prompt_id,
             "evaluation_prompt_version": prompt_source.evaluation_prompt_version,
+            "evaluation_prompt_version_id": prompt_source.prompt_version_id,
             "evaluation_character": prompt_source.evaluation_character,
         }
         build_prompt_fn = build_evaluation_prompt_from_source
@@ -719,6 +723,8 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
             "evaluation_prompt_version": activity_context.get("evaluation_prompt_version"),
             "evaluation_character": activity_context.get("evaluation_character"),
             "prompt_id": activity_context.get("evaluation_prompt_id"),
+            "prompt_version_id": prompt_source.prompt_version_id,
+            "prompt_saved_at": prompt_source.saved_at,
             "prompt_source": prompt_source.source,
         }
         if is_evaluation

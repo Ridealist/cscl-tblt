@@ -229,6 +229,7 @@ function loadTokenRoute(options = {}) {
               evaluationCharacter: 'Kate',
               openingSentence: 'Hi, I’m Kate. I’m new here. Nice to meet you!',
               prompt: '# PRE-TEST INTERACTION PROMPT: Kate',
+              promptVersionId: null,
               evaluations: [],
             },
         };
@@ -334,6 +335,7 @@ test('token route marks eval-prefixed realtime rooms as evaluation sessions', as
       evaluationCharacter: 'Kate',
       openingSentence: 'Hi, I’m Kate. I’m new here. Nice to meet you!',
       prompt: '# PRE-TEST INTERACTION PROMPT: Kate',
+      promptVersionId: 'eval-version-1',
       evaluations: [],
     },
     sessionPurpose: 'evaluation',
@@ -363,7 +365,7 @@ test('token route marks eval-prefixed realtime rooms as evaluation sessions', as
   assert.equal(metadata.evaluationId, 'pretest_6_10');
   assert.equal(metadata.evaluationPromptId, 'manifest-prompt-id');
   assert.equal(metadata.evaluationPromptVersion, 'manifest-version-1');
-  assert.equal(metadata.promptVersionId, undefined);
+  assert.equal(metadata.promptVersionId, 'eval-version-1');
   assert.equal(metadata.promptSource, undefined);
   assert.equal(createdRooms.length, 0);
   assert.equal(createdDispatches.length, 0);

@@ -126,6 +126,7 @@ def test_metadata_activity_context_maps_evaluation_fields() -> None:
             "evaluationPromptId": "pretest_6_10",
             "evaluationPromptVersion": "2026-06-10",
             "sessionPurpose": "evaluation",
+            "promptVersionId": "eval-version-1",
         }
     )
 
@@ -135,6 +136,7 @@ def test_metadata_activity_context_maps_evaluation_fields() -> None:
         "evaluation_id": "pretest_6_10",
         "evaluation_prompt_id": "pretest_6_10",
         "evaluation_prompt_version": "2026-06-10",
+        "evaluation_prompt_version_id": "eval-version-1",
         "session_purpose": "evaluation",
     }
 
