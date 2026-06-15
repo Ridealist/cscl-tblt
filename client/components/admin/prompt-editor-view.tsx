@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { type AgentRole, getAgentRoleLabel, normalizeAgentRole } from '@/lib/agent-role';
+import type { PromptVersionSummary } from '@/lib/prompt-version-store';
 import type {
   RealtimeFeedbackConditionSummary,
   RealtimePromptConfig,
@@ -17,12 +18,19 @@ type PromptResponse = RealtimePromptState;
 type EvaluationPromptResponse = {
   source: 'evaluation';
   usingDefault: boolean;
+  activePromptVersionId: string | null;
   evaluationId: string;
   evaluationPromptId: string;
   evaluationPromptVersion?: string | null;
   evaluationCharacter: string;
   openingSentence: string;
   prompt: string;
+  promptVersionCreatedAt: string | null;
+  promptVersionHash: string | null;
+  promptVersionId: string | null;
+  promptVersionLabel: string | null;
+  promptVersions: PromptVersionSummary[];
+  savedAt: string | null;
   evaluations: Array<{
     id: string;
     character: string;
@@ -124,6 +132,42 @@ function confirmPromptChange(action: string) {
   );
 }
 
+function extractEvaluationOpening(prompt: string) {
+  const lines = prompt.split('\n');
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index].trim().toLowerCase() !== '# opening') continue;
+    const openingLines: string[] = [];
+    for (const candidate of lines.slice(index + 1)) {
+      const stripped = candidate.trim();
+      if (stripped.startsWith('#')) break;
+      if (stripped) openingLines.push(stripped.replace(/^"|"$/g, ''));
+    }
+    return openingLines.join(' ').trim() || null;
+  }
+  return null;
+}
+
+function evaluationPromptUrl(evaluationId?: string, versionId?: string, useDefault = false) {
+  const params = new URLSearchParams();
+  if (evaluationId) params.set('evaluationId', evaluationId);
+  if (versionId) params.set('versionId', versionId);
+  if (useDefault) params.set('default', '1');
+  const query = params.toString();
+  return `/api/admin/prompts/evaluation${query ? `?${query}` : ''}`;
+}
+
+function isGeneratedVersionLabel(version: PromptVersionSummary) {
+  return /^(realtime|evaluation) \d{4}-\d{2}-\d{2}T/.test(version.label);
+}
+
+function formatVersionOption(version: PromptVersionSummary, activeVersionId: string | null) {
+  const savedAt = new Date(version.createdAt).toLocaleString('ko-KR');
+  const customLabel = isGeneratedVersionLabel(version) ? null : version.label.trim();
+  return [version.id === activeVersionId ? '활성' : null, savedAt, customLabel]
+    .filter(Boolean)
+    .join(' · ');
+}
+
 export function PromptEditorView({ sessionPurpose }: { sessionPurpose: SessionPurpose }) {
   if (sessionPurpose === 'evaluation') {
     return <EvaluationPromptView />;
@@ -133,32 +177,176 @@ export function PromptEditorView({ sessionPurpose }: { sessionPurpose: SessionPu
 
 function EvaluationPromptView() {
   const [promptState, setPromptState] = useState<EvaluationPromptResponse | null>(null);
+  const [savedPromptState, setSavedPromptState] = useState<EvaluationPromptResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
+  const [versionLabel, setVersionLabel] = useState('');
+  const hasChanges = Boolean(
+    promptState &&
+      savedPromptState &&
+      (promptState.evaluationId !== savedPromptState.evaluationId ||
+        promptState.prompt !== savedPromptState.prompt)
+  );
+  const openingSentence = promptState
+    ? (extractEvaluationOpening(promptState.prompt) ?? promptState.openingSentence)
+    : '';
 
-  async function loadPrompt() {
-    setLoading(true);
-    setMessage(null);
-    try {
-      const res = await fetch('/api/admin/prompts/evaluation', { cache: 'no-store' });
-      const data = await res.json();
-      if (!res.ok) {
-        setMessage({ text: data.error ?? 'Evaluation 프롬프트를 불러오지 못했습니다.', ok: false });
+  const loadPrompt = useCallback(
+    async (evaluationId?: string, versionId?: string, useDefault = false) => {
+      setLoading(true);
+      setMessage(null);
+      try {
+        const res = await fetch(evaluationPromptUrl(evaluationId, versionId, useDefault), {
+          cache: 'no-store',
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setMessage({
+            text: data.error ?? 'Evaluation 프롬프트를 불러오지 못했습니다.',
+            ok: false,
+          });
+          setPromptState(null);
+          setSavedPromptState(null);
+          return;
+        }
+        setPromptState(data as EvaluationPromptResponse);
+        setSavedPromptState(data as EvaluationPromptResponse);
+        setVersionLabel('');
+      } catch {
+        setMessage({ text: 'Evaluation 프롬프트를 불러오지 못했습니다.', ok: false });
         setPromptState(null);
-        return;
+        setSavedPromptState(null);
+      } finally {
+        setLoading(false);
       }
-      setPromptState(data as EvaluationPromptResponse);
-    } catch {
-      setMessage({ text: 'Evaluation 프롬프트를 불러오지 못했습니다.', ok: false });
-      setPromptState(null);
-    } finally {
-      setLoading(false);
-    }
-  }
+    },
+    []
+  );
 
   useEffect(() => {
     loadPrompt();
-  }, []);
+  }, [loadPrompt]);
+
+  async function savePrompt() {
+    if (!promptState) return;
+
+    setSaving(true);
+    setMessage(null);
+    try {
+      const res = await fetch(evaluationPromptUrl(promptState.evaluationId), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          evaluationId: promptState.evaluationId,
+          prompt: promptState.prompt,
+          versionLabel: versionLabel.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ text: data.error ?? 'Evaluation 프롬프트 저장 실패', ok: false });
+        return;
+      }
+      const saved = data as EvaluationPromptResponse;
+      setPromptState(saved);
+      setSavedPromptState(saved);
+      setSaveDialogOpen(false);
+      setVersionLabel('');
+      setSavedAt(new Date().toLocaleTimeString('ko-KR'));
+      setMessage({ text: 'Evaluation 프롬프트 새 버전을 저장했습니다.', ok: true });
+    } catch {
+      setMessage({ text: 'Evaluation 프롬프트 저장 중 오류가 발생했습니다.', ok: false });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function resetPrompt() {
+    if (!promptState || !confirmPromptChange('Evaluation 프롬프트를 기본값으로 복원합니다.')) {
+      return;
+    }
+
+    setSaving(true);
+    setMessage(null);
+    try {
+      const res = await fetch(evaluationPromptUrl(promptState.evaluationId), { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ text: data.error ?? '기본값 복원 실패', ok: false });
+        return;
+      }
+      const restored = data as EvaluationPromptResponse;
+      setPromptState(restored);
+      setSavedPromptState(restored);
+      setVersionLabel('');
+      setSavedAt(new Date().toLocaleTimeString('ko-KR'));
+      setMessage({ text: '기본 Evaluation 프롬프트로 복원했습니다.', ok: true });
+    } catch {
+      setMessage({ text: '기본값 복원 중 오류가 발생했습니다.', ok: false });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function activateVersion() {
+    if (!promptState?.promptVersionId) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const res = await fetch(evaluationPromptUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'activate', versionId: promptState.promptVersionId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ text: data.error ?? '버전 활성화 실패', ok: false });
+        return;
+      }
+      const activated = data as EvaluationPromptResponse;
+      setPromptState(activated);
+      setSavedPromptState(activated);
+      setMessage({ text: 'Evaluation 프롬프트 버전을 활성화했습니다.', ok: true });
+    } catch {
+      setMessage({ text: '버전 활성화 중 오류가 발생했습니다.', ok: false });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteVersion() {
+    if (
+      !promptState?.promptVersionId ||
+      !confirmPromptChange('선택한 Evaluation 프롬프트 버전을 삭제합니다.')
+    ) {
+      return;
+    }
+
+    setSaving(true);
+    setMessage(null);
+    try {
+      const res = await fetch(evaluationPromptUrl(undefined, promptState.promptVersionId), {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ text: data.error ?? '버전 삭제 실패', ok: false });
+        return;
+      }
+      const next = data as EvaluationPromptResponse;
+      setPromptState(next);
+      setSavedPromptState(next);
+      setMessage({ text: 'Evaluation 프롬프트 버전을 삭제했습니다.', ok: true });
+    } catch {
+      setMessage({ text: '버전 삭제 중 오류가 발생했습니다.', ok: false });
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -172,9 +360,14 @@ function EvaluationPromptView() {
             <p className="text-muted-foreground text-xs">
               운영 설정: {getSessionPurposeLabel('evaluation')}
             </p>
+            <p className="text-muted-foreground text-xs">
+              {promptState?.usingDefault
+                ? '현재 prompts/evaluation/*.md 기본값을 사용합니다.'
+                : '현재 prompt_versions 사용자 버전이 md 기본값보다 우선합니다.'}
+            </p>
           </div>
           <span className="bg-muted text-muted-foreground shrink-0 rounded px-2 py-1 text-xs">
-            파일 기준
+            {promptState?.usingDefault ? '기본값 사용 중' : '사용자 설정 사용 중'}
           </span>
         </div>
         {promptState && (
@@ -183,12 +376,6 @@ function EvaluationPromptView() {
               Evaluation ID:{' '}
               <span className="text-foreground font-mono font-semibold">
                 {promptState.evaluationId}
-              </span>
-            </span>
-            <span>
-              Prompt ID:{' '}
-              <span className="text-foreground font-mono font-semibold">
-                {promptState.evaluationPromptId}
               </span>
             </span>
             <span>
@@ -203,6 +390,20 @@ function EvaluationPromptView() {
                 {promptState.evaluationCharacter}
               </span>
             </span>
+            <span>
+              저장 시각:{' '}
+              <span className="text-foreground font-semibold">
+                {promptState.savedAt
+                  ? new Date(promptState.savedAt).toLocaleString('ko-KR')
+                  : '저장 이력 없음'}
+              </span>
+            </span>
+            <span>
+              Version ID:{' '}
+              <span className="text-foreground font-mono font-semibold">
+                {promptState.promptVersionId ?? '기본값'}
+              </span>
+            </span>
           </div>
         )}
       </section>
@@ -212,17 +413,86 @@ function EvaluationPromptView() {
       ) : promptState ? (
         <>
           <section className="flex flex-col gap-3">
+            <div>
+              <h3 className="text-foreground text-sm font-semibold">Prompt Version</h3>
+              <p className="text-muted-foreground text-xs">
+                저장된 버전은 immutable snapshot이며, 수정 후 저장하면 새 버전이 생성됩니다.
+              </p>
+            </div>
+            <select
+              value={promptState.promptVersionId ?? 'default'}
+              disabled={saving}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === 'default') {
+                  loadPrompt(promptState.evaluationId, undefined, true);
+                } else {
+                  loadPrompt(undefined, value);
+                }
+              }}
+              className="border-input bg-background text-foreground focus:ring-primary w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 disabled:opacity-50"
+            >
+              <option value="default">기본값</option>
+              {promptState.promptVersions.map((version) => (
+                <option key={version.id} value={version.id}>
+                  {formatVersionOption(version, promptState.activePromptVersionId)}
+                </option>
+              ))}
+            </select>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={activateVersion}
+                disabled={
+                  saving ||
+                  !promptState.promptVersionId ||
+                  promptState.promptVersionId === promptState.activePromptVersionId
+                }
+                className="border-border hover:bg-muted text-foreground rounded-md border px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                이 버전 활성화
+              </button>
+              <button
+                onClick={deleteVersion}
+                disabled={saving || !promptState.promptVersionId}
+                className="border-border hover:bg-muted text-foreground rounded-md border px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                이 버전 삭제
+              </button>
+              {promptState.promptVersionHash && (
+                <span className="text-muted-foreground font-mono text-xs">
+                  hash {promptState.promptVersionHash.slice(0, 12)}
+                </span>
+              )}
+            </div>
+          </section>
+
+          <section className="flex flex-col gap-3">
+            {promptState.evaluations.length > 1 && (
+              <select
+                value={promptState.evaluationId}
+                disabled={saving}
+                onChange={(e) => loadPrompt(e.target.value)}
+                className="border-input bg-background text-foreground focus:ring-primary w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 disabled:opacity-50"
+              >
+                {promptState.evaluations.map((evaluation) => (
+                  <option key={evaluation.id} value={evaluation.id}>
+                    {evaluation.id} · {evaluation.character}
+                    {evaluation.version ? ` · ${evaluation.version}` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
             <div className="flex items-end justify-between gap-3">
               <div>
                 <h3 className="text-foreground text-sm font-semibold">Opening</h3>
                 <p className="text-muted-foreground text-xs">Evaluation 세션 첫 발화입니다.</p>
               </div>
               <span className="text-muted-foreground shrink-0 font-mono text-xs">
-                {promptState.openingSentence.length.toLocaleString('ko-KR')}자
+                {openingSentence.length.toLocaleString('ko-KR')}자
               </span>
             </div>
             <textarea
-              value={promptState.openingSentence}
+              value={openingSentence}
               rows={2}
               readOnly
               spellCheck={false}
@@ -245,9 +515,14 @@ function EvaluationPromptView() {
             <textarea
               value={promptState.prompt}
               rows={32}
-              readOnly
               spellCheck={false}
-              className="border-input bg-muted/40 text-foreground min-h-96 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none"
+              onChange={(e) =>
+                setPromptState((current) =>
+                  current ? { ...current, prompt: e.target.value } : current
+                )
+              }
+              disabled={saving}
+              className="border-input bg-background text-foreground focus:ring-primary min-h-96 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none focus:ring-2 disabled:opacity-50"
             />
           </section>
         </>
@@ -260,14 +535,154 @@ function EvaluationPromptView() {
       )}
 
       <div className="flex flex-wrap items-center gap-2">
+        <Button
+          onClick={() => {
+            setVersionLabel('');
+            setSaveDialogOpen(true);
+          }}
+          disabled={loading || saving || !hasChanges}
+        >
+          {saving ? '저장 중...' : '새 버전으로 저장'}
+        </Button>
         <button
-          onClick={loadPrompt}
-          disabled={loading}
+          onClick={resetPrompt}
+          disabled={loading || saving || !promptState}
+          className="border-border hover:bg-muted text-foreground rounded-md border px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          기본값으로 복원
+        </button>
+        <button
+          onClick={() => setDiscardDialogOpen(true)}
+          disabled={loading || saving || !hasChanges}
           className="text-muted-foreground hover:text-foreground px-2 py-2 text-sm underline underline-offset-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
         >
-          다시 불러오기
+          변경 사항 되돌리기
         </button>
+        {hasChanges && (
+          <span className="text-muted-foreground text-xs">저장되지 않은 변경사항</span>
+        )}
+        {savedAt && <span className="text-muted-foreground text-xs">마지막 저장: {savedAt}</span>}
       </div>
+
+      {saveDialogOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !saving) {
+              setSaveDialogOpen(false);
+            }
+          }}
+        >
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="evaluation-save-dialog-title"
+            className="bg-background text-foreground border-border w-full max-w-md rounded-lg border p-5 shadow-xl"
+            onSubmit={(event) => {
+              event.preventDefault();
+              savePrompt();
+            }}
+          >
+            <div className="flex flex-col gap-1">
+              <h3 id="evaluation-save-dialog-title" className="text-base font-semibold">
+                새 프롬프트 버전 저장
+              </h3>
+              <p className="text-muted-foreground text-sm">
+                Evaluation 프롬프트의 현재 내용을 immutable snapshot으로 저장합니다.
+              </p>
+            </div>
+
+            <div className="mt-5 flex flex-col gap-2">
+              <label className="text-sm font-medium" htmlFor="evaluation-version-label">
+                버전 이름
+              </label>
+              <input
+                id="evaluation-version-label"
+                value={versionLabel}
+                onChange={(event) => setVersionLabel(event.target.value)}
+                disabled={saving}
+                autoFocus
+                placeholder="비워두면 저장 시각만 표시됩니다"
+                className="border-input bg-background text-foreground focus:ring-primary w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 disabled:opacity-50"
+              />
+            </div>
+
+            <p className="text-muted-foreground mt-4 text-xs leading-5">
+              저장된 변경사항은 현재 진행 중인 세션에는 적용되지 않고, 다음에 새로 생성되는 개별
+              세션부터 반영됩니다.
+            </p>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setSaveDialogOpen(false)}
+                disabled={saving}
+                className="border-border hover:bg-muted text-foreground rounded-md border px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                취소
+              </button>
+              <Button type="submit" disabled={saving}>
+                {saving ? '저장 중...' : '저장'}
+              </Button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {discardDialogOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !loading && !saving) {
+              setDiscardDialogOpen(false);
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="evaluation-discard-dialog-title"
+            className="bg-background text-foreground border-border w-full max-w-md rounded-lg border p-5 shadow-xl"
+          >
+            <div className="flex flex-col gap-1">
+              <h3 id="evaluation-discard-dialog-title" className="text-base font-semibold">
+                변경 사항 되돌리기
+              </h3>
+              <p className="text-muted-foreground text-sm">
+                저장하지 않은 Evaluation 프롬프트 편집 내용이 삭제되고, 마지막으로 화면에 불러온
+                프롬프트 상태로 돌아갑니다.
+              </p>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDiscardDialogOpen(false)}
+                disabled={loading || saving}
+                className="border-border hover:bg-muted text-foreground rounded-md border px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                취소
+              </button>
+              <Button
+                type="button"
+                disabled={loading || saving}
+                onClick={() => {
+                  if (savedPromptState) {
+                    setPromptState(savedPromptState);
+                    setVersionLabel('');
+                    setMessage({ text: '저장되지 않은 변경 사항을 되돌렸습니다.', ok: true });
+                  }
+                  setDiscardDialogOpen(false);
+                }}
+              >
+                확인
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
