@@ -37,12 +37,27 @@ const DEFAULT_REALTIME_PROMPT_METADATA = {
   source: 'default',
 };
 
+const EMPTY_CONDITION_COMBINATION_PROMPTS = {
+  dominant_no_corrective: '',
+  dominant_explicit_correction: '',
+  collaborative_no_corrective: '',
+  collaborative_explicit_correction: '',
+};
+
+const CUSTOM_CONDITION_COMBINATION_PROMPTS = {
+  dominant_no_corrective: 'Dominant no corrective condition prompt.',
+  dominant_explicit_correction: 'Dominant explicit correction condition prompt.',
+  collaborative_no_corrective: 'Collaborative no corrective condition prompt.',
+  collaborative_explicit_correction: 'Collaborative explicit correction condition prompt.',
+};
+
 const DEFAULT_PROMPT = {
   basePrompt: '# BASE PROMPT:\nDefault base prompt',
   dominantPrompt: '# INTERLOCUTOR ROLE PROMPT: Dominant\nDefault dominant prompt',
   collaborativePrompt: '# INTERLOCUTOR ROLE PROMPT: Collaborative\nDefault collaborative prompt',
   feedbackConditionId: 'explicit_correction',
   feedbackPrompt: '# FEEDBACK CONDITION: Explicit Correction\nDefault explicit feedback',
+  conditionCombinationPrompts: EMPTY_CONDITION_COMBINATION_PROMPTS,
   taskCardId: 'school_event_invitation',
   taskCardPrompt: '# TASK CARD: School Event Invitation\nDefault task card',
 };
@@ -53,6 +68,7 @@ const CUSTOM_PROMPT = {
   collaborativePrompt: '# INTERLOCUTOR ROLE PROMPT: Collaborative\nEdited collaborative prompt',
   feedbackConditionId: 'explicit_correction',
   feedbackPrompt: '# FEEDBACK CONDITION: Explicit Correction\nEdited feedback prompt',
+  conditionCombinationPrompts: CUSTOM_CONDITION_COMBINATION_PROMPTS,
   taskCardId: 'school_event_invitation',
   taskCardPrompt: '# TASK CARD: School Event Invitation\nEdited task card prompt',
 };
@@ -160,7 +176,13 @@ function validateRealtimePromptConfig(value) {
   }
   return {
     ok: true,
-    config: Object.fromEntries(required.map((key) => [key, value[key].trim()])),
+    config: {
+      ...Object.fromEntries(required.map((key) => [key, value[key].trim()])),
+      conditionCombinationPrompts: {
+        ...EMPTY_CONDITION_COMBINATION_PROMPTS,
+        ...(value.conditionCombinationPrompts ?? {}),
+      },
+    },
   };
 }
 
@@ -301,6 +323,7 @@ function promptFields(value) {
     collaborativePrompt: value.collaborativePrompt,
     feedbackConditionId: value.feedbackConditionId,
     feedbackPrompt: value.feedbackPrompt,
+    conditionCombinationPrompts: value.conditionCombinationPrompts,
     taskCardId: value.taskCardId,
     taskCardPrompt: value.taskCardPrompt,
   };

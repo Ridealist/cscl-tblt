@@ -16,6 +16,12 @@ const PRACTICE_ROW = {
   collaborative_prompt: 'Collaborative prompt',
   feedback_condition_id: 'no_corrective',
   feedback_prompt: 'Feedback prompt',
+  condition_combination_prompts: {
+    dominant_no_corrective: 'Dominant no corrective prompt',
+    dominant_explicit_correction: 'Dominant explicit correction prompt',
+    collaborative_no_corrective: 'Collaborative no corrective prompt',
+    collaborative_explicit_correction: 'Collaborative explicit correction prompt',
+  },
   task_card_id: 'school_event_invitation',
   task_card_prompt: 'Task card prompt',
   source: 'custom',
@@ -24,6 +30,13 @@ const PRACTICE_ROW = {
   hash: 'hash-practice',
   created_at: '2026-06-12T00:00:00.000Z',
   created_by: 'admin-user',
+};
+
+const EMPTY_CONDITION_COMBINATION_PROMPTS = {
+  dominant_no_corrective: '',
+  dominant_explicit_correction: '',
+  collaborative_no_corrective: '',
+  collaborative_explicit_correction: '',
 };
 
 const EVALUATION_ROW = {
@@ -87,7 +100,19 @@ function validateRealtimePromptConfig(value) {
   }
   return {
     ok: true,
-    config: Object.fromEntries(required.map((key) => [key, value[key].trim()])),
+    config: {
+      ...Object.fromEntries(required.map((key) => [key, value[key].trim()])),
+      conditionCombinationPrompts: normalizeConditionCombinationPrompts(
+        value.conditionCombinationPrompts
+      ),
+    },
+  };
+}
+
+function normalizeConditionCombinationPrompts(value) {
+  return {
+    ...EMPTY_CONDITION_COMBINATION_PROMPTS,
+    ...(value && typeof value === 'object' ? value : {}),
   };
 }
 
@@ -103,7 +128,7 @@ function loadPromptVersionDbStore(options = {}) {
       return {};
     }
     if (specifier === '@/lib/realtime-prompt-config') {
-      return { validateRealtimePromptConfig };
+      return { normalizeConditionCombinationPrompts, validateRealtimePromptConfig };
     }
     if (specifier === '@/lib/supabase/admin') {
       return {
@@ -180,4 +205,58 @@ test('deletePromptVersion requires an expected purpose for the delete RPC', asyn
       },
     },
   ]);
+});
+
+test('savePracticePromptVersion sends condition-combination prompts to the RPC', async () => {
+  const { calls, savePracticePromptVersion } = loadPromptVersionDbStore({
+    rpcData: PRACTICE_ROW,
+  });
+
+  const config = {
+    basePrompt: 'Base prompt',
+    dominantPrompt: 'Dominant prompt',
+    collaborativePrompt: 'Collaborative prompt',
+    feedbackConditionId: 'no_corrective',
+    feedbackPrompt: 'Feedback prompt',
+    conditionCombinationPrompts: PRACTICE_ROW.condition_combination_prompts,
+    taskCardId: 'school_event_invitation',
+    taskCardPrompt: 'Task card prompt',
+  };
+
+  const version = await savePracticePromptVersion(config, {
+    createdBy: 'admin-user',
+    label: 'Practice version',
+  });
+
+  assert.deepEqual(version.conditionCombinationPrompts, PRACTICE_ROW.condition_combination_prompts);
+  assert.equal(calls.rpcs[0].name, 'save_practice_prompt_version');
+  assert.deepEqual(
+    calls.rpcs[0].args.p_condition_combination_prompts,
+    PRACTICE_ROW.condition_combination_prompts
+  );
+});
+
+test('hashPracticePromptConfig changes when condition-combination prompt changes', () => {
+  const { hashPracticePromptConfig } = loadPromptVersionDbStore();
+  const baseConfig = {
+    basePrompt: 'Base prompt',
+    dominantPrompt: 'Dominant prompt',
+    collaborativePrompt: 'Collaborative prompt',
+    feedbackConditionId: 'no_corrective',
+    feedbackPrompt: 'Feedback prompt',
+    conditionCombinationPrompts: EMPTY_CONDITION_COMBINATION_PROMPTS,
+    taskCardId: 'school_event_invitation',
+    taskCardPrompt: 'Task card prompt',
+  };
+
+  assert.notEqual(
+    hashPracticePromptConfig(baseConfig),
+    hashPracticePromptConfig({
+      ...baseConfig,
+      conditionCombinationPrompts: {
+        ...EMPTY_CONDITION_COMBINATION_PROMPTS,
+        collaborative_explicit_correction: 'Changed prompt',
+      },
+    })
+  );
 });

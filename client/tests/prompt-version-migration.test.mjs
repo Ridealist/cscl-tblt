@@ -9,6 +9,13 @@ const MIGRATION = readFileSync(
   ),
   'utf-8'
 );
+const CONDITION_COMBINATION_MIGRATION = readFileSync(
+  new URL(
+    '../../supabase/migrations/20260617000000_condition_combination_prompts.sql',
+    import.meta.url
+  ),
+  'utf-8'
+);
 
 test('compatibility realtime_prompt_versions view uses invoker security', () => {
   assert.match(
@@ -30,5 +37,24 @@ test('activate and delete RPCs accept expected purpose before mutating prompt_ve
   assert.match(
     MIGRATION,
     /normalized_expected_purpose\s+is\s+null\s+or\s+purpose\s+=\s+normalized_expected_purpose/i
+  );
+});
+
+test('condition-combination migration adds JSONB storage and RPC parameters', () => {
+  assert.match(
+    CONDITION_COMBINATION_MIGRATION,
+    /add\s+column\s+if\s+not\s+exists\s+condition_combination_prompts\s+jsonb\s+not\s+null\s+default\s+'\{\}'::jsonb/i
+  );
+  assert.match(
+    CONDITION_COMBINATION_MIGRATION,
+    /jsonb_typeof\s*\(\s*condition_combination_prompts\s*\)\s*=\s*'object'/i
+  );
+  assert.match(
+    CONDITION_COMBINATION_MIGRATION,
+    /p_condition_combination_prompts\s+jsonb\s+default\s+'\{\}'::jsonb/i
+  );
+  assert.match(
+    CONDITION_COMBINATION_MIGRATION,
+    /condition_combination_prompts\s*=\s*excluded\.condition_combination_prompts/i
   );
 });

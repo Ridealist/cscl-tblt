@@ -13,6 +13,12 @@ const EVALUATION_MANIFEST_PATH = join(
   "evaluation",
   "manifest.json",
 );
+const CONDITION_COMBINATION_PROMPT_KEYS = [
+  "dominant_no_corrective",
+  "dominant_explicit_correction",
+  "collaborative_no_corrective",
+  "collaborative_explicit_correction",
+];
 
 function parseDotenv(text) {
   for (const rawLine of text.split(/\r?\n/)) {
@@ -55,6 +61,17 @@ function stableStringify(value) {
 
 function hashConfig(config) {
   return createHash("sha256").update(stableStringify(config)).digest("hex");
+}
+
+function normalizeConditionCombinationPrompts(value) {
+  const source =
+    value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return Object.fromEntries(
+    CONDITION_COMBINATION_PROMPT_KEYS.map((key) => [
+      key,
+      typeof source[key] === "string" ? source[key].trim() : "",
+    ]),
+  );
 }
 
 function text(value) {
@@ -154,6 +171,9 @@ function evaluationMetadata(evaluationId, prompt, manifest) {
 
 function practicePayload(version, activeId) {
   const config = version.config;
+  const conditionCombinationPrompts = normalizeConditionCombinationPrompts(
+    config?.conditionCombinationPrompts,
+  );
   const required = [
     "basePrompt",
     "dominantPrompt",
@@ -173,11 +193,17 @@ function practicePayload(version, activeId) {
   return {
     p_base_prompt: config.basePrompt,
     p_collaborative_prompt: config.collaborativePrompt,
+    p_condition_combination_prompts: conditionCombinationPrompts,
     p_created_at: version.createdAt,
     p_dominant_prompt: config.dominantPrompt,
     p_feedback_condition_id: config.feedbackConditionId,
     p_feedback_prompt: config.feedbackPrompt,
-    p_hash: text(version.hash) || hashConfig(config),
+    p_hash:
+      text(version.hash) ||
+      hashConfig({
+        ...config,
+        conditionCombinationPrompts,
+      }),
     p_is_active: activeId === version.id,
     p_label: text(version.label) || `practice ${version.createdAt}`,
     p_legacy_file_purpose: "realtime",

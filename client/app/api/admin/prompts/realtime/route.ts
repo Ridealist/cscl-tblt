@@ -73,6 +73,7 @@ function versionToPromptState(
     collaborativePrompt: version.collaborativePrompt,
     feedbackConditionId: version.feedbackConditionId,
     feedbackPrompt: version.feedbackPrompt,
+    conditionCombinationPrompts: version.conditionCombinationPrompts,
     taskCardId: version.taskCardId,
     taskCardPrompt: version.taskCardPrompt,
     promptId: version.promptId,
@@ -369,7 +370,7 @@ function defaultRequestedFromRequest(req?: Request) {
   return value === '1' || value === 'true';
 }
 
-export async function GET(req?: Request) {
+export async function GET(req: Request) {
   const adminError = await requireAdmin();
   if (adminError) return adminError;
 
@@ -429,7 +430,7 @@ export async function POST(req: Request) {
   }
 }
 
-export async function DELETE(req?: Request) {
+export async function DELETE(req: Request) {
   const adminError = await requireAdmin();
   if (adminError) return adminError;
 

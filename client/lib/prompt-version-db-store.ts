@@ -3,6 +3,7 @@ import 'server-only';
 import {
   type RealtimePromptConfig,
   type RealtimePromptMetadata,
+  normalizeConditionCombinationPrompts,
   validateRealtimePromptConfig,
 } from '@/lib/realtime-prompt-config';
 import { createSupabaseAdminClient, hasSupabaseAdminEnv } from '@/lib/supabase/admin';
@@ -29,6 +30,7 @@ type PromptVersionRow = {
   collaborative_prompt?: unknown;
   feedback_condition_id?: unknown;
   feedback_prompt?: unknown;
+  condition_combination_prompts?: unknown;
   task_card_id?: unknown;
   task_card_prompt?: unknown;
   evaluation_prompt?: unknown;
@@ -104,6 +106,7 @@ const PROMPT_VERSION_COLUMNS = [
   'collaborative_prompt',
   'feedback_condition_id',
   'feedback_prompt',
+  'condition_combination_prompts',
   'task_card_id',
   'task_card_prompt',
   'evaluation_prompt',
@@ -155,6 +158,9 @@ export function hashPracticePromptConfig(config: RealtimePromptConfig): string {
     dominantPrompt: config.dominantPrompt,
     feedbackConditionId: config.feedbackConditionId,
     feedbackPrompt: config.feedbackPrompt,
+    conditionCombinationPrompts: normalizeConditionCombinationPrompts(
+      config.conditionCombinationPrompts
+    ),
     taskCardId: config.taskCardId,
     taskCardPrompt: config.taskCardPrompt,
   });
@@ -211,6 +217,7 @@ function rowToPracticeVersion(row: PromptVersionRow): PracticePromptVersion {
     collaborativePrompt: row.collaborative_prompt,
     feedbackConditionId: row.feedback_condition_id,
     feedbackPrompt: row.feedback_prompt,
+    conditionCombinationPrompts: row.condition_combination_prompts,
     taskCardId: row.task_card_id,
     taskCardPrompt: row.task_card_prompt,
   });
@@ -395,6 +402,9 @@ export async function savePracticePromptVersion(
     p_dominant_prompt: config.dominantPrompt,
     p_feedback_condition_id: config.feedbackConditionId,
     p_feedback_prompt: config.feedbackPrompt,
+    p_condition_combination_prompts: normalizeConditionCombinationPrompts(
+      config.conditionCombinationPrompts
+    ),
     p_hash: hash,
     p_label: options.label ?? null,
     p_task_card_id: config.taskCardId,
