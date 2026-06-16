@@ -261,6 +261,26 @@ type RealtimeRoomsResponse = {
   realtimeRooms?: Array<{ name: string }>;
 };
 
+type PracticePromptMetadataResponse = {
+  promptId: string;
+  promptVersionLabel: string | null;
+  savedAt: string | null;
+  usingDefault: boolean;
+};
+
+type EvaluationPromptMetadataResponse = {
+  evaluationPromptId: string;
+  promptVersionLabel: string | null;
+  savedAt: string | null;
+  usingDefault: boolean;
+};
+
+type ActivePromptVersionMetadata = {
+  promptId: string;
+  savedAt: string | null;
+  versionLabel: string;
+};
+
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -278,6 +298,115 @@ function inferRoomSessionPurpose(room: RealtimeRoomStatus): SessionPurpose | und
   if (room.name.startsWith('eval-')) return 'evaluation';
   if (room.name.startsWith('task-')) return 'practice';
   return undefined;
+}
+
+function formatPromptVersionDate(value: string | null) {
+  return value ? new Date(value).toLocaleString('ko-KR') : '저장 이력 없음';
+}
+
+function metadataFromPracticePrompt(
+  data: PracticePromptMetadataResponse
+): ActivePromptVersionMetadata {
+  return {
+    promptId: data.promptId,
+    versionLabel:
+      data.promptVersionLabel ?? (data.usingDefault ? 'Tracked markdown default' : '이름 없음'),
+    savedAt: data.savedAt,
+  };
+}
+
+function metadataFromEvaluationPrompt(
+  data: EvaluationPromptMetadataResponse
+): ActivePromptVersionMetadata {
+  return {
+    promptId: data.evaluationPromptId,
+    versionLabel:
+      data.promptVersionLabel ?? (data.usingDefault ? 'Tracked markdown default' : '이름 없음'),
+    savedAt: data.savedAt,
+  };
+}
+
+function ActivePromptVersionSection({ sessionPurpose }: { sessionPurpose: SessionPurpose }) {
+  const [metadata, setMetadata] = useState<ActivePromptVersionMetadata | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadMetadata() {
+      setLoading(true);
+      setError(null);
+      try {
+        const endpoint =
+          sessionPurpose === 'evaluation'
+            ? '/api/admin/prompts/evaluation'
+            : '/api/admin/prompts/realtime';
+        const res = await fetch(endpoint, { cache: 'no-store' });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(typeof data.error === 'string' ? data.error : 'Prompt Version 조회 실패');
+        }
+        if (cancelled) return;
+        setMetadata(
+          sessionPurpose === 'evaluation'
+            ? metadataFromEvaluationPrompt(data as EvaluationPromptMetadataResponse)
+            : metadataFromPracticePrompt(data as PracticePromptMetadataResponse)
+        );
+      } catch (loadError) {
+        if (cancelled) return;
+        setMetadata(null);
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : '현재 활성 Prompt Version을 불러오지 못했습니다.'
+        );
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadMetadata();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionPurpose]);
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div>
+        <h2 className="text-foreground text-sm font-semibold">현재 활성 Prompt Version</h2>
+        <p className="text-muted-foreground text-xs">
+          새 개별 세션에 적용될 프롬프트 버전 메타정보입니다. 버전 변경은 프롬프트 편집에서
+          관리합니다.
+        </p>
+      </div>
+
+      {loading ? (
+        <p className="text-muted-foreground text-sm">Prompt Version 정보를 불러오는 중...</p>
+      ) : error ? (
+        <p className="text-destructive text-xs">{error}</p>
+      ) : metadata ? (
+        <div className="border-border divide-border rounded-lg border text-xs">
+          <div className="flex items-center justify-between gap-4 px-3 py-2">
+            <span className="text-muted-foreground">프롬프트 ID</span>
+            <span className="text-foreground font-mono font-semibold">{metadata.promptId}</span>
+          </div>
+          <div className="flex items-center justify-between gap-4 px-3 py-2">
+            <span className="text-muted-foreground">버전 이름</span>
+            <span className="text-foreground font-semibold">{metadata.versionLabel}</span>
+          </div>
+          <div className="flex items-center justify-between gap-4 px-3 py-2">
+            <span className="text-muted-foreground">저장 시각</span>
+            <span className="text-foreground font-semibold">
+              {formatPromptVersionDate(metadata.savedAt)}
+            </span>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
 }
 
 function inferRoomActivityType(room: RealtimeRoomStatus): ActivityType | undefined {
@@ -682,7 +811,7 @@ export default function AdminPage() {
       [
         `Session Purpose를 [${nextLabel}]로 변경하면 현재 진행 중인 모든 개별 세션이 종료됩니다.`,
         '',
-        `변경 후에는 [${nextLabel}] 기준으로 새 개별 세션과 프롬프트 편집 화면이 구성됩니다.`,
+        `변경 후에는 [${nextLabel}] 기준으로 새 개별 세션이 생성됩니다.`,
         '',
         '계속하시겠습니까?',
       ].join('\n')
@@ -1061,6 +1190,8 @@ export default function AdminPage() {
                   )}
                 </section>
               )}
+
+              <ActivePromptVersionSection sessionPurpose={settings.sessionPurpose} />
 
               <hr className="border-border" />
             </>
