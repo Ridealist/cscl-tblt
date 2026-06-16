@@ -6,10 +6,20 @@ import {
   readEvaluationPromptState,
   writeEvaluationPromptOverride,
 } from '@/lib/evaluation-prompt-source';
+import { PromptVersionStoreError } from '@/lib/prompt-version-db-store';
 import { requireAdmin } from '@/lib/supabase/admin-auth';
 
 function statusForError(error: unknown) {
-  return error instanceof EvaluationPromptSourceError ? error.status : 500;
+  if (error instanceof EvaluationPromptSourceError) return error.status;
+  if (error instanceof PromptVersionStoreError) return error.status;
+  return 500;
+}
+
+function messageForError(error: unknown, fallback: string) {
+  if (error instanceof EvaluationPromptSourceError || error instanceof PromptVersionStoreError) {
+    return error.message;
+  }
+  return fallback;
 }
 
 function evaluationIdFromRequest(req: Request) {
@@ -39,7 +49,7 @@ export async function GET(req: Request) {
     );
   } catch (error) {
     return NextResponse.json(
-      { error: 'Evaluation 프롬프트 파일을 불러오지 못했습니다.' },
+      { error: messageForError(error, 'Evaluation 프롬프트 파일을 불러오지 못했습니다.') },
       { status: statusForError(error) }
     );
   }
@@ -69,7 +79,7 @@ export async function POST(req: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof EvaluationPromptSourceError ? error.message : '프롬프트 저장 실패',
+        error: messageForError(error, '프롬프트 저장 실패'),
       },
       { status: statusForError(error) }
     );
@@ -90,10 +100,7 @@ export async function DELETE(req: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error:
-          error instanceof EvaluationPromptSourceError
-            ? error.message
-            : '기본 Evaluation 프롬프트 복원 실패',
+        error: messageForError(error, '기본 Evaluation 프롬프트 복원 실패'),
       },
       { status: statusForError(error) }
     );

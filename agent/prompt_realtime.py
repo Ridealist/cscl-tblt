@@ -21,6 +21,7 @@ PROMPT_FIELDS = ("basePrompt", "dominantPrompt", "collaborativePrompt")
 PROMPT_VERSION_COLUMNS = ",".join(
     (
         "id",
+        "purpose",
         "base_prompt",
         "dominant_prompt",
         "collaborative_prompt",
@@ -226,8 +227,9 @@ def _fetch_prompt_version_row(prompt_version_id: str) -> dict:
         raise PromptVersionFetchError("Prompt version id is empty.")
     url, key = _get_supabase_prompt_env()
     endpoint = (
-        f"{url}/rest/v1/realtime_prompt_versions"
-        f"?id=eq.{quote(version_id, safe='')}&select={PROMPT_VERSION_COLUMNS}"
+        f"{url}/rest/v1/prompt_versions"
+        f"?id=eq.{quote(version_id, safe='')}"
+        f"&purpose=eq.practice&select={PROMPT_VERSION_COLUMNS}"
     )
     request = Request(
         endpoint,
@@ -258,6 +260,8 @@ def _fetch_prompt_version_row(prompt_version_id: str) -> dict:
         raise PromptVersionFetchError(
             f"Prompt version response has invalid shape: {version_id}"
         )
+    if row.get("purpose") != "practice":
+        raise PromptVersionFetchError(f"Prompt version is not a practice version: {version_id}")
     return row
 
 

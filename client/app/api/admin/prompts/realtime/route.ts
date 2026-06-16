@@ -12,8 +12,12 @@ import {
 import {
   RealtimePromptStoreError,
   type RealtimePromptVersion,
+  activateRealtimePromptVersion,
   deactivateActiveRealtimePromptVersion,
+  deleteRealtimePromptVersion,
+  listRealtimePromptVersions,
   readActiveRealtimePromptVersion,
+  readRealtimePromptVersion,
   saveRealtimePromptVersion,
 } from '@/lib/realtime-prompt-store';
 import { readSettings } from '@/lib/settings-store';
@@ -52,10 +56,16 @@ type PromptDefaults = RealtimePromptConfig & {
   feedbackConditions: RealtimeFeedbackConditionSummary[];
   taskCards: RealtimeTaskCardSummary[];
 };
+type PromptVersionMetadata = {
+  activePromptVersionId: string | null;
+  activeVersion: RealtimePromptVersion | null;
+  promptVersions: Awaited<ReturnType<typeof listRealtimePromptVersions>>;
+};
 
 function versionToPromptState(
   version: RealtimePromptVersion,
-  defaults: PromptDefaults
+  defaults: PromptDefaults,
+  versionMetadata: PromptVersionMetadata
 ): RealtimePromptState {
   return {
     basePrompt: version.basePrompt,
@@ -68,7 +78,13 @@ function versionToPromptState(
     promptId: version.promptId,
     savedAt: version.savedAt,
     source: version.source,
+    activePromptVersionId: versionMetadata.activePromptVersionId,
     feedbackConditions: defaults.feedbackConditions,
+    promptVersionCreatedAt: version.savedAt,
+    promptVersionHash: version.hash,
+    promptVersionId: version.promptId,
+    promptVersionLabel: version.label,
+    promptVersions: versionMetadata.promptVersions,
     taskCards: defaults.taskCards,
     usingDefault: false,
   };
@@ -257,21 +273,76 @@ async function readTaskCardConfig(
   };
 }
 
-async function readPromptConfig(): Promise<RealtimePromptState> {
-  const activeVersion = await readActiveRealtimePromptVersion();
-  if (activeVersion) {
-    const defaults = await readDefaultPromptConfigForTask(
-      activeVersion.taskCardId,
-      activeVersion.feedbackConditionId
-    );
-    return versionToPromptState(activeVersion, defaults);
-  }
-
+async function readPromptVersionMetadata(): Promise<PromptVersionMetadata> {
+  const [activeVersion, promptVersions] = await Promise.all([
+    readActiveRealtimePromptVersion(),
+    listRealtimePromptVersions(),
+  ]);
   return {
-    ...(await readDefaultPromptConfigForTask(undefined, await readRuntimeFeedbackConditionId())),
+    activePromptVersionId: activeVersion?.promptId ?? null,
+    activeVersion,
+    promptVersions,
+  };
+}
+
+function defaultPromptState(
+  defaults: PromptDefaults,
+  versionMetadata: PromptVersionMetadata
+): RealtimePromptState {
+  return {
+    ...defaults,
     ...DEFAULT_REALTIME_PROMPT_METADATA,
+    activePromptVersionId: versionMetadata.activePromptVersionId,
+    promptVersionCreatedAt: null,
+    promptVersionHash: null,
+    promptVersionId: null,
+    promptVersionLabel: null,
+    promptVersions: versionMetadata.promptVersions,
     usingDefault: true,
   };
+}
+
+async function promptStateFromVersion(
+  version: RealtimePromptVersion,
+  versionMetadata?: PromptVersionMetadata
+): Promise<RealtimePromptState> {
+  const metadata = versionMetadata ?? (await readPromptVersionMetadata());
+  const defaults = await readDefaultPromptConfigForTask(
+    version.taskCardId,
+    version.feedbackConditionId
+  );
+  return versionToPromptState(version, defaults, metadata);
+}
+
+async function readPromptConfig(
+  options: {
+    useDefault?: boolean;
+    versionId?: string;
+  } = {}
+): Promise<RealtimePromptState> {
+  const versionMetadata = await readPromptVersionMetadata();
+
+  if (!options.useDefault && options.versionId) {
+    const selectedVersion = await readRealtimePromptVersion(options.versionId);
+    if (!selectedVersion) {
+      throw new RealtimePromptStoreError(
+        'prompt_version_not_found',
+        'Practice 프롬프트 버전을 찾을 수 없습니다.',
+        404
+      );
+    }
+    return promptStateFromVersion(selectedVersion, versionMetadata);
+  }
+
+  const activeVersion = options.useDefault ? null : versionMetadata.activeVersion;
+  if (activeVersion) {
+    return promptStateFromVersion(activeVersion, versionMetadata);
+  }
+
+  return defaultPromptState(
+    await readDefaultPromptConfigForTask(undefined, await readRuntimeFeedbackConditionId()),
+    versionMetadata
+  );
 }
 
 function getRequestPromptText(body: unknown, key: keyof RealtimePromptConfig, fallback: string) {
@@ -287,12 +358,28 @@ function promptStoreErrorResponse(error: unknown, fallbackMessage: string) {
   return NextResponse.json({ error: fallbackMessage }, { status: 500 });
 }
 
-export async function GET() {
+function versionIdFromRequest(req?: Request) {
+  if (!req) return undefined;
+  return new URL(req.url).searchParams.get('versionId') ?? undefined;
+}
+
+function defaultRequestedFromRequest(req?: Request) {
+  if (!req) return false;
+  const value = new URL(req.url).searchParams.get('default');
+  return value === '1' || value === 'true';
+}
+
+export async function GET(req?: Request) {
   const adminError = await requireAdmin();
   if (adminError) return adminError;
 
   try {
-    return NextResponse.json(await readPromptConfig());
+    return NextResponse.json(
+      await readPromptConfig({
+        useDefault: defaultRequestedFromRequest(req),
+        versionId: versionIdFromRequest(req),
+      })
+    );
   } catch (error) {
     return promptStoreErrorResponse(error, '기본 프롬프트 파일을 불러오지 못했습니다.');
   }
@@ -306,6 +393,12 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
+    if (body?.action === 'activate') {
+      const versionId = typeof body.versionId === 'string' ? body.versionId.trim() : '';
+      const version = await activateRealtimePromptVersion(versionId);
+      return NextResponse.json(await promptStateFromVersion(version));
+    }
+
     const runtimeFeedbackConditionId = await readRuntimeFeedbackConditionId();
     const requestedFeedbackConditionId =
       typeof body?.feedbackConditionId === 'string' && body.feedbackConditionId.trim()
@@ -326,24 +419,28 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
 
-    const version = await saveRealtimePromptVersion(result.config, { createdBy: auth.user.id });
-    return NextResponse.json(versionToPromptState(version, defaults));
+    const version = await saveRealtimePromptVersion(result.config, {
+      createdBy: auth.user.id,
+      label: typeof body?.versionLabel === 'string' ? body.versionLabel : null,
+    });
+    return NextResponse.json(await promptStateFromVersion(version));
   } catch (error) {
     return promptStoreErrorResponse(error, '프롬프트 저장 실패');
   }
 }
 
-export async function DELETE() {
+export async function DELETE(req?: Request) {
   const adminError = await requireAdmin();
   if (adminError) return adminError;
 
   try {
-    await deactivateActiveRealtimePromptVersion();
-    return NextResponse.json({
-      ...(await readDefaultPromptConfigForTask(undefined, await readRuntimeFeedbackConditionId())),
-      ...DEFAULT_REALTIME_PROMPT_METADATA,
-      usingDefault: true,
-    });
+    const versionId = versionIdFromRequest(req);
+    if (versionId) {
+      await deleteRealtimePromptVersion(versionId);
+    } else {
+      await deactivateActiveRealtimePromptVersion();
+    }
+    return NextResponse.json(await readPromptConfig({ useDefault: true }));
   } catch (error) {
     return promptStoreErrorResponse(error, '기본값 복원 실패');
   }

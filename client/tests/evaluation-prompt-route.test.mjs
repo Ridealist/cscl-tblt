@@ -29,6 +29,15 @@ class EvaluationPromptSourceError extends Error {
   }
 }
 
+class PromptVersionStoreError extends Error {
+  constructor(code, message, status = 503) {
+    super(message);
+    this.name = 'PromptVersionStoreError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
 function loadModule(relativePath, requireMock) {
   const sourceUrl = new URL(`../${relativePath}`, import.meta.url);
   const source = readFileSync(sourceUrl, 'utf8');
@@ -113,6 +122,10 @@ function loadEvaluationPromptRoute(options = {}) {
           return options.adminError ?? null;
         },
       };
+    }
+
+    if (specifier === '@/lib/prompt-version-db-store') {
+      return { PromptVersionStoreError };
     }
 
     throw new Error(`Unexpected import in evaluation prompt route test: ${specifier}`);

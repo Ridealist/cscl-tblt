@@ -63,7 +63,9 @@ const CUSTOM_VERSION = {
   savedAt: '2026-06-12T00:00:00.000Z',
   source: 'custom',
   createdBy: 'admin-user',
+  hash: 'hash-custom',
   isActive: true,
+  label: 'Custom practice',
 };
 
 const FILES = new Map(
@@ -164,8 +166,12 @@ function validateRealtimePromptConfig(value) {
 
 function loadRealtimePromptRoute(options = {}) {
   const calls = {
+    activate: [],
+    delete: [],
     deactivate: 0,
+    list: 0,
     readActive: 0,
+    readVersion: [],
     savedConfigs: [],
   };
   const processMock = {
@@ -207,14 +213,39 @@ function loadRealtimePromptRoute(options = {}) {
       if (specifier === '@/lib/realtime-prompt-store') {
         return {
           RealtimePromptStoreError,
+          activateRealtimePromptVersion: async (versionId) => {
+            calls.activate.push(versionId);
+            return options.activeVersion ?? CUSTOM_VERSION;
+          },
           deactivateActiveRealtimePromptVersion: async () => {
             calls.deactivate += 1;
             if (options.deactivateError) throw options.deactivateError;
+          },
+          deleteRealtimePromptVersion: async (versionId) => {
+            calls.delete.push(versionId);
+            if (options.deleteError) throw options.deleteError;
+          },
+          listRealtimePromptVersions: async () => {
+            calls.list += 1;
+            return (
+              options.promptVersions ?? [
+                {
+                  id: CUSTOM_VERSION.promptId,
+                  label: CUSTOM_VERSION.label,
+                  createdAt: CUSTOM_VERSION.savedAt,
+                  hash: CUSTOM_VERSION.hash,
+                },
+              ]
+            );
           },
           readActiveRealtimePromptVersion: async () => {
             calls.readActive += 1;
             if (options.readActiveError) throw options.readActiveError;
             return options.activeVersion ?? null;
+          },
+          readRealtimePromptVersion: async (versionId) => {
+            calls.readVersion.push(versionId);
+            return options.readVersion ?? null;
           },
           saveRealtimePromptVersion: async (config, saveOptions) => {
             calls.savedConfigs.push({ config, options: saveOptions });
@@ -225,7 +256,9 @@ function loadRealtimePromptRoute(options = {}) {
               savedAt: '2026-06-12T00:00:00.000Z',
               source: 'custom',
               createdBy: saveOptions.createdBy,
+              hash: 'hash-custom',
               isActive: true,
+              label: saveOptions.label ?? 'Custom practice',
             };
           },
         };
@@ -322,7 +355,7 @@ test('POST saves a new active version with edited feedback and task card prompt 
   assert.deepEqual(plain(calls.savedConfigs), [
     {
       config: CUSTOM_PROMPT,
-      options: { createdBy: 'admin-user' },
+      options: { createdBy: 'admin-user', label: null },
     },
   ]);
 });

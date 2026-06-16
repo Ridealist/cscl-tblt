@@ -30,9 +30,22 @@ export interface RealtimePromptMetadata {
   source: RealtimePromptSource;
 }
 
+export interface RealtimePromptVersionSummary {
+  id: string;
+  label: string;
+  createdAt: string;
+  hash: string;
+}
+
 export type RealtimePromptState = RealtimePromptConfig &
   RealtimePromptMetadata & {
+    activePromptVersionId: string | null;
     feedbackConditions: RealtimeFeedbackConditionSummary[];
+    promptVersionCreatedAt: string | null;
+    promptVersionHash: string | null;
+    promptVersionId: string | null;
+    promptVersionLabel: string | null;
+    promptVersions: RealtimePromptVersionSummary[];
     taskCards: RealtimeTaskCardSummary[];
     usingDefault: boolean;
   };
