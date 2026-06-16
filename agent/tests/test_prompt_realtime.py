@@ -255,6 +255,44 @@ def test_realtime_prompt_version_uses_task_card_snapshot_without_examples(
     assert "CONVERSATION EXAMPLE" not in prompt
 
 
+def test_realtime_prompt_version_runtime_feedback_condition_overrides_snapshot(
+    tmp_path, monkeypatch
+) -> None:
+    source_dir = tmp_path / "realtime"
+    source_dir.mkdir()
+    _write_prompt_source(source_dir)
+    monkeypatch.setattr(prompt_realtime, "DEFAULT_PROMPT_SOURCE_DIR", source_dir)
+    monkeypatch.setattr(
+        prompt_realtime,
+        "PROMPT_SOURCE_MANIFEST_PATH",
+        source_dir / "manifest.json",
+    )
+    row = _prompt_version_row(
+        feedback_condition_id="explicit_correction",
+        task_card_prompt="# TASK CARD: Runtime\nRuntime task card.",
+    )
+    monkeypatch.setattr(
+        prompt_realtime,
+        "_fetch_prompt_version_row",
+        lambda prompt_version_id: row,
+    )
+
+    source = prompt_realtime.load_prompt_source(
+        feedback_condition_id="no_corrective",
+        prompt_version_id=row["id"],
+    )
+    prompt = build_prompt(
+        role="dominant",
+        feedback_condition_id="no_corrective",
+        prompt_version_id=row["id"],
+    )
+
+    assert source.feedback_condition == "no_corrective"
+    assert "# FEEDBACK CONDITION PROMPT: No Corrective Feedback" in prompt
+    assert "Runtime feedback condition." not in prompt
+    assert "explicit feedback" not in prompt
+
+
 def test_realtime_opening_comes_from_supabase_prompt_version(
     monkeypatch,
 ) -> None:

@@ -146,6 +146,18 @@ def _load_feedback_source(
     return selected_id, value
 
 
+def _load_default_feedback_prompt(
+    feedback_condition_id: str | None = None,
+) -> tuple[FeedbackCondition, str] | None:
+    try:
+        manifest = json.loads(PROMPT_SOURCE_MANIFEST_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(manifest, dict):
+        return None
+    return _load_feedback_source(DEFAULT_PROMPT_SOURCE_DIR, manifest, feedback_condition_id)
+
+
 def _load_task_card_source(
     source_dir: Path,
     manifest: dict,
@@ -265,7 +277,10 @@ def _fetch_prompt_version_row(prompt_version_id: str) -> dict:
     return row
 
 
-def _load_prompt_version_source(prompt_version_id: str) -> ResolvedRealtimePrompt:
+def _load_prompt_version_source(
+    prompt_version_id: str,
+    feedback_condition_id: str | None = None,
+) -> ResolvedRealtimePrompt:
     row = _fetch_prompt_version_row(prompt_version_id)
     base_prompt = _valid_prompt_text(row.get("base_prompt"))
     dominant_prompt = _valid_prompt_text(row.get("dominant_prompt"))
@@ -284,12 +299,22 @@ def _load_prompt_version_source(prompt_version_id: str) -> ResolvedRealtimePromp
         if isinstance(task_card_id, str) and task_card_id.strip()
         else None
     )
-    feedback_condition_id = row.get("feedback_condition_id")
-    selected_feedback = normalize_feedback_condition(
-        feedback_condition_id
+    row_feedback_condition_id = row.get("feedback_condition_id")
+    row_feedback = normalize_feedback_condition(
+        row_feedback_condition_id
+        if isinstance(row_feedback_condition_id, str) and row_feedback_condition_id.strip()
+        else None
+    )
+    runtime_feedback = (
+        normalize_feedback_condition(feedback_condition_id)
         if isinstance(feedback_condition_id, str) and feedback_condition_id.strip()
         else None
     )
+    selected_feedback = runtime_feedback or row_feedback
+    if runtime_feedback and runtime_feedback != row_feedback:
+        default_feedback = _load_default_feedback_prompt(runtime_feedback)
+        if default_feedback:
+            selected_feedback, feedback_prompt = default_feedback
     saved_at = row.get("created_at")
 
     if not all(
@@ -435,7 +460,7 @@ def load_prompt_source(
     prompt_version_id: str | None = None,
 ) -> ResolvedRealtimePrompt:
     if isinstance(prompt_version_id, str) and prompt_version_id.strip():
-        return _load_prompt_version_source(prompt_version_id)
+        return _load_prompt_version_source(prompt_version_id, feedback_condition_id)
 
     return _resolved_prompt_from_tuple(
         load_default_prompt_config(task_card_id, feedback_condition_id),
