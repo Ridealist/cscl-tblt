@@ -4,15 +4,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type {
+  ConditionCombinationPromptKey,
   RealtimeFeedbackConditionSummary,
   RealtimePromptConfig,
   RealtimePromptState,
   RealtimePromptVersionSummary,
   RealtimeTaskCardSummary,
 } from '@/lib/realtime-prompt-config';
+import { normalizeConditionCombinationPrompts } from '@/lib/realtime-prompt-config';
 import type { SessionPurpose } from '@/lib/session-activity';
 
-type PromptField = keyof RealtimePromptConfig;
+type PromptField = Exclude<keyof RealtimePromptConfig, 'conditionCombinationPrompts'>;
 
 type PromptResponse = RealtimePromptState;
 type PromptVersionSummary = RealtimePromptVersionSummary;
@@ -105,6 +107,7 @@ const EMPTY_PROMPT: RealtimePromptConfig = {
   collaborativePrompt: '',
   feedbackConditionId: 'no_corrective',
   feedbackPrompt: '',
+  conditionCombinationPrompts: normalizeConditionCombinationPrompts(null),
   taskCardId: 'school_event_invitation',
   taskCardPrompt: '',
 };
@@ -126,16 +129,7 @@ const CONDITION_COMBINATION_PROMPTS = [
     key: 'collaborative_explicit_correction',
     title: 'Collaborative - Explicit Corrective Feedback',
   },
-] as const;
-
-type ConditionCombinationPromptKey = (typeof CONDITION_COMBINATION_PROMPTS)[number]['key'];
-
-const EMPTY_CONDITION_COMBINATION_PROMPTS: Record<ConditionCombinationPromptKey, string> = {
-  collaborative_explicit_correction: '',
-  collaborative_no_corrective: '',
-  dominant_explicit_correction: '',
-  dominant_no_corrective: '',
-};
+] as const satisfies Array<{ key: ConditionCombinationPromptKey; title: string }>;
 
 function promptConfigFromResponse(data: RealtimePromptConfig): RealtimePromptConfig {
   return {
@@ -144,6 +138,9 @@ function promptConfigFromResponse(data: RealtimePromptConfig): RealtimePromptCon
     collaborativePrompt: data.collaborativePrompt,
     feedbackConditionId: data.feedbackConditionId,
     feedbackPrompt: data.feedbackPrompt,
+    conditionCombinationPrompts: normalizeConditionCombinationPrompts(
+      data.conditionCombinationPrompts
+    ),
     taskCardId: data.taskCardId,
     taskCardPrompt: data.taskCardPrompt,
   };
@@ -157,6 +154,8 @@ function samePrompt(a: RealtimePromptConfig | null, b: RealtimePromptConfig | nu
     a.collaborativePrompt === b.collaborativePrompt &&
     a.feedbackConditionId === b.feedbackConditionId &&
     a.feedbackPrompt === b.feedbackPrompt &&
+    JSON.stringify(a.conditionCombinationPrompts) ===
+      JSON.stringify(b.conditionCombinationPrompts) &&
     a.taskCardId === b.taskCardId &&
     a.taskCardPrompt === b.taskCardPrompt
   );
@@ -740,15 +739,15 @@ function PracticePromptEditorView() {
   const [versionLabel, setVersionLabel] = useState('');
   const [expandedConditionPromptKey, setExpandedConditionPromptKey] =
     useState<ConditionCombinationPromptKey | null>(null);
-  const [conditionCombinationPrompts, setConditionCombinationPrompts] = useState<
-    Record<ConditionCombinationPromptKey, string>
-  >(EMPTY_CONDITION_COMBINATION_PROMPTS);
 
   const hasChanges = useMemo(() => !samePrompt(prompt, savedPrompt), [prompt, savedPrompt]);
   const conditionCombinationPromptLength = useMemo(
     () =>
-      Object.values(conditionCombinationPrompts).reduce((total, value) => total + value.length, 0),
-    [conditionCombinationPrompts]
+      Object.values(prompt.conditionCombinationPrompts).reduce(
+        (total, value) => total + value.length,
+        0
+      ),
+    [prompt.conditionCombinationPrompts]
   );
   const selectedFeedbackCondition = useMemo(
     () =>
@@ -960,7 +959,7 @@ function PracticePromptEditorView() {
       <div className="border-border divide-border overflow-hidden rounded-lg border">
         {CONDITION_COMBINATION_PROMPTS.map((conditionPrompt) => {
           const expanded = expandedConditionPromptKey === conditionPrompt.key;
-          const promptText = conditionCombinationPrompts[conditionPrompt.key];
+          const promptText = prompt.conditionCombinationPrompts[conditionPrompt.key];
           const editorId = `condition-combination-prompt-${conditionPrompt.key}`;
 
           return (
@@ -1010,9 +1009,12 @@ function PracticePromptEditorView() {
                     spellCheck={false}
                     onChange={(e) => {
                       const nextPrompt = e.target.value;
-                      setConditionCombinationPrompts((current) => ({
+                      setPrompt((current) => ({
                         ...current,
-                        [conditionPrompt.key]: nextPrompt,
+                        conditionCombinationPrompts: {
+                          ...current.conditionCombinationPrompts,
+                          [conditionPrompt.key]: nextPrompt,
+                        },
                       }));
                     }}
                     disabled={saving}

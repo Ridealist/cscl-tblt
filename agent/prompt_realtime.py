@@ -1,6 +1,6 @@
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 from urllib.error import HTTPError, URLError
@@ -18,6 +18,12 @@ DEFAULT_OPENING_SENTENCE = (
 DEFAULT_PROMPT_SOURCE_DIR = Path(__file__).parent.parent / "prompts" / "realtime"
 PROMPT_SOURCE_MANIFEST_PATH = DEFAULT_PROMPT_SOURCE_DIR / "manifest.json"
 PROMPT_FIELDS = ("basePrompt", "dominantPrompt", "collaborativePrompt")
+CONDITION_COMBINATION_PROMPT_KEYS = (
+    "dominant_no_corrective",
+    "dominant_explicit_correction",
+    "collaborative_no_corrective",
+    "collaborative_explicit_correction",
+)
 PROMPT_VERSION_COLUMNS = ",".join(
     (
         "id",
@@ -27,6 +33,7 @@ PROMPT_VERSION_COLUMNS = ",".join(
         "collaborative_prompt",
         "feedback_condition_id",
         "feedback_prompt",
+        "condition_combination_prompts",
         "task_card_id",
         "task_card_prompt",
         "source",
@@ -48,6 +55,7 @@ class ResolvedRealtimePrompt:
     feedback_prompt: str
     task_card_prompt: str
     source: PromptSource
+    condition_combination_prompts: dict[str, str] = field(default_factory=dict)
     prompt_version_id: str | None = None
     saved_at: str | None = None
     task_card_id: str | None = None
@@ -80,6 +88,21 @@ def normalize_feedback_condition(value: str | None = None) -> FeedbackCondition:
     if value in ("explicit_correction", "explicit", "correction"):
         return "explicit_correction"
     return DEFAULT_FEEDBACK_CONDITION_ID
+
+
+def normalize_condition_combination_prompts(value: object) -> dict[str, str]:
+    source = value if isinstance(value, dict) else {}
+    return {
+        key: source[key].strip() if isinstance(source.get(key), str) else ""
+        for key in CONDITION_COMBINATION_PROMPT_KEYS
+    }
+
+
+def _condition_combination_key(
+    role: str | None,
+    feedback: str | None,
+) -> str:
+    return f"{normalize_role(role)}_{normalize_feedback_condition(feedback)}"
 
 
 def _valid_prompt_text(value: object) -> str | None:
@@ -338,6 +361,9 @@ def _load_prompt_version_source(
         },
         feedback_condition=selected_feedback,
         feedback_prompt=feedback_prompt,
+        condition_combination_prompts=normalize_condition_combination_prompts(
+            row.get("condition_combination_prompts")
+        ),
         task_card_prompt=task_card_prompt,
         source="custom",
         prompt_version_id=resolved_version_id,
@@ -446,6 +472,7 @@ def _resolved_prompt_from_tuple(
         role_prompts=role_prompts,
         feedback_condition=selected_feedback,
         feedback_prompt=feedback_prompt,
+        condition_combination_prompts=normalize_condition_combination_prompts(None),
         task_card_prompt=task_card_prompt,
         source=source,
         prompt_version_id=prompt_version_id,
@@ -508,10 +535,19 @@ def build_prompt_from_source(
     role: str | None = "dominant",
 ) -> str:
     agent_role = normalize_role(role)
-    prompt = (
-        f"{source.base_prompt}\n\n{source.role_prompts[agent_role]}\n\n"
-        f"{source.feedback_prompt}\n\n{source.task_card_prompt}"
+    condition_prompt = source.condition_combination_prompts.get(
+        _condition_combination_key(agent_role, source.feedback_condition),
+        "",
     )
+    chunks = [
+        source.base_prompt,
+        source.role_prompts[agent_role],
+        source.feedback_prompt,
+    ]
+    if condition_prompt.strip():
+        chunks.append(condition_prompt.strip())
+    chunks.append(source.task_card_prompt)
+    prompt = "\n\n".join(chunks)
     name = participant_name.strip() if participant_name else ""
 
     if name:
