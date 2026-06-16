@@ -479,7 +479,7 @@ function buildRoomConfig(
                   : {}),
                 promptSavedAt: promptSnapshot?.savedAt ?? DEFAULT_REALTIME_PROMPT_METADATA.savedAt,
                 promptSource: promptSnapshot?.source ?? DEFAULT_REALTIME_PROMPT_METADATA.source,
-                feedbackConditionId: promptSnapshot?.feedbackConditionId ?? feedbackConditionId,
+                feedbackConditionId,
                 ...(promptSnapshot?.taskCardId ? { taskCardId: promptSnapshot.taskCardId } : {}),
               }),
         }

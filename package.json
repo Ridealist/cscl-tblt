@@ -8,6 +8,7 @@
     "build": "pnpm prompts:check && pnpm --dir client build",
     "start": "pnpm prompts:check && pnpm --dir client start",
     "lint": "pnpm --dir client lint",
+    "prompts:import:supabase": "node scripts/import_prompt_versions_to_supabase.mjs",
     "prompts:check": "python3 scripts/check_realtime_prompts.py",
     "dev:pipeline": "bash scripts/dev.sh pipeline",
     "dev:realtime": "bash scripts/dev.sh realtime",

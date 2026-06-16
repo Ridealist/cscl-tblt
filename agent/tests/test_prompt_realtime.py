@@ -49,6 +49,7 @@ def _prompt_version_row(
     task_card_id: str = "morning_exercise_challenge",
     feedback_condition_id: str = "explicit_correction",
     task_card_prompt: str = "# TASK CARD: Runtime\n# Opening\nHi from runtime card.",
+    condition_combination_prompts: dict[str, str] | None = None,
 ):
     return {
         "id": version_id,
@@ -57,6 +58,7 @@ def _prompt_version_row(
         "collaborative_prompt": "Runtime collaborative role.",
         "feedback_condition_id": feedback_condition_id,
         "feedback_prompt": "Runtime feedback condition.",
+        "condition_combination_prompts": condition_combination_prompts or {},
         "task_card_id": task_card_id,
         "task_card_prompt": task_card_prompt,
         "source": "custom",
@@ -253,6 +255,103 @@ def test_realtime_prompt_version_uses_task_card_snapshot_without_examples(
         "Runtime feedback condition.\n\n# TASK CARD: Runtime\nRuntime task card."
     )
     assert "CONVERSATION EXAMPLE" not in prompt
+
+
+def test_realtime_prompt_version_inserts_selected_condition_combination_before_task_card(
+    monkeypatch,
+) -> None:
+    row = _prompt_version_row(
+        task_card_prompt="# TASK CARD: Runtime\nRuntime task card.",
+        condition_combination_prompts={
+            "dominant_no_corrective": "Dominant no corrective condition.",
+            "dominant_explicit_correction": "Dominant explicit condition.",
+            "collaborative_no_corrective": "Collaborative no corrective condition.",
+            "collaborative_explicit_correction": "Collaborative explicit condition.",
+        },
+    )
+    monkeypatch.setattr(
+        prompt_realtime,
+        "_fetch_prompt_version_row",
+        lambda prompt_version_id: row,
+    )
+
+    prompt = build_prompt(role="collaborative", prompt_version_id=row["id"])
+
+    assert prompt == (
+        "Runtime base prompt.\n\nRuntime collaborative role.\n\n"
+        "Runtime feedback condition.\n\nCollaborative explicit condition.\n\n"
+        "# TASK CARD: Runtime\nRuntime task card."
+    )
+    assert "Dominant no corrective condition." not in prompt
+    assert "Dominant explicit condition." not in prompt
+    assert "Collaborative no corrective condition." not in prompt
+
+
+def test_realtime_prompt_version_skips_empty_condition_combination_prompt(
+    monkeypatch,
+) -> None:
+    row = _prompt_version_row(
+        task_card_prompt="# TASK CARD: Runtime\nRuntime task card.",
+        condition_combination_prompts={
+            "collaborative_explicit_correction": "",
+        },
+    )
+    monkeypatch.setattr(
+        prompt_realtime,
+        "_fetch_prompt_version_row",
+        lambda prompt_version_id: row,
+    )
+
+    prompt = build_prompt(role="collaborative", prompt_version_id=row["id"])
+
+    assert prompt == (
+        "Runtime base prompt.\n\nRuntime collaborative role.\n\n"
+        "Runtime feedback condition.\n\n# TASK CARD: Runtime\nRuntime task card."
+    )
+
+
+def test_realtime_prompt_version_runtime_feedback_condition_overrides_snapshot(
+    tmp_path, monkeypatch
+) -> None:
+    source_dir = tmp_path / "realtime"
+    source_dir.mkdir()
+    _write_prompt_source(source_dir)
+    monkeypatch.setattr(prompt_realtime, "DEFAULT_PROMPT_SOURCE_DIR", source_dir)
+    monkeypatch.setattr(
+        prompt_realtime,
+        "PROMPT_SOURCE_MANIFEST_PATH",
+        source_dir / "manifest.json",
+    )
+    row = _prompt_version_row(
+        feedback_condition_id="explicit_correction",
+        task_card_prompt="# TASK CARD: Runtime\nRuntime task card.",
+        condition_combination_prompts={
+            "dominant_no_corrective": "Dominant no corrective condition.",
+            "dominant_explicit_correction": "Dominant explicit condition.",
+        },
+    )
+    monkeypatch.setattr(
+        prompt_realtime,
+        "_fetch_prompt_version_row",
+        lambda prompt_version_id: row,
+    )
+
+    source = prompt_realtime.load_prompt_source(
+        feedback_condition_id="no_corrective",
+        prompt_version_id=row["id"],
+    )
+    prompt = build_prompt(
+        role="dominant",
+        feedback_condition_id="no_corrective",
+        prompt_version_id=row["id"],
+    )
+
+    assert source.feedback_condition == "no_corrective"
+    assert "# FEEDBACK CONDITION PROMPT: No Corrective Feedback" in prompt
+    assert "Dominant no corrective condition." in prompt
+    assert "Dominant explicit condition." not in prompt
+    assert "Runtime feedback condition." not in prompt
+    assert "explicit feedback" not in prompt
 
 
 def test_realtime_opening_comes_from_supabase_prompt_version(

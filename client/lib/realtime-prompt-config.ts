@@ -4,9 +4,21 @@ export interface RealtimePromptConfig {
   collaborativePrompt: string;
   feedbackConditionId: string;
   feedbackPrompt: string;
+  conditionCombinationPrompts: ConditionCombinationPrompts;
   taskCardId: string;
   taskCardPrompt: string;
 }
+
+export const CONDITION_COMBINATION_PROMPT_KEYS = [
+  'dominant_no_corrective',
+  'dominant_explicit_correction',
+  'collaborative_no_corrective',
+  'collaborative_explicit_correction',
+] as const;
+
+export type ConditionCombinationPromptKey = (typeof CONDITION_COMBINATION_PROMPT_KEYS)[number];
+
+export type ConditionCombinationPrompts = Record<ConditionCombinationPromptKey, string>;
 
 export interface RealtimeFeedbackConditionSummary {
   id: string;
@@ -30,9 +42,22 @@ export interface RealtimePromptMetadata {
   source: RealtimePromptSource;
 }
 
+export interface RealtimePromptVersionSummary {
+  id: string;
+  label: string;
+  createdAt: string;
+  hash: string;
+}
+
 export type RealtimePromptState = RealtimePromptConfig &
   RealtimePromptMetadata & {
+    activePromptVersionId: string | null;
     feedbackConditions: RealtimeFeedbackConditionSummary[];
+    promptVersionCreatedAt: string | null;
+    promptVersionHash: string | null;
+    promptVersionId: string | null;
+    promptVersionLabel: string | null;
+    promptVersions: RealtimePromptVersionSummary[];
     taskCards: RealtimeTaskCardSummary[];
     usingDefault: boolean;
   };
@@ -45,6 +70,16 @@ export const DEFAULT_REALTIME_PROMPT_METADATA: RealtimePromptMetadata = {
 };
 
 const PROMPT_FIELDS = ['basePrompt', 'dominantPrompt', 'collaborativePrompt'] as const;
+
+export function normalizeConditionCombinationPrompts(value: unknown): ConditionCombinationPrompts {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return Object.fromEntries(
+    CONDITION_COMBINATION_PROMPT_KEYS.map((key) => {
+      const text = (source as Record<string, unknown>)[key];
+      return [key, typeof text === 'string' ? text.trim() : ''];
+    })
+  ) as ConditionCombinationPrompts;
+}
 
 export function validateRealtimePromptConfig(
   value: unknown
@@ -59,6 +94,7 @@ export function validateRealtimePromptConfig(
       | 'passivePrompt'
       | 'feedbackConditionId'
       | 'feedbackPrompt'
+      | 'conditionCombinationPrompts'
       | 'taskCardId'
       | 'taskCardPrompt',
       unknown
@@ -97,6 +133,9 @@ export function validateRealtimePromptConfig(
   }
   config.feedbackConditionId = feedbackConditionId;
   config.feedbackPrompt = feedbackPrompt.trim();
+  config.conditionCombinationPrompts = normalizeConditionCombinationPrompts(
+    source.conditionCombinationPrompts
+  );
 
   const taskCardId =
     typeof source.taskCardId === 'string' && source.taskCardId.trim()

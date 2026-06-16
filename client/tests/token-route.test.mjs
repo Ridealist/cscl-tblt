@@ -285,7 +285,10 @@ function loadTokenRoute(options = {}) {
 
 test('token route creates a named realtime room config for token-based agent dispatch', async () => {
   const { exports, accessTokens, createdDispatches, createdRooms } = loadTokenRoute({
-    activePromptVersion: CUSTOM_PROMPT_VERSION,
+    activePromptVersion: {
+      ...CUSTOM_PROMPT_VERSION,
+      feedbackConditionId: 'explicit_correction',
+    },
   });
 
   const response = await exports.POST({
@@ -312,6 +315,7 @@ test('token route creates a named realtime room config for token-based agent dis
   const metadata = JSON.parse(token.assignedRoomConfig.agents[0].metadata);
   assert.equal(metadata.promptVersionId, CUSTOM_PROMPT_VERSION.promptId);
   assert.equal(metadata.promptSource, 'custom');
+  assert.equal(metadata.feedbackConditionId, 'no_corrective');
   assert.equal(metadata.sessionPurpose, 'practice');
   assert.equal(metadata.activityType, 'task_solution');
   assert.equal(metadata.studentId, 'student-id-1');

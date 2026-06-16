@@ -97,58 +97,72 @@ function loadEvaluationPromptSource() {
         return path;
       }
 
-      if (specifier === '@/lib/prompt-version-store') {
+      if (specifier === '@/lib/prompt-version-db-store') {
         const summary = (version) => ({
-          id: version.id,
+          id: version.promptVersionId,
           label: version.label,
-          createdAt: version.createdAt,
+          createdAt: version.savedAt,
           hash: version.hash,
         });
         return {
-          activatePromptVersion: async (purpose, versionId) => {
-            assert.equal(purpose, 'evaluation');
+          activateEvaluationPromptVersion: async (versionId) => {
             const version = versions.get(versionId) ?? null;
-            if (version) activeVersionId = version.id;
+            if (version) {
+              activeVersionId = version.promptVersionId;
+              version.isActive = true;
+            }
             return version;
           },
-          clearActivePromptVersion: async (purpose) => {
+          clearActivePromptVersion: async (purpose, options) => {
             assert.equal(purpose, 'evaluation');
+            assert.equal(options.evaluationId, 'pretest_6_10');
             activeVersionId = null;
           },
-          createPromptVersion: async ({ activate, config, label, purpose }) => {
-            assert.equal(purpose, 'evaluation');
-            const id = `eval-version-${nextVersionIndex++}`;
-            const version = {
-              schemaVersion: 1,
-              purpose,
-              id,
-              label: label ?? `evaluation ${id}`,
-              createdAt: '2026-06-13T00:00:00.000Z',
-              hash: `hash-${id}`,
-              config,
-            };
-            versions.set(id, version);
-            if (activate) activeVersionId = id;
-            calls.createdVersions.push(version);
-            return version;
-          },
-          deletePromptVersion: async (purpose, versionId) => {
-            assert.equal(purpose, 'evaluation');
+          deletePromptVersion: async (versionId, expectedPurpose) => {
+            assert.equal(expectedPurpose, 'evaluation');
             versions.delete(versionId);
             if (activeVersionId === versionId) activeVersionId = null;
           },
-          readActivePromptVersion: async (purpose) => {
+          listPromptVersions: async (purpose, options) => {
             assert.equal(purpose, 'evaluation');
-            return activeVersionId ? (versions.get(activeVersionId) ?? null) : null;
+            assert.equal(options.evaluationId, 'pretest_6_10');
+            return [...versions.values()]
+              .filter((version) => version.evaluationId === options.evaluationId)
+              .map(summary);
           },
-          readPromptVersion: async (purpose, versionId) => {
-            assert.equal(purpose, 'evaluation');
-            return versions.get(versionId) ?? null;
+          readActiveEvaluationPromptVersion: async (evaluationId) => {
+            assert.equal(evaluationId, 'pretest_6_10');
+            const version = activeVersionId ? (versions.get(activeVersionId) ?? null) : null;
+            return version?.evaluationId === evaluationId ? version : null;
           },
-          readPromptVersionIndex: async () => ({
-            active: { evaluation: activeVersionId },
-            versions: { evaluation: [...versions.values()].map(summary), realtime: [] },
-          }),
+          readEvaluationPromptVersion: async (versionId) => versions.get(versionId) ?? null,
+          saveEvaluationPromptVersion: async (config, options) => {
+            const id = `eval-version-${nextVersionIndex++}`;
+            const version = {
+              createdBy: null,
+              evaluationCharacter: config.evaluationCharacter,
+              evaluationId: config.evaluationId,
+              evaluationPromptId: id,
+              evaluationPromptVersion: config.evaluationPromptVersion,
+              hash: `hash-${id}`,
+              isActive: true,
+              label: options.label ?? `evaluation ${id}`,
+              legacyFilePurpose: null,
+              legacyFileVersionId: null,
+              openingSentence: config.openingSentence,
+              prompt: config.prompt,
+              promptId: id,
+              promptVersionId: id,
+              purpose: 'evaluation',
+              savedAt: '2026-06-13T00:00:00.000Z',
+              source: 'custom',
+            };
+            for (const existing of versions.values()) existing.isActive = false;
+            versions.set(id, version);
+            activeVersionId = id;
+            calls.createdVersions.push(version);
+            return version;
+          },
         };
       }
 

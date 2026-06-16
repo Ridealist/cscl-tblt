@@ -1,21 +1,20 @@
-import { mkdir, readFile, rename, unlink, writeFile } from 'fs/promises';
-import { dirname, join } from 'path';
+import { readFile } from 'fs/promises';
+import { join } from 'path';
 import 'server-only';
 import {
-  type PromptVersionFile,
+  type EvaluationPromptVersion,
   type PromptVersionSummary,
-  activatePromptVersion,
+  activateEvaluationPromptVersion as activateDbEvaluationPromptVersion,
   clearActivePromptVersion,
-  createPromptVersion,
   deletePromptVersion,
-  readActivePromptVersion,
-  readPromptVersion,
-  readPromptVersionIndex,
-} from '@/lib/prompt-version-store';
+  listPromptVersions,
+  readActiveEvaluationPromptVersion,
+  readEvaluationPromptVersion,
+  saveEvaluationPromptVersion,
+} from '@/lib/prompt-version-db-store';
 
 const DEFAULT_PROMPT_SOURCE_DIR = join(process.cwd(), '..', 'prompts', 'evaluation');
 const PROMPT_SOURCE_MANIFEST_PATH = join(DEFAULT_PROMPT_SOURCE_DIR, 'manifest.json');
-const PROMPT_CONFIG_PATH = join(process.cwd(), '..', 'prompt_config.json');
 
 type EvaluationManifest = {
   defaultEvaluationId?: unknown;
@@ -41,22 +40,8 @@ type EvaluationSummary = {
   version?: string;
 };
 
-type StoredEvaluationPrompt = {
-  prompt?: unknown;
-  promptId?: unknown;
-  savedAt?: unknown;
-};
-
-type PromptConfigFile = {
-  evaluation?: {
-    evaluationPrompts?: unknown;
-  };
-  realtime?: unknown;
-};
-
-type EvaluationVersionConfig = {
-  evaluationId: string;
-  prompt: string;
+type EvaluationOption = Omit<EvaluationSummary, 'marker' | 'prompt'> & {
+  version?: string;
 };
 
 export type EvaluationPromptState = {
@@ -65,11 +50,7 @@ export type EvaluationPromptState = {
   evaluationId: string;
   evaluationPromptId: string;
   evaluationPromptVersion?: string;
-  evaluations: Array<
-    Omit<EvaluationSummary, 'marker' | 'prompt'> & {
-      version?: string;
-    }
-  >;
+  evaluations: EvaluationOption[];
   openingSentence: string;
   prompt: string;
   promptVersionCreatedAt: string | null;
@@ -109,53 +90,6 @@ function extractOpening(prompt: string): string | null {
     return openingLines.join(' ').trim() || null;
   }
   return null;
-}
-
-function readStoredEvaluationPrompts(
-  raw: PromptConfigFile | null
-): Record<string, { prompt: string; promptId: string; savedAt: string | null }> {
-  const prompts = raw?.evaluation?.evaluationPrompts;
-  if (!prompts || typeof prompts !== 'object' || Array.isArray(prompts)) return {};
-
-  const stored: Record<string, { prompt: string; promptId: string; savedAt: string | null }> = {};
-  for (const [evaluationId, value] of Object.entries(prompts)) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
-    const source = value as StoredEvaluationPrompt;
-    const prompt = text(source.prompt);
-    if (!prompt) continue;
-    stored[evaluationId] = {
-      prompt,
-      promptId: text(source.promptId) ?? `custom-${evaluationId}`,
-      savedAt: text(source.savedAt),
-    };
-  }
-  return stored;
-}
-
-async function readPromptConfigFile(): Promise<PromptConfigFile | null> {
-  try {
-    return JSON.parse(await readFile(PROMPT_CONFIG_PATH, 'utf-8')) as PromptConfigFile;
-  } catch {
-    return null;
-  }
-}
-
-async function writePromptConfigFile(config: PromptConfigFile): Promise<void> {
-  await mkdir(dirname(PROMPT_CONFIG_PATH), { recursive: true });
-  const tempPath = `${PROMPT_CONFIG_PATH}.tmp`;
-  await writeFile(tempPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
-  await rename(tempPath, PROMPT_CONFIG_PATH);
-}
-
-async function readEvaluationVersionMetadata(): Promise<{
-  activePromptVersionId: string | null;
-  promptVersions: PromptVersionSummary[];
-}> {
-  const index = await readPromptVersionIndex();
-  return {
-    activePromptVersionId: index.active.evaluation ?? null,
-    promptVersions: index.versions.evaluation,
-  };
 }
 
 async function readEvaluationSummaries(): Promise<{
@@ -201,69 +135,114 @@ async function readEvaluationSummaries(): Promise<{
   };
 }
 
-async function stateFromEvaluationVersion(
-  version: PromptVersionFile<EvaluationVersionConfig>
-): Promise<EvaluationPromptState> {
-  const { evaluations } = await readEvaluationSummaries();
-  const selected = evaluations.find((evaluation) => evaluation.id === version.config.evaluationId);
-  if (!selected) {
-    throw new EvaluationPromptSourceError(
-      `Unknown evaluation prompt id: ${version.config.evaluationId}`,
-      400
-    );
+function evaluationOptions(
+  evaluations: EvaluationSummary[],
+  selectedFallback?: EvaluationOption
+): EvaluationOption[] {
+  const options = evaluations.map((evaluation) => ({
+    id: evaluation.id,
+    character: evaluation.character,
+    file: evaluation.file,
+    promptId: evaluation.promptId,
+    version: evaluation.version,
+    openingSentence: evaluation.openingSentence,
+  }));
+  if (selectedFallback && !options.some((option) => option.id === selectedFallback.id)) {
+    return [selectedFallback, ...options];
   }
-  const versionMetadata = await readEvaluationVersionMetadata();
+  return options;
+}
+
+async function readEvaluationVersionMetadata(evaluationId: string): Promise<{
+  activePromptVersionId: string | null;
+  promptVersions: PromptVersionSummary[];
+}> {
+  const [activeVersion, promptVersions] = await Promise.all([
+    readActiveEvaluationPromptVersion(evaluationId),
+    listPromptVersions('evaluation', { evaluationId }),
+  ]);
+  return {
+    activePromptVersionId: activeVersion?.promptVersionId ?? null,
+    promptVersions,
+  };
+}
+
+function fallbackSummaryForVersion(version: EvaluationPromptVersion): EvaluationOption {
+  return {
+    id: version.evaluationId,
+    character: version.evaluationCharacter,
+    file: '',
+    promptId: version.evaluationPromptId,
+    version: version.evaluationPromptVersion ?? undefined,
+    openingSentence: version.openingSentence,
+  };
+}
+
+async function stateFromEvaluationVersion(
+  version: EvaluationPromptVersion,
+  evaluations: EvaluationSummary[],
+  metadata?: {
+    activePromptVersionId: string | null;
+    promptVersions: PromptVersionSummary[];
+  }
+): Promise<EvaluationPromptState> {
+  const selected = evaluations.find((evaluation) => evaluation.id === version.evaluationId);
+  const fallback = selected ? undefined : fallbackSummaryForVersion(version);
+  const versionMetadata = metadata ?? (await readEvaluationVersionMetadata(version.evaluationId));
 
   return {
     source: 'evaluation',
     usingDefault: false,
-    evaluationId: selected.id,
-    evaluationPromptId: version.id,
-    evaluationPromptVersion: selected.version,
-    evaluationCharacter: selected.character,
-    openingSentence: extractOpening(version.config.prompt) ?? selected.openingSentence,
-    prompt: version.config.prompt,
-    savedAt: version.createdAt,
+    evaluationId: version.evaluationId,
+    evaluationPromptId: version.evaluationPromptId,
+    evaluationPromptVersion: version.evaluationPromptVersion ?? selected?.version,
+    evaluationCharacter: version.evaluationCharacter,
+    openingSentence: extractOpening(version.prompt) ?? version.openingSentence,
+    prompt: version.prompt,
+    savedAt: version.savedAt,
     activePromptVersionId: versionMetadata.activePromptVersionId,
-    promptVersionCreatedAt: version.createdAt,
+    promptVersionCreatedAt: version.savedAt,
     promptVersionHash: version.hash,
-    promptVersionId: version.id,
+    promptVersionId: version.promptVersionId,
     promptVersionLabel: version.label,
     promptVersions: versionMetadata.promptVersions,
-    evaluations: evaluations.map((evaluation) => ({
-      id: evaluation.id,
-      character: evaluation.character,
-      file: evaluation.file,
-      promptId: evaluation.promptId,
-      version: evaluation.version,
-      openingSentence: evaluation.openingSentence,
-    })),
+    evaluations: evaluationOptions(evaluations, fallback),
   };
 }
 
-export async function readEvaluationPromptState(options?: {
-  evaluationId?: string;
-  useDefault?: boolean;
-  versionId?: string;
-}): Promise<EvaluationPromptState> {
-  const requestedEvaluationId = text(options?.evaluationId);
-  const requestedVersion = options?.useDefault
-    ? null
-    : options?.versionId
-      ? await readPromptVersion<EvaluationVersionConfig>('evaluation', options.versionId)
-      : await readActivePromptVersion<EvaluationVersionConfig>('evaluation');
-  if (
-    requestedVersion &&
-    (!requestedEvaluationId || requestedVersion.config.evaluationId === requestedEvaluationId)
-  ) {
-    return stateFromEvaluationVersion(requestedVersion);
+function defaultEvaluationState(
+  selected: EvaluationSummary,
+  evaluations: EvaluationSummary[],
+  metadata: {
+    activePromptVersionId: string | null;
+    promptVersions: PromptVersionSummary[];
   }
+): EvaluationPromptState {
+  return {
+    source: 'evaluation',
+    usingDefault: true,
+    evaluationId: selected.id,
+    evaluationPromptId: selected.promptId,
+    evaluationPromptVersion: selected.version,
+    evaluationCharacter: selected.character,
+    openingSentence: selected.openingSentence,
+    prompt: selected.prompt,
+    savedAt: null,
+    activePromptVersionId: metadata.activePromptVersionId,
+    promptVersionCreatedAt: null,
+    promptVersionHash: null,
+    promptVersionId: null,
+    promptVersionLabel: null,
+    promptVersions: metadata.promptVersions,
+    evaluations: evaluationOptions(evaluations),
+  };
+}
 
-  const { defaultEvaluationId, evaluations } = await readEvaluationSummaries();
-  const storedPrompts = options?.useDefault
-    ? {}
-    : readStoredEvaluationPrompts(await readPromptConfigFile());
-  const versionMetadata = await readEvaluationVersionMetadata();
+function selectEvaluation(
+  evaluations: EvaluationSummary[],
+  requestedEvaluationId?: string | null,
+  defaultEvaluationId?: string
+): EvaluationSummary {
   const selectedEvaluationId = requestedEvaluationId ?? defaultEvaluationId ?? evaluations[0]?.id;
   const selected = evaluations.find((evaluation) => evaluation.id === selectedEvaluationId);
 
@@ -278,34 +257,45 @@ export async function readEvaluationPromptState(options?: {
     throw new EvaluationPromptSourceError('Evaluation prompt manifest has no evaluations.');
   }
 
-  const stored = storedPrompts[selected.id];
-  const prompt = stored?.prompt ?? selected.prompt;
+  return selected;
+}
 
-  return {
-    source: 'evaluation',
-    usingDefault: !stored,
-    evaluationId: selected.id,
-    evaluationPromptId: stored?.promptId ?? selected.promptId,
-    evaluationPromptVersion: selected.version,
-    evaluationCharacter: selected.character,
-    openingSentence: extractOpening(prompt) ?? selected.openingSentence,
-    prompt,
-    savedAt: stored?.savedAt ?? null,
-    activePromptVersionId: versionMetadata.activePromptVersionId,
-    promptVersionCreatedAt: null,
-    promptVersionHash: null,
-    promptVersionId: null,
-    promptVersionLabel: null,
-    promptVersions: versionMetadata.promptVersions,
-    evaluations: evaluations.map((evaluation) => ({
-      id: evaluation.id,
-      character: evaluation.character,
-      file: evaluation.file,
-      promptId: evaluation.promptId,
-      version: evaluation.version,
-      openingSentence: evaluation.openingSentence,
-    })),
-  };
+export async function readEvaluationPromptState(options?: {
+  evaluationId?: string;
+  useDefault?: boolean;
+  versionId?: string;
+}): Promise<EvaluationPromptState> {
+  const requestedEvaluationId = text(options?.evaluationId);
+  const { defaultEvaluationId, evaluations } = await readEvaluationSummaries();
+
+  if (!options?.useDefault && options?.versionId) {
+    const requestedVersionId = text(options.versionId);
+    const version = requestedVersionId
+      ? await readEvaluationPromptVersion(requestedVersionId)
+      : null;
+    if (!version) {
+      throw new EvaluationPromptSourceError('Evaluation 프롬프트 버전을 찾을 수 없습니다.', 404);
+    }
+    if (requestedEvaluationId && version.evaluationId !== requestedEvaluationId) {
+      throw new EvaluationPromptSourceError(
+        `Evaluation 프롬프트 버전이 요청한 evaluationId와 일치하지 않습니다: ${requestedEvaluationId}`,
+        400
+      );
+    }
+    return stateFromEvaluationVersion(version, evaluations);
+  }
+
+  const selected = selectEvaluation(evaluations, requestedEvaluationId, defaultEvaluationId);
+  const metadata = await readEvaluationVersionMetadata(selected.id);
+  const activeVersion = options?.useDefault
+    ? null
+    : await readActiveEvaluationPromptVersion(selected.id);
+
+  if (activeVersion) {
+    return stateFromEvaluationVersion(activeVersion, evaluations, metadata);
+  }
+
+  return defaultEvaluationState(selected, evaluations, metadata);
 }
 
 export async function writeEvaluationPromptOverride({
@@ -321,28 +311,31 @@ export async function writeEvaluationPromptOverride({
     throw new EvaluationPromptSourceError('Evaluation prompt 값이 비어 있습니다.', 400);
   }
 
-  const current = await readEvaluationPromptState({ evaluationId });
-  const version = await createPromptVersion<EvaluationVersionConfig>({
-    purpose: 'evaluation',
-    label,
-    config: {
+  const current = await readEvaluationPromptState({ evaluationId, useDefault: true });
+  const trimmedPrompt = prompt.trim();
+  const version = await saveEvaluationPromptVersion(
+    {
+      evaluationCharacter: current.evaluationCharacter,
       evaluationId: current.evaluationId,
-      prompt: prompt.trim(),
+      evaluationPromptVersion: current.evaluationPromptVersion ?? null,
+      openingSentence: extractOpening(trimmedPrompt) ?? current.openingSentence,
+      prompt: trimmedPrompt,
     },
-    activate: true,
-  });
+    { label }
+  );
 
-  return readEvaluationPromptState({ versionId: version.id });
+  return readEvaluationPromptState({ versionId: version.promptVersionId });
 }
 
 export async function activateEvaluationPromptVersion(
   versionId: string
 ): Promise<EvaluationPromptState> {
-  const version = await activatePromptVersion<EvaluationVersionConfig>('evaluation', versionId);
-  if (!version) {
+  const requestedVersionId = text(versionId);
+  if (!requestedVersionId) {
     throw new EvaluationPromptSourceError('Evaluation 프롬프트 버전을 찾을 수 없습니다.', 404);
   }
-  return readEvaluationPromptState({ versionId });
+  const version = await activateDbEvaluationPromptVersion(requestedVersionId);
+  return readEvaluationPromptState({ versionId: version.promptVersionId });
 }
 
 export async function deleteEvaluationPromptOverride(options?: {
@@ -350,52 +343,16 @@ export async function deleteEvaluationPromptOverride(options?: {
   versionId?: string;
 }): Promise<EvaluationPromptState> {
   if (options?.versionId) {
-    await deletePromptVersion('evaluation', options.versionId);
-    return readEvaluationPromptState({ evaluationId: options.evaluationId });
+    const existing = await readEvaluationPromptVersion(options.versionId);
+    const evaluationId = text(options.evaluationId) ?? existing?.evaluationId;
+    await deletePromptVersion(options.versionId, 'evaluation');
+    return readEvaluationPromptState({ evaluationId });
   }
 
-  await clearActivePromptVersion('evaluation');
-  const current = await readEvaluationPromptState({ evaluationId: options?.evaluationId });
-  const raw = await readPromptConfigFile();
-  const existingPrompts: Record<string, unknown> | null =
-    raw?.evaluation?.evaluationPrompts &&
-    typeof raw.evaluation.evaluationPrompts === 'object' &&
-    !Array.isArray(raw.evaluation.evaluationPrompts)
-      ? (raw.evaluation.evaluationPrompts as Record<string, unknown>)
-      : null;
-
-  if (!raw || !existingPrompts) {
-    return readEvaluationPromptState({ evaluationId: current.evaluationId });
-  }
-
-  const nextPrompts = { ...existingPrompts };
-  delete nextPrompts[current.evaluationId];
-  const nextConfig: PromptConfigFile = {
-    ...raw,
-    evaluation: {
-      ...(raw.evaluation ?? {}),
-      evaluationPrompts: nextPrompts,
-    },
-  };
-
-  if (Object.keys(nextPrompts).length === 0) {
-    delete nextConfig.evaluation?.evaluationPrompts;
-  }
-  if (nextConfig.evaluation && Object.keys(nextConfig.evaluation).length === 0) {
-    delete nextConfig.evaluation;
-  }
-
-  if (!nextConfig.evaluation && !nextConfig.realtime) {
-    try {
-      await unlink(PROMPT_CONFIG_PATH);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw error;
-      }
-    }
-  } else {
-    await writePromptConfigFile(nextConfig);
-  }
-
-  return readEvaluationPromptState({ evaluationId: current.evaluationId });
+  const current = await readEvaluationPromptState({
+    evaluationId: options?.evaluationId,
+    useDefault: true,
+  });
+  await clearActivePromptVersion('evaluation', { evaluationId: current.evaluationId });
+  return readEvaluationPromptState({ evaluationId: current.evaluationId, useDefault: true });
 }
