@@ -1,5 +1,8 @@
 # Realtime Deployment Strategy
 
+> Status: superseded/reference.
+> 현재 production 기준값은 [Production Environment](operations/production-environment.md), 배포 절차는 [Deployment Runbook](operations/deployment-runbook.md), 용량 기준은 [Capacity Plan](operations/capacity-plan.md)을 따른다.
+
 이 문서는 2026년 7월까지 **Realtime-only** 운영을 전제로 한 EC2/LiveKit 배포 전략 요약이다.
 
 ## 전제
@@ -11,7 +14,7 @@
 
 ## 현재 병목 해석
 
-기존 `README_PRD.md`의 핵심 병목 분석은 그룹 대화 `pipeline` 기준이다. `pipeline`은 로컬 Silero VAD와 turn detector를 쓰기 때문에 EC2 CPU 분석이 중요하다.
+기존 archive 문서 [Legacy Pipeline Production Guide](archive/2026-legacy-pipeline-production-guide.md)의 핵심 병목 분석은 그룹 대화 `pipeline` 기준이다. `pipeline`은 로컬 Silero VAD와 turn detector를 쓰기 때문에 EC2 CPU 분석이 중요하다.
 
 반면 현재 운영할 `realtime`은 `openai.realtime.RealtimeModel(...)` + Cartesia TTS 기반이다. 따라서 24~25 Realtime 세션의 주요 리스크는 다음 순서로 보는 것이 맞다.
 
@@ -103,11 +106,11 @@ instance stop -> instance type 변경 -> instance start
 
 ## 문서 갱신 필요 사항
 
-현재 문서에는 배포 사양과 부하 분석이 섞여 있다.
+이 문서는 Realtime-only 실험 검토 기록으로 보관한다. 현재 운영 문서는 다음 위치를 따른다.
 
-- `README.md`는 아직 `m5.large` 기준 문구가 남아 있다.
-- `README_PRD.md`는 `m5.xlarge`와 `pipeline` 중심 VAD 분석에 치우쳐 있다.
-- 7월 운영 문서는 `Realtime-only`, `24~25 one-to-one sessions`, `m5.2xlarge`, `LiveKit Scale`, `OpenAI Realtime limit` 기준으로 다시 정리해야 한다.
+- 현재 production 기준값: [Production Environment](operations/production-environment.md)
+- 배포 절차: [Deployment Runbook](operations/deployment-runbook.md)
+- 평상시/실험일 용량 기준: [Capacity Plan](operations/capacity-plan.md)
 
 ## 참고 링크
 

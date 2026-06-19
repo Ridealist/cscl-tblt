@@ -1,3 +1,6 @@
+> Status: migration/reference.
+> Supabase migration 완료 후 일반 production 기준값은 [Production Environment](operations/production-environment.md), 일반 배포 절차는 [Deployment Runbook](operations/deployment-runbook.md)을 따른다.
+
 # Production Supabase Runbook
 
 이 문서는 이미 배포된 EC2 서버(`/opt/cscl-tblt`)에 Supabase를 붙일 때 필요한 최소 절차를 정리한다.
