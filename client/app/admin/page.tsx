@@ -295,8 +295,8 @@ function inferRoomSessionPurpose(room: RealtimeRoomStatus): SessionPurpose | und
   if (room.sessionPurpose === 'evaluation' || room.sessionPurpose === 'practice') {
     return room.sessionPurpose;
   }
-  if (room.name.startsWith('eval-')) return 'evaluation';
-  if (room.name.startsWith('task-')) return 'practice';
+  if (room.name.startsWith('eval-') || room.name.startsWith('eval_')) return 'evaluation';
+  if (room.name.startsWith('task-') || room.name.startsWith('task_')) return 'practice';
   return undefined;
 }
 

@@ -331,7 +331,9 @@ def _resolve_realtime_activity_context(ctx: JobContext) -> dict:
             return _normalize_activity_context(activity_context)
 
     room_name = getattr(ctx.room, "name", "")
-    if isinstance(room_name, str) and room_name.startswith("eval-"):
+    if isinstance(room_name, str) and (
+        room_name.startswith("eval-") or room_name.startswith("eval_")
+    ):
         return {
             "activity_type": "free_conversation",
             "evaluation_id": "pretest_6_10",

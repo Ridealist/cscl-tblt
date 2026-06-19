@@ -127,8 +127,8 @@ export async function POST(req: Request) {
       typeof body?.display_name === 'string' && body.display_name.trim()
         ? body.display_name.trim()
         : studentDefaultDisplayName(student);
-    const roomName = typeof body?.room_name === 'string' ? body.room_name.trim() : '';
-    if (!displayName || !roomName) {
+    const requestedRoomName = typeof body?.room_name === 'string' ? body.room_name.trim() : '';
+    if (!displayName || !requestedRoomName) {
       return NextResponse.json(
         { error: 'display_name and room_name are required.' },
         { status: 400, headers: { 'Cache-Control': 'no-store' } }
@@ -136,14 +136,18 @@ export async function POST(req: Request) {
     }
     const participantIdentity = createStudentParticipantIdentity(student);
     const config = await readRuntimeConfig();
-    const agentMode = inferAgentMode(body?.agent_mode, roomName, config.agentMode);
+    const agentMode = inferAgentMode(body?.agent_mode, requestedRoomName, config.agentMode);
     const sessionActivity =
       agentMode === 'realtime'
-        ? await readSessionActivityContext(body, roomName, config.sessionPurpose)
+        ? await readSessionActivityContext(body, requestedRoomName, config.sessionPurpose)
         : undefined;
+    const roomName =
+      agentMode === 'realtime' && sessionActivity
+        ? canonicalRealtimeRoomName(requestedRoomName, displayName, student, sessionActivity)
+        : requestedRoomName;
     if (agentMode === 'realtime' && config.realtimeResetting) {
       logTokenEvent('rejected realtime token during reset', {
-        roomName,
+        roomName: requestedRoomName,
         studentNumber: student.studentNumber,
         requestedAgentMode: body?.agent_mode ?? null,
         requestedActivityType: body?.activity_type ?? null,
@@ -178,6 +182,7 @@ export async function POST(req: Request) {
 
     logTokenEvent('issuing participant token', {
       roomName,
+      requestedRoomName,
       displayName,
       studentId: student.id,
       studentNumber: student.studentNumber,
@@ -279,6 +284,53 @@ function safeIdentityPart(value: string) {
   );
 }
 
+function safeRoomNamePart(value: string) {
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 40) || 'student'
+  );
+}
+
+function isActivityRoomName(roomName: string) {
+  return (
+    roomName.startsWith('eval-') ||
+    roomName.startsWith('eval_') ||
+    roomName.startsWith('task-') ||
+    roomName.startsWith('task_')
+  );
+}
+
+function roomSuffixFromRequested(roomName: string) {
+  const match = roomName.match(/[_-]([a-zA-Z0-9]{8})$/);
+  return match?.[1] ?? String(Date.now()).slice(-8);
+}
+
+function canonicalRealtimeRoomName(
+  requestedRoomName: string,
+  displayName: string,
+  student: StudentSession,
+  sessionActivity: SessionActivityContext
+) {
+  if (!isActivityRoomName(requestedRoomName)) return requestedRoomName;
+
+  const prefix =
+    sessionActivity.sessionPurpose === 'evaluation' ||
+    sessionActivity.activityType === 'free_conversation'
+      ? 'eval'
+      : 'task';
+  return [
+    prefix,
+    student.classNumber,
+    student.rollNumber,
+    safeRoomNamePart(displayName),
+    roomSuffixFromRequested(requestedRoomName),
+  ].join('_');
+}
+
 function createStudentParticipantIdentity(student: StudentSession) {
   return `student-${safeIdentityPart(student.studentNumber)}-${Math.floor(Math.random() * 10_000)}`;
 }
@@ -295,7 +347,14 @@ async function readRuntimeConfig(): Promise<RuntimeConfig> {
 }
 
 function inferAgentMode(value: unknown, roomName: string, fallback: AgentMode): AgentMode {
-  if (roomName.startsWith('eval-') || roomName.startsWith('task-')) return 'realtime';
+  if (
+    roomName.startsWith('eval-') ||
+    roomName.startsWith('eval_') ||
+    roomName.startsWith('task-') ||
+    roomName.startsWith('task_')
+  ) {
+    return 'realtime';
+  }
   if (roomName.startsWith('realtime-')) return 'realtime';
   return normalizeAgentMode(value ?? fallback);
 }
@@ -310,8 +369,8 @@ type SessionPurposeSignal = {
 };
 
 function parseRoomSessionPurpose(roomName: string): SessionPurpose | undefined {
-  if (roomName.startsWith('eval-')) return 'evaluation';
-  if (roomName.startsWith('task-')) return 'practice';
+  if (roomName.startsWith('eval-') || roomName.startsWith('eval_')) return 'evaluation';
+  if (roomName.startsWith('task-') || roomName.startsWith('task_')) return 'practice';
   return undefined;
 }
 

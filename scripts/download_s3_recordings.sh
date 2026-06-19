@@ -112,7 +112,7 @@ download_filtered() {
   "${list_cmd[@]}" | while read -r date time size key; do
     [[ -n "${key:-}" ]] || continue
 
-    if [[ "$key" =~ --([0-9]{8})_[0-9]{6}\.mp3$ ]]; then
+    if [[ "$key" =~ -([0-9]{8})_[0-9]{6}\.mp3$ ]]; then
       if [[ "${BASH_REMATCH[1]}" < "$cutoff" ]]; then
         continue
       fi
