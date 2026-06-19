@@ -350,7 +350,7 @@ test('token route marks eval-prefixed realtime rooms as evaluation sessions', as
   const response = await exports.POST({
     json: async () => ({
       display_name: 'Debug User',
-      room_name: 'eval-9-minji-kim-a1b2c3d4',
+      room_name: 'eval_9_2_minji_kim_a1b2c3d4',
       agent_mode: 'realtime',
       activity_type: 'free_conversation',
       session_purpose: 'evaluation',
@@ -361,7 +361,7 @@ test('token route marks eval-prefixed realtime rooms as evaluation sessions', as
   assert.equal(response.status, 200);
 
   const token = accessTokens[0];
-  assert.equal(token.grant.room, 'eval-9-minji-kim-a1b2c3d4');
+  assert.equal(token.grant.room, 'eval_9_2_debug_user_a1b2c3d4');
   assert.equal(token.assignedRoomConfig.agents[0].agentName, 'realtime-agent');
   const metadata = JSON.parse(token.assignedRoomConfig.metadata);
   assert.equal(metadata.agentMode, 'realtime');
@@ -384,7 +384,7 @@ test('token route rejects stale eval room requests when admin purpose is practic
   const response = await exports.POST({
     json: async () => ({
       display_name: 'Debug User',
-      room_name: 'eval-9-minji-kim-a1b2c3d4',
+      room_name: 'eval_9_2_minji_kim_a1b2c3d4',
       agent_mode: 'realtime',
       activity_type: 'free_conversation',
       session_purpose: 'evaluation',
@@ -405,7 +405,7 @@ test('token route rejects stale task room requests when admin purpose is evaluat
   const response = await exports.POST({
     json: async () => ({
       display_name: 'Debug User',
-      room_name: 'task-9-minji-kim-a1b2c3d4',
+      room_name: 'task_9_2_minji_kim_a1b2c3d4',
       agent_mode: 'realtime',
       activity_type: 'task_solution',
       session_purpose: 'practice',
@@ -425,7 +425,7 @@ test('token route rejects realtime requests with conflicting purpose signals', a
   const response = await exports.POST({
     json: async () => ({
       display_name: 'Debug User',
-      room_name: 'eval-9-minji-kim-a1b2c3d4',
+      room_name: 'eval_9_2_minji_kim_a1b2c3d4',
       agent_mode: 'realtime',
       activity_type: 'task_solution',
       session_purpose: 'evaluation',
@@ -445,7 +445,7 @@ test('token route reports stale room purpose when room and body disagree', async
   const response = await exports.POST({
     json: async () => ({
       display_name: 'Debug User',
-      room_name: 'eval-9-minji-kim-a1b2c3d4',
+      room_name: 'eval_9_2_minji_kim_a1b2c3d4',
       agent_mode: 'realtime',
       activity_type: 'free_conversation',
       session_purpose: 'practice',
@@ -467,7 +467,7 @@ test('token route marks task-prefixed realtime rooms as practice sessions', asyn
   const response = await exports.POST({
     json: async () => ({
       display_name: 'Debug User',
-      room_name: 'task-9-minji-kim-a1b2c3d4',
+      room_name: 'task_9_2_minji_kim_a1b2c3d4',
       agent_mode: 'realtime',
       activity_type: 'task_solution',
       session_purpose: 'practice',
@@ -487,6 +487,27 @@ test('token route marks task-prefixed realtime rooms as practice sessions', asyn
   assert.equal(createdDispatches.length, 0);
 });
 
+test('token route canonicalizes activity room class and roll from the student session', async () => {
+  const { exports, accessTokens } = loadTokenRoute({
+    activePromptVersion: CUSTOM_PROMPT_VERSION,
+  });
+
+  const response = await exports.POST({
+    json: async () => ({
+      display_name: 'Minji Kim',
+      room_name: 'task_1_99_minji_kim_94be8111',
+      agent_mode: 'realtime',
+      activity_type: 'task_solution',
+      session_purpose: 'practice',
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.jsonBody.roomName, 'task_9_2_minji_kim_94be8111');
+  assert.equal(accessTokens[0].grant.room, 'task_9_2_minji_kim_94be8111');
+  assert.equal(accessTokens[0].assignedRoomConfig.name, 'task_9_2_minji_kim_94be8111');
+});
+
 test('token route explicitly dispatches the pipeline agent for pipeline rooms', async () => {
   const { exports, accessTokens, createdDispatches, createdRooms } = loadTokenRoute();
 
@@ -500,9 +521,12 @@ test('token route explicitly dispatches the pipeline agent for pipeline rooms', 
 
   assert.equal(response.status, 200);
   assert.equal(response.jsonBody.participantName, 'Debug User');
+  assert.equal(response.jsonBody.roomName, '1반-1그룹');
 
   const token = accessTokens[0];
   assert.match(token.tokenOptions.identity, /^student-20260001-/);
+  assert.equal(token.grant.room, '1반-1그룹');
+  assert.equal(token.assignedRoomConfig.name, '1반-1그룹');
   assert.equal(token.assignedRoomConfig.agents[0].agentName, 'pipeline-agent');
   const metadata = JSON.parse(token.assignedRoomConfig.metadata);
   assert.equal(metadata.agentMode, 'pipeline');
