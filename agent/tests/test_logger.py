@@ -123,6 +123,8 @@ def test_conversation_logger_dual_writes_pending_events_to_mock_writer(tmp_path)
             "feedback_condition_id": "explicit_correction",
             "task_card_id": "school_event_invitation",
             "prompt_version_id": "8c747fcb-8db6-42dd-a2dd-9639d413c441",
+            "student_id": "22222222-2222-4222-8222-222222222222",
+            "student_name": "Minji",
         },
         logs_dir=tmp_path,
         supabase_writer=writer,
@@ -141,6 +143,9 @@ def test_conversation_logger_dual_writes_pending_events_to_mock_writer(tmp_path)
     assert writer.started == 1
     assert [batch[0]["sequence"] for batch in writer.event_batches] == [1, 2]
     assert [batch[0]["role"] for batch in writer.event_batches] == ["user", "agent"]
+    assert writer.event_batches[0][0]["student_id"] == "22222222-2222-4222-8222-222222222222"
+    assert writer.event_batches[0][0]["student_name"] == "Minji"
+    assert "student_id" not in writer.event_batches[1][0]
     assert writer.metadata_syncs[-1]["egress_id"] == "egress-123"
     assert writer.closed_metadata is not None
     assert writer.closed_metadata["recording_path"].startswith("recordings/")
@@ -252,6 +257,8 @@ def test_supabase_writer_posts_session_and_events_payloads() -> None:
                 "text": "I want go to the park.",
                 "participant_identity": "student-1",
                 "participant_name": "Minji",
+                "student_id": "22222222-2222-4222-8222-222222222222",
+                "student_name": "Minji",
             }
         ]
     )
@@ -270,7 +277,56 @@ def test_supabase_writer_posts_session_and_events_payloads() -> None:
     assert calls[1]["body"][0]["session_id"] == "11111111-1111-4111-8111-111111111111"
     assert calls[1]["body"][0]["sequence"] == 1
     assert calls[1]["body"][0]["participant_name"] == "Minji"
+    assert calls[1]["body"][0]["student_id"] == "22222222-2222-4222-8222-222222222222"
+    assert calls[1]["body"][0]["student_name"] == "Minji"
     assert calls[1]["timeout"] == 7
+
+
+def test_supabase_writer_retries_events_without_student_name_when_schema_is_stale() -> None:
+    calls: list[dict] = []
+
+    def opener(request, timeout):
+        body = request.data.decode("utf-8") if request.data else ""
+        payload = json.loads(body) if body else None
+        calls.append(
+            {
+                "method": request.get_method(),
+                "url": request.full_url,
+                "body": payload,
+            }
+        )
+        if "class_sessions" in request.full_url and request.get_method() == "POST":
+            return FakeResponse(f'[{{"id":"{payload["id"]}"}}]')
+        if "conversation_events" in request.full_url and len(calls) == 2:
+            raise missing_column_error(request, "student_name")
+        return FakeResponse()
+
+    writer = SupabaseConversationWriter(
+        "livekit-room-sid",
+        "9-1",
+        {"agent_mode": "realtime"},
+        SupabaseConversationConfig(url="http://supabase.test", key="secret"),
+        opener=opener,
+        class_session_id="11111111-1111-4111-8111-111111111111",
+    )
+
+    writer.write_events(
+        [
+            {
+                "timestamp": "2026-06-12T01:02:03.000000Z",
+                "sequence": 1,
+                "role": "user",
+                "text": "I am free.",
+                "student_name": "Minji",
+            }
+        ]
+    )
+
+    assert len(calls) == 3
+    assert calls[1]["url"].endswith("/rest/v1/conversation_events")
+    assert calls[1]["body"][0]["student_name"] == "Minji"
+    assert calls[2]["url"].endswith("/rest/v1/conversation_events")
+    assert "student_name" not in calls[2]["body"][0]
 
 
 def test_supabase_writer_posts_evaluation_session_fields() -> None:
@@ -367,7 +423,7 @@ def test_supabase_writer_retries_without_evaluation_columns_when_schema_is_stale
                 "timestamp": "2026-06-12T01:02:03.000000Z",
                 "sequence": 1,
                 "role": "agent",
-                "text": "Hi, I’m Kate. I’m new here. Nice to meet you!",
+                "text": "Hi, I’m Kate. I just moved to Korea. Nice to meet you!",
             }
         ]
     )
@@ -382,7 +438,10 @@ def test_supabase_writer_retries_without_evaluation_columns_when_schema_is_stale
     assert "activity_type" not in calls[2]["body"]
     assert calls[2]["body"]["egress_id"] == "egress-123"
     assert calls[3]["url"].endswith("/rest/v1/conversation_events")
-    assert calls[3]["body"][0]["text"] == "Hi, I’m Kate. I’m new here. Nice to meet you!"
+    assert (
+        calls[3]["body"][0]["text"]
+        == "Hi, I’m Kate. I just moved to Korea. Nice to meet you!"
+    )
     assert "schema is missing evaluation/session columns" in caplog.text
 
 

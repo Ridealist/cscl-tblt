@@ -20,6 +20,7 @@ SESSION_ACTIVITY_COLUMNS = (
     "evaluation_prompt_id",
     "evaluation_prompt_version",
 )
+EVENT_OPTIONAL_COLUMNS = ("student_name",)
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +44,14 @@ def _optional_uuid(value: Any) -> str | None:
         return str(UUID(text))
     except ValueError:
         return None
+
+
+def _metadata_student_id(metadata: dict) -> str | None:
+    return _optional_uuid(metadata.get("student_id"))
+
+
+def _metadata_student_name(metadata: dict) -> str | None:
+    return _optional_text(metadata.get("student_name"))
 
 
 def _agent_mode(value: Any) -> str:
@@ -110,6 +119,7 @@ class SupabaseConversationWriter:
         self._session_ready = False
         self._last_metadata_json: str | None = None
         self._supports_session_activity_columns = True
+        self._supports_event_student_name_column = True
 
     @classmethod
     def from_env(
@@ -168,24 +178,7 @@ class SupabaseConversationWriter:
 
         with self._lock:
             self._ensure_session_locked()
-            payload = [
-                {
-                    "session_id": self._class_session_id,
-                    "sequence": entry["sequence"],
-                    "role": entry["role"],
-                    "text": entry["text"],
-                    "participant_identity": entry.get("participant_identity"),
-                    "participant_name": entry.get("participant_name"),
-                    "created_at": entry["timestamp"],
-                }
-                for entry in entries
-            ]
-            self._request(
-                "POST",
-                "conversation_events",
-                payload,
-                prefer="return=minimal",
-            )
+            self._write_events(entries)
             log.info(
                 "Supabase conversation events inserted: class_session_id=%s count=%s last_sequence=%s",
                 self._class_session_id,
@@ -311,6 +304,60 @@ class SupabaseConversationWriter:
         body = error.body.lower()
         return any(column in body for column in SESSION_ACTIVITY_COLUMNS)
 
+    def _event_payload(self, entries: list[dict], *, include_student_name: bool) -> list[dict]:
+        payload = []
+        for entry in entries:
+            row = {
+                "session_id": self._class_session_id,
+                "sequence": entry["sequence"],
+                "role": entry["role"],
+                "text": entry["text"],
+                "participant_identity": entry.get("participant_identity"),
+                "participant_name": entry.get("participant_name"),
+                "student_id": entry.get("student_id"),
+                "created_at": entry["timestamp"],
+            }
+            if include_student_name:
+                row["student_name"] = entry.get("student_name")
+            payload.append(row)
+        return payload
+
+    def _write_events(self, entries: list[dict]) -> None:
+        payload = self._event_payload(
+            entries,
+            include_student_name=self._supports_event_student_name_column,
+        )
+        try:
+            self._request(
+                "POST",
+                "conversation_events",
+                payload,
+                prefer="return=minimal",
+            )
+            return
+        except SupabaseRequestError as exc:
+            if not self._is_missing_event_optional_column_error(exc):
+                raise
+
+            self._supports_event_student_name_column = False
+            log.warning(
+                "Supabase conversation_events schema is missing student_name; "
+                "retrying event insert without that optional column. Apply the latest "
+                "migration to retain student name snapshots in event rows."
+            )
+            self._request(
+                "POST",
+                "conversation_events",
+                self._event_payload(entries, include_student_name=False),
+                prefer="return=minimal",
+            )
+
+    def _is_missing_event_optional_column_error(self, error: SupabaseRequestError) -> bool:
+        if error.status != 400 or "PGRST204" not in error.body:
+            return False
+        body = error.body.lower()
+        return any(column in body for column in EVENT_OPTIONAL_COLUMNS)
+
     def _request(
         self,
         method: str,
@@ -406,6 +453,13 @@ class ConversationLogger:
             entry["participant_identity"] = participant_identity
         if participant_name:
             entry["participant_name"] = participant_name
+        if role == "user":
+            student_id = _metadata_student_id(self.metadata)
+            student_name = _metadata_student_name(self.metadata)
+            if student_id:
+                entry["student_id"] = student_id
+            if student_name:
+                entry["student_name"] = student_name
         self.entries.append(entry)
         self._schedule_flush()
 

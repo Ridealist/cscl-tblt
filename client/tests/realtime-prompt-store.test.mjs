@@ -18,22 +18,30 @@ const PROMPT_CONFIG = {
   taskCardPrompt: 'Task card prompt',
 };
 
-const PROMPT_ROW = {
-  id: '00000000-0000-4000-8000-000000000034',
-  base_prompt: PROMPT_CONFIG.basePrompt,
-  dominant_prompt: PROMPT_CONFIG.dominantPrompt,
-  collaborative_prompt: PROMPT_CONFIG.collaborativePrompt,
-  feedback_condition_id: PROMPT_CONFIG.feedbackConditionId,
-  feedback_prompt: PROMPT_CONFIG.feedbackPrompt,
-  task_card_id: PROMPT_CONFIG.taskCardId,
-  task_card_prompt: PROMPT_CONFIG.taskCardPrompt,
+const PROMPT_VERSION = {
+  ...PROMPT_CONFIG,
+  promptId: '00000000-0000-4000-8000-000000000034',
+  savedAt: '2026-06-12T00:00:00.000Z',
   source: 'custom',
-  is_active: true,
-  created_at: '2026-06-12T00:00:00.000Z',
-  created_by: 'admin-user',
+  createdBy: 'admin-user',
+  hash: 'hash-1',
+  isActive: true,
+  label: 'practice v1',
+  legacyFilePurpose: null,
+  legacyFileVersionId: null,
+  purpose: 'practice',
 };
 
-function loadModule(relativePath, requireMock, processMock = process) {
+class PromptVersionStoreError extends Error {
+  constructor(code, message, status = 503) {
+    super(message);
+    this.name = 'PromptVersionStoreError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+function loadModule(relativePath, requireMock) {
   const sourceUrl = new URL(`../${relativePath}`, import.meta.url);
   const source = readFileSync(sourceUrl, 'utf8');
   const transpiled = ts.transpileModule(source, {
@@ -52,7 +60,6 @@ function loadModule(relativePath, requireMock, processMock = process) {
       console,
       exports: module.exports,
       module,
-      process: processMock,
       require: requireMock,
     },
     { filename: relativePath }
@@ -60,63 +67,15 @@ function loadModule(relativePath, requireMock, processMock = process) {
   return module.exports;
 }
 
-function validateRealtimePromptConfig(value) {
-  const required = [
-    'basePrompt',
-    'dominantPrompt',
-    'collaborativePrompt',
-    'feedbackConditionId',
-    'feedbackPrompt',
-    'taskCardId',
-    'taskCardPrompt',
-  ];
-  for (const key of required) {
-    if (typeof value?.[key] !== 'string' || !value[key].trim()) {
-      return { ok: false, error: `${key} invalid` };
-    }
-  }
-  return {
-    ok: true,
-    config: Object.fromEntries(required.map((key) => [key, value[key].trim()])),
-  };
-}
-
-function createSupabaseClient(options, calls) {
-  return {
-    from(table) {
-      assert.equal(table, 'realtime_prompt_versions');
-      return {
-        select(columns) {
-          calls.selects.push(columns);
-          return {
-            eq(column, value) {
-              assert.equal(column, 'is_active');
-              assert.equal(value, true);
-              return {
-                maybeSingle: async () => ({
-                  data: options.readRow ?? null,
-                  error: options.readError ?? null,
-                }),
-              };
-            },
-          };
-        },
-      };
-    },
-    rpc(name, args) {
-      calls.rpcs.push({ name, args });
-      return Promise.resolve({
-        data: options.rpcData ?? null,
-        error: options.rpcError ?? null,
-      });
-    },
-  };
-}
-
 function loadPromptStore(options = {}) {
   const calls = {
-    rpcs: [],
-    selects: [],
+    activate: [],
+    clear: [],
+    delete: [],
+    list: [],
+    read: [],
+    readActive: 0,
+    save: [],
   };
 
   const exports = loadModule('lib/realtime-prompt-store.ts', (specifier) => {
@@ -125,13 +84,40 @@ function loadPromptStore(options = {}) {
     }
 
     if (specifier === '@/lib/realtime-prompt-config') {
-      return { validateRealtimePromptConfig };
+      return {};
     }
 
-    if (specifier === '@/lib/supabase/admin') {
+    if (specifier === '@/lib/prompt-version-db-store') {
       return {
-        createSupabaseAdminClient: () => createSupabaseClient(options, calls),
-        hasSupabaseAdminEnv: () => options.hasSupabaseAdminEnv !== false,
+        PromptVersionStoreError,
+        activatePracticePromptVersion: async (versionId) => {
+          calls.activate.push(versionId);
+          return options.activatedVersion ?? PROMPT_VERSION;
+        },
+        clearActivePromptVersion: async (purpose) => {
+          calls.clear.push(purpose);
+        },
+        deletePromptVersion: async (versionId, expectedPurpose) => {
+          calls.delete.push({ expectedPurpose, versionId });
+        },
+        listPromptVersions: async (purpose) => {
+          calls.list.push(purpose);
+          return options.versions ?? [];
+        },
+        readActivePracticePromptVersion: async () => {
+          calls.readActive += 1;
+          if (options.readActiveError) throw options.readActiveError;
+          return options.activeVersion ?? null;
+        },
+        readPracticePromptVersion: async (versionId) => {
+          calls.read.push(versionId);
+          return options.readVersion ?? null;
+        },
+        savePracticePromptVersion: async (config, saveOptions) => {
+          calls.save.push({ config, options: saveOptions });
+          if (options.saveError) throw options.saveError;
+          return { ...PROMPT_VERSION, ...config, createdBy: saveOptions.createdBy ?? null };
+        },
       };
     }
 
@@ -145,93 +131,75 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-test('readActiveRealtimePromptVersion maps active Supabase row to prompt metadata', async () => {
-  const { readActiveRealtimePromptVersion } = loadPromptStore({ readRow: PROMPT_ROW });
-
-  const prompt = await readActiveRealtimePromptVersion();
-
-  assert.deepEqual(plain(prompt), {
-    ...PROMPT_CONFIG,
-    promptId: PROMPT_ROW.id,
-    savedAt: PROMPT_ROW.created_at,
-    source: 'custom',
-    createdBy: PROMPT_ROW.created_by,
-    isActive: true,
-  });
-});
-
-test('readActiveRealtimePromptVersion returns null when no active row exists', async () => {
-  const { readActiveRealtimePromptVersion } = loadPromptStore({ readRow: null });
-
-  assert.equal(await readActiveRealtimePromptVersion(), null);
-});
-
-test('readActiveRealtimePromptVersion returns null when Supabase is not configured', async () => {
+test('readActiveRealtimePromptVersion delegates to the practice DB store', async () => {
   const { calls, readActiveRealtimePromptVersion } = loadPromptStore({
-    hasSupabaseAdminEnv: false,
+    activeVersion: PROMPT_VERSION,
   });
 
-  assert.equal(await readActiveRealtimePromptVersion(), null);
-  assert.equal(calls.selects.length, 0);
+  assert.deepEqual(plain(await readActiveRealtimePromptVersion()), plain(PROMPT_VERSION));
+  assert.equal(calls.readActive, 1);
 });
 
-test('saveRealtimePromptVersion activates one new version through RPC', async () => {
-  const { calls, saveRealtimePromptVersion } = loadPromptStore({ rpcData: PROMPT_ROW });
+test('listRealtimePromptVersions delegates to prompt_versions practice rows', async () => {
+  const versions = [{ id: 'v1', label: 'v1', createdAt: '2026-06-12T00:00:00.000Z', hash: 'h' }];
+  const { calls, listRealtimePromptVersions } = loadPromptStore({ versions });
 
-  const prompt = await saveRealtimePromptVersion(PROMPT_CONFIG, { createdBy: 'admin-user' });
+  assert.deepEqual(await listRealtimePromptVersions(), versions);
+  assert.deepEqual(calls.list, ['practice']);
+});
 
-  assert.equal(prompt.promptId, PROMPT_ROW.id);
-  assert.deepEqual(plain(calls.rpcs), [
+test('saveRealtimePromptVersion saves a practice version through the DB store', async () => {
+  const { calls, saveRealtimePromptVersion } = loadPromptStore();
+
+  const prompt = await saveRealtimePromptVersion(PROMPT_CONFIG, {
+    createdBy: 'admin-user',
+    label: 'Edited practice',
+  });
+
+  assert.equal(prompt.promptId, PROMPT_VERSION.promptId);
+  assert.deepEqual(plain(calls.save), [
     {
-      name: 'activate_realtime_prompt_version',
-      args: {
-        p_base_prompt: PROMPT_CONFIG.basePrompt,
-        p_dominant_prompt: PROMPT_CONFIG.dominantPrompt,
-        p_collaborative_prompt: PROMPT_CONFIG.collaborativePrompt,
-        p_feedback_condition_id: PROMPT_CONFIG.feedbackConditionId,
-        p_feedback_prompt: PROMPT_CONFIG.feedbackPrompt,
-        p_task_card_id: PROMPT_CONFIG.taskCardId,
-        p_task_card_prompt: PROMPT_CONFIG.taskCardPrompt,
-        p_created_by: 'admin-user',
-      },
+      config: PROMPT_CONFIG,
+      options: { createdBy: 'admin-user', label: 'Edited practice' },
     },
   ]);
 });
 
-test('deactivateActiveRealtimePromptVersion deactivates active custom prompt through RPC', async () => {
+test('activateRealtimePromptVersion delegates to the DB store', async () => {
+  const { activateRealtimePromptVersion, calls } = loadPromptStore();
+
+  await activateRealtimePromptVersion('practice-version-1');
+
+  assert.deepEqual(calls.activate, ['practice-version-1']);
+});
+
+test('deleteRealtimePromptVersion delegates to the generic DB delete', async () => {
+  const { calls, deleteRealtimePromptVersion } = loadPromptStore();
+
+  await deleteRealtimePromptVersion('practice-version-1');
+
+  assert.deepEqual(calls.delete, [
+    { expectedPurpose: 'practice', versionId: 'practice-version-1' },
+  ]);
+});
+
+test('deactivateActiveRealtimePromptVersion clears the active practice version', async () => {
   const { calls, deactivateActiveRealtimePromptVersion } = loadPromptStore();
 
   await deactivateActiveRealtimePromptVersion();
 
-  assert.deepEqual(plain(calls.rpcs), [
-    {
-      name: 'deactivate_realtime_prompt_versions',
-    },
-  ]);
+  assert.deepEqual(calls.clear, ['practice']);
 });
 
-test('saveRealtimePromptVersion fails when Supabase is not configured', async () => {
-  const { saveRealtimePromptVersion } = loadPromptStore({ hasSupabaseAdminEnv: false });
+test('RealtimePromptStoreError remains the shared prompt version store error class', async () => {
+  const error = new PromptVersionStoreError('supabase_not_configured', 'missing');
+  const { saveRealtimePromptVersion } = loadPromptStore({ saveError: error });
 
   await assert.rejects(
     () => saveRealtimePromptVersion(PROMPT_CONFIG),
-    (error) =>
-      error.name === 'RealtimePromptStoreError' &&
-      error.code === 'supabase_not_configured' &&
-      error.status === 503
-  );
-});
-
-test('readActiveRealtimePromptVersion reports Supabase read failures', async () => {
-  const { readActiveRealtimePromptVersion } = loadPromptStore({
-    readError: new Error('database unavailable'),
-  });
-
-  await assert.rejects(
-    () => readActiveRealtimePromptVersion(),
-    (error) =>
-      error.name === 'RealtimePromptStoreError' &&
-      error.code === 'prompt_version_read_failed' &&
-      error.status === 503
+    (actual) =>
+      actual.name === 'PromptVersionStoreError' &&
+      actual.code === 'supabase_not_configured' &&
+      actual.status === 503
   );
 });

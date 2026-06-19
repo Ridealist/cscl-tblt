@@ -166,8 +166,8 @@ export function AgentSessionView_01({
   supportsVideoInput = true,
   supportsScreenShare = true,
   isPreConnectBufferEnabled = true,
-  agentDisplayName = 'Daisy',
-  agentAvatarSrc = '/agents/daisy_photo.png',
+  agentDisplayName = 'Kate',
+  agentAvatarSrc = '/agents/kate_photo_20260615.png',
 
   audioVisualizerType,
   audioVisualizerColor,
@@ -240,9 +240,9 @@ export function AgentSessionView_01({
         audioVisualizerGridRowCount={audioVisualizerGridRowCount}
         audioVisualizerGridColumnCount={audioVisualizerGridColumnCount}
         audioVisualizerWaveLineWidth={audioVisualizerWaveLineWidth}
-        agentState={agentState}
         agentDisplayName={agentDisplayName}
         agentAvatarSrc={agentAvatarSrc}
+        agentState={agentState}
       />
       {/* Bottom */}
       <motion.div

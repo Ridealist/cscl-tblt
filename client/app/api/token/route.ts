@@ -68,6 +68,9 @@ type SessionActivityContext = {
   evaluationId?: string;
   evaluationPromptId?: string;
   evaluationPromptVersion?: string;
+  evaluationPromptVersionId?: string;
+  promptSavedAt?: string | null;
+  promptSource?: string;
   sessionPurpose: SessionPurpose;
 };
 
@@ -404,6 +407,9 @@ async function readSessionActivityContext(
     evaluationId: evaluationPrompt.evaluationId,
     evaluationPromptId: evaluationPrompt.evaluationPromptId,
     evaluationPromptVersion: evaluationPrompt.evaluationPromptVersion,
+    evaluationPromptVersionId: evaluationPrompt.promptVersionId ?? undefined,
+    promptSavedAt: evaluationPrompt.savedAt,
+    promptSource: evaluationPrompt.usingDefault ? 'evaluation' : 'custom',
     sessionPurpose,
   };
 }
@@ -457,6 +463,13 @@ function buildRoomConfig(
                 evaluationId: sessionActivity.evaluationId,
                 evaluationPromptId: sessionActivity.evaluationPromptId,
                 evaluationPromptVersion: sessionActivity.evaluationPromptVersion,
+                ...(sessionActivity.evaluationPromptVersionId
+                  ? { promptVersionId: sessionActivity.evaluationPromptVersionId }
+                  : {}),
+                ...(sessionActivity.promptSavedAt
+                  ? { promptSavedAt: sessionActivity.promptSavedAt }
+                  : {}),
+                promptSource: sessionActivity.promptSource ?? 'evaluation',
               }
             : {
                 agentRole,
@@ -466,7 +479,7 @@ function buildRoomConfig(
                   : {}),
                 promptSavedAt: promptSnapshot?.savedAt ?? DEFAULT_REALTIME_PROMPT_METADATA.savedAt,
                 promptSource: promptSnapshot?.source ?? DEFAULT_REALTIME_PROMPT_METADATA.source,
-                feedbackConditionId: promptSnapshot?.feedbackConditionId ?? feedbackConditionId,
+                feedbackConditionId,
                 ...(promptSnapshot?.taskCardId ? { taskCardId: promptSnapshot.taskCardId } : {}),
               }),
         }

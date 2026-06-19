@@ -26,13 +26,26 @@ const SESSION_COLUMNS = [
   'started_at',
   'ended_at',
 ].join(',');
-const EVENT_COLUMNS = [
+const EVENT_COLUMNS_WITH_STUDENT_NAME = [
   'session_id',
   'sequence',
   'role',
   'text',
   'participant_identity',
   'participant_name',
+  'student_id',
+  'student_name',
+  'metadata',
+  'created_at',
+].join(',');
+const EVENT_COLUMNS_WITHOUT_STUDENT_NAME = [
+  'session_id',
+  'sequence',
+  'role',
+  'text',
+  'participant_identity',
+  'participant_name',
+  'student_id',
   'metadata',
   'created_at',
 ].join(',');
@@ -67,6 +80,8 @@ type SupabaseEventRow = {
   text?: unknown;
   participant_identity?: unknown;
   participant_name?: unknown;
+  student_id?: unknown;
+  student_name?: unknown;
   metadata?: unknown;
   created_at?: unknown;
 };
@@ -103,6 +118,8 @@ export interface ConversationLogEntry {
   text: string;
   participant_identity?: string;
   participant_name?: string;
+  student_id?: string;
+  student_name?: string;
   metadata?: ConversationLogMetadata;
 }
 
@@ -131,12 +148,14 @@ export interface ConversationLogSessionFilters {
 export class ConversationLogStoreError extends Error {
   status: number;
   code: string;
+  cause?: unknown;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, cause?: unknown) {
     super(message);
     this.name = 'ConversationLogStoreError';
     this.status = status;
     this.code = code;
+    this.cause = cause;
   }
 }
 
@@ -171,11 +190,22 @@ function missingSupabaseError() {
   );
 }
 
-function supabaseReadError(operation: string) {
+function supabaseReadError(operation: string, cause?: unknown) {
   return new ConversationLogStoreError(
     500,
     'supabase_read_failed',
-    `Supabase conversation logs could not be read: ${operation}.`
+    `Supabase conversation logs could not be read: ${operation}.`,
+    cause
+  );
+}
+
+function isMissingSupabaseColumnError(error: unknown, column: string) {
+  if (!error || typeof error !== 'object') return false;
+  const source = error as { code?: unknown; message?: unknown };
+  return (
+    source.code === 'PGRST204' &&
+    typeof source.message === 'string' &&
+    source.message.toLowerCase().includes(column.toLowerCase())
   );
 }
 
@@ -276,6 +306,8 @@ function mapEventRow(row: SupabaseEventRow): ConversationLogEntry | null {
       ? { participant_identity: text(row.participant_identity) }
       : {}),
     ...(text(row.participant_name) ? { participant_name: text(row.participant_name) } : {}),
+    ...(text(row.student_id) ? { student_id: text(row.student_id) } : {}),
+    ...(text(row.student_name) ? { student_name: text(row.student_name) } : {}),
     metadata: objectValue(row.metadata),
   };
 }
@@ -301,7 +333,7 @@ async function readPagedSupabaseRows<T>(
   for (let from = 0; ; from += EVENT_PAGE_SIZE) {
     const to = from + EVENT_PAGE_SIZE - 1;
     const { data, error } = await createQuery().range(from, to);
-    if (error) throw supabaseReadError(operation);
+    if (error) throw supabaseReadError(operation, error);
 
     const page = Array.isArray(data) ? data : [];
     rows.push(...page);
@@ -371,18 +403,38 @@ async function readSupabaseLogData(sessionId: string): Promise<ConversationLogDa
     );
   }
 
-  const eventRows = await readPagedSupabaseRows<SupabaseEventRow>(
-    () =>
-      supabase
-        .from('conversation_events')
-        .select(EVENT_COLUMNS)
-        .eq('session_id', sessionId)
-        .order('sequence', { ascending: true })
-        .order('created_at', {
-          ascending: true,
-        }) as unknown as SupabasePagedQuery<SupabaseEventRow>,
-    'conversation_events'
-  );
+  let eventRows: SupabaseEventRow[];
+  try {
+    eventRows = await readPagedSupabaseRows<SupabaseEventRow>(
+      () =>
+        supabase
+          .from('conversation_events')
+          .select(EVENT_COLUMNS_WITH_STUDENT_NAME)
+          .eq('session_id', sessionId)
+          .order('sequence', { ascending: true })
+          .order('created_at', {
+            ascending: true,
+          }) as unknown as SupabasePagedQuery<SupabaseEventRow>,
+      'conversation_events'
+    );
+  } catch (error) {
+    const cause = error instanceof ConversationLogStoreError ? error.cause : error;
+    if (!isMissingSupabaseColumnError(cause, 'student_name')) {
+      throw error;
+    }
+    eventRows = await readPagedSupabaseRows<SupabaseEventRow>(
+      () =>
+        supabase
+          .from('conversation_events')
+          .select(EVENT_COLUMNS_WITHOUT_STUDENT_NAME)
+          .eq('session_id', sessionId)
+          .order('sequence', { ascending: true })
+          .order('created_at', {
+            ascending: true,
+          }) as unknown as SupabasePagedQuery<SupabaseEventRow>,
+      'conversation_events'
+    );
+  }
 
   const mappedSession = mapSessionRow(
     sessionRow as SupabaseSessionRow,
@@ -529,6 +581,8 @@ function readFileLogData(filename?: string | null): ConversationLogData {
                 ...(text(raw.participant_name)
                   ? { participant_name: text(raw.participant_name) }
                   : {}),
+                ...(text(raw.student_id) ? { student_id: text(raw.student_id) } : {}),
+                ...(text(raw.student_name) ? { student_name: text(raw.student_name) } : {}),
               },
             ];
           })

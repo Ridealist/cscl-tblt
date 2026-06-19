@@ -227,8 +227,10 @@ function loadTokenRoute(options = {}) {
               evaluationPromptId: 'pretest_6_10',
               evaluationPromptVersion: '2026-06-10',
               evaluationCharacter: 'Kate',
-              openingSentence: 'Hi, I’m Kate. I’m new here. Nice to meet you!',
+              openingSentence: 'Hi, I’m Kate. I just moved to Korea. Nice to meet you!',
               prompt: '# PRE-TEST INTERACTION PROMPT: Kate',
+              promptVersionId: null,
+              savedAt: null,
               evaluations: [],
             },
         };
@@ -283,7 +285,10 @@ function loadTokenRoute(options = {}) {
 
 test('token route creates a named realtime room config for token-based agent dispatch', async () => {
   const { exports, accessTokens, createdDispatches, createdRooms } = loadTokenRoute({
-    activePromptVersion: CUSTOM_PROMPT_VERSION,
+    activePromptVersion: {
+      ...CUSTOM_PROMPT_VERSION,
+      feedbackConditionId: 'explicit_correction',
+    },
   });
 
   const response = await exports.POST({
@@ -310,6 +315,7 @@ test('token route creates a named realtime room config for token-based agent dis
   const metadata = JSON.parse(token.assignedRoomConfig.agents[0].metadata);
   assert.equal(metadata.promptVersionId, CUSTOM_PROMPT_VERSION.promptId);
   assert.equal(metadata.promptSource, 'custom');
+  assert.equal(metadata.feedbackConditionId, 'no_corrective');
   assert.equal(metadata.sessionPurpose, 'practice');
   assert.equal(metadata.activityType, 'task_solution');
   assert.equal(metadata.studentId, 'student-id-1');
@@ -332,8 +338,10 @@ test('token route marks eval-prefixed realtime rooms as evaluation sessions', as
       evaluationPromptId: 'manifest-prompt-id',
       evaluationPromptVersion: 'manifest-version-1',
       evaluationCharacter: 'Kate',
-      openingSentence: 'Hi, I’m Kate. I’m new here. Nice to meet you!',
+      openingSentence: 'Hi, I’m Kate. I just moved to Korea. Nice to meet you!',
       prompt: '# PRE-TEST INTERACTION PROMPT: Kate',
+      promptVersionId: 'eval-version-1',
+      savedAt: '2026-06-13T01:00:00.000Z',
       evaluations: [],
     },
     sessionPurpose: 'evaluation',
@@ -363,8 +371,9 @@ test('token route marks eval-prefixed realtime rooms as evaluation sessions', as
   assert.equal(metadata.evaluationId, 'pretest_6_10');
   assert.equal(metadata.evaluationPromptId, 'manifest-prompt-id');
   assert.equal(metadata.evaluationPromptVersion, 'manifest-version-1');
-  assert.equal(metadata.promptVersionId, undefined);
-  assert.equal(metadata.promptSource, undefined);
+  assert.equal(metadata.promptVersionId, 'eval-version-1');
+  assert.equal(metadata.promptSavedAt, '2026-06-13T01:00:00.000Z');
+  assert.equal(metadata.promptSource, 'custom');
   assert.equal(createdRooms.length, 0);
   assert.equal(createdDispatches.length, 0);
 });

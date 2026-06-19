@@ -4,6 +4,7 @@
 !.env.example
 config.json
 prompt_config.json
+prompt_versions/
 
 # ===== Python =====
 __pycache__/
@@ -71,3 +72,7 @@ Thumbs.db
 # ===== AWS_File Managements =====
 /aws_cli
 aws_cli/
+
+# ===== Leaf Work =====
+leaf-work/
+.leaf-work/

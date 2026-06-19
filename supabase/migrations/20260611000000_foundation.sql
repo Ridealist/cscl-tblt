@@ -168,6 +168,13 @@ to authenticated
 using (public.is_admin(auth.uid()))
 with check (public.is_admin(auth.uid()));
 
+grant select, insert, update, delete on public.profiles to authenticated;
+grant select, insert, update, delete on public.app_settings to authenticated;
+grant select, insert, update, delete on public.realtime_prompt_versions to authenticated;
+grant select, insert, update, delete on public.profiles to service_role;
+grant select, insert, update, delete on public.app_settings to service_role;
+grant select, insert, update, delete on public.realtime_prompt_versions to service_role;
+
 comment on table public.profiles is 'Supabase Auth profile and app role metadata. Bootstrap the first admin through SQL or the Supabase dashboard.';
 comment on table public.app_settings is 'Persistent replacement target for config.json.';
 comment on table public.realtime_prompt_versions is 'Versioned replacement target for prompt_config.json realtime overrides.';

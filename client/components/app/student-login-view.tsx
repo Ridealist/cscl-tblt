@@ -69,7 +69,7 @@ export function StudentLoginView({
             }}
             autoComplete="username"
             className="border-input bg-background text-foreground placeholder:text-muted-foreground focus:ring-primary rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2"
-            placeholder="예: 20260001"
+            placeholder="예: 60101"
           />
         </label>
 

@@ -53,6 +53,8 @@ interface LogEntry {
   text: string;
   participant_identity?: string;
   participant_name?: string;
+  student_id?: string;
+  student_name?: string;
 }
 
 interface SessionMetadata extends Record<string, unknown> {
@@ -468,7 +470,10 @@ function ConversationView({ session, onBack }: { session: SessionMeta; onBack: (
                 const isAgent = entry.role === 'agent';
                 const speakerName = isAgent
                   ? '에이전트'
-                  : (entry.participant_name ?? entry.participant_identity ?? '참가자');
+                  : (entry.student_name ??
+                    entry.participant_name ??
+                    entry.participant_identity ??
+                    '참가자');
                 const palette = isAgent ? AGENT_PALETTE : getColor(speakerName);
                 return (
                   <div

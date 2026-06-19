@@ -69,7 +69,14 @@ def _install_livekit_mocks() -> None:
 
 _install_livekit_mocks()
 
-from main import _metadata_activity_context, _metadata_prompt_version_id  # noqa: E402
+from main import (  # noqa: E402
+    _metadata_activity_context,
+    _metadata_prompt_version_id,
+    _metadata_student_context,
+    _normalize_activity_context,
+    _realtime_tts_extra_kwargs_for_session_purpose,
+    _realtime_tts_voice_for_session_purpose,
+)
 
 
 def test_metadata_prompt_version_id_prefers_explicit_version_id() -> None:
@@ -97,6 +104,31 @@ def test_metadata_prompt_version_id_falls_back_to_custom_prompt_id() -> None:
     assert _metadata_prompt_version_id(metadata) == "custom-prompt-id"
 
 
+def test_metadata_prompt_version_id_reads_evaluation_version_id() -> None:
+    metadata = json.dumps(
+        {
+            "agentMode": "realtime",
+            "evaluationPromptVersionId": "eval-version-id",
+            "sessionPurpose": "evaluation",
+        }
+    )
+
+    assert _metadata_prompt_version_id(metadata) == "eval-version-id"
+
+
+def test_metadata_prompt_version_id_falls_back_to_evaluation_prompt_id() -> None:
+    metadata = json.dumps(
+        {
+            "agentMode": "realtime",
+            "evaluationId": "pretest_6_10",
+            "evaluationPromptId": "20260615144023-d871b1c2",
+            "sessionPurpose": "evaluation",
+        }
+    )
+
+    assert _metadata_prompt_version_id(metadata) == "20260615144023-d871b1c2"
+
+
 def test_metadata_prompt_version_id_ignores_default_prompt_id() -> None:
     metadata = json.dumps(
         {
@@ -119,6 +151,7 @@ def test_metadata_activity_context_maps_evaluation_fields() -> None:
             "evaluationPromptId": "pretest_6_10",
             "evaluationPromptVersion": "2026-06-10",
             "sessionPurpose": "evaluation",
+            "promptVersionId": "eval-version-1",
         }
     )
 
@@ -128,5 +161,72 @@ def test_metadata_activity_context_maps_evaluation_fields() -> None:
         "evaluation_id": "pretest_6_10",
         "evaluation_prompt_id": "pretest_6_10",
         "evaluation_prompt_version": "2026-06-10",
+        "evaluation_prompt_version_id": "eval-version-1",
         "session_purpose": "evaluation",
+    }
+
+
+def test_metadata_student_context_maps_student_fields() -> None:
+    metadata = json.dumps(
+        {
+            "studentId": "student-id-1",
+            "studentNumber": "20260001",
+            "studentName": "Kim Minji",
+            "studentDisplayName": "Minji",
+            "studentClassNumber": 9,
+            "studentRollNumber": 2,
+        }
+    )
+
+    assert _metadata_student_context(metadata) == {
+        "student_id": "student-id-1",
+        "student_number": "20260001",
+        "student_name": "Kim Minji",
+        "student_display_name": "Minji",
+        "student_class_number": 9,
+        "student_roll_number": 2,
+    }
+
+
+def test_normalize_activity_context_maps_execution_to_practice() -> None:
+    assert _normalize_activity_context({"session_purpose": "execution"}) == {
+        "activity_type": "task_solution",
+        "session_purpose": "practice",
+    }
+
+
+def test_normalize_activity_context_prioritizes_free_conversation() -> None:
+    assert _normalize_activity_context({"activity_type": "free_conversation"}) == {
+        "activity_type": "free_conversation",
+        "session_purpose": "evaluation",
+    }
+
+
+def test_realtime_tts_voice_changes_by_session_purpose() -> None:
+    assert (
+        _realtime_tts_voice_for_session_purpose("evaluation")
+        == "b7d50908-b17c-442d-ad8d-810c63997ed9"
+    )
+    assert (
+        _realtime_tts_voice_for_session_purpose("practice")
+        == "b7d50908-b17c-442d-ad8d-810c63997ed9"
+    )
+    assert (
+        _realtime_tts_voice_for_session_purpose(None)
+        == "b7d50908-b17c-442d-ad8d-810c63997ed9"
+    )
+
+
+def test_realtime_tts_extra_kwargs_change_by_session_purpose() -> None:
+    assert _realtime_tts_extra_kwargs_for_session_purpose("evaluation") == {
+        "speed": 0.8,
+        "volume": 1.0,
+    }
+    assert _realtime_tts_extra_kwargs_for_session_purpose("practice") == {
+        "speed": 0.8,
+        "volume": 1.1,
+    }
+    assert _realtime_tts_extra_kwargs_for_session_purpose(None) == {
+        "speed": 0.8,
+        "volume": 1.1,
     }

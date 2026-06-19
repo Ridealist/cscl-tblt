@@ -20,10 +20,6 @@ export interface AgentChatTranscriptProps extends ComponentProps<'div'> {
    * The current state of the agent. When 'thinking', displays a loading indicator.
    */
   agentState?: AgentState;
-  /** Display name used for assistant avatar alt text. */
-  agentDisplayName?: string;
-  /** Public image path used for assistant avatar images. */
-  agentAvatarSrc?: string;
   /**
    * Array of messages to display in the transcript.
    * @defaultValue []
@@ -33,6 +29,10 @@ export interface AgentChatTranscriptProps extends ComponentProps<'div'> {
    * Additional CSS class names to apply to the conversation container.
    */
   className?: string;
+  /** Display name used for assistant transcript avatars. */
+  agentDisplayName?: string;
+  /** Public image path used for assistant transcript avatars. */
+  agentAvatarSrc?: string;
 }
 
 /**
@@ -52,10 +52,10 @@ export interface AgentChatTranscriptProps extends ComponentProps<'div'> {
  */
 export function AgentChatTranscript({
   agentState,
-  agentDisplayName = 'Daisy',
-  agentAvatarSrc = '/agents/daisy_photo.png',
   messages = [],
   className,
+  agentDisplayName = 'Kate',
+  agentAvatarSrc = '/agents/kate_photo_20260615.png',
   ...props
 }: AgentChatTranscriptProps) {
   return (

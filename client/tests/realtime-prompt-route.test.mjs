@@ -37,12 +37,27 @@ const DEFAULT_REALTIME_PROMPT_METADATA = {
   source: 'default',
 };
 
+const EMPTY_CONDITION_COMBINATION_PROMPTS = {
+  dominant_no_corrective: '',
+  dominant_explicit_correction: '',
+  collaborative_no_corrective: '',
+  collaborative_explicit_correction: '',
+};
+
+const CUSTOM_CONDITION_COMBINATION_PROMPTS = {
+  dominant_no_corrective: 'Dominant no corrective condition prompt.',
+  dominant_explicit_correction: 'Dominant explicit correction condition prompt.',
+  collaborative_no_corrective: 'Collaborative no corrective condition prompt.',
+  collaborative_explicit_correction: 'Collaborative explicit correction condition prompt.',
+};
+
 const DEFAULT_PROMPT = {
   basePrompt: '# BASE PROMPT:\nDefault base prompt',
   dominantPrompt: '# INTERLOCUTOR ROLE PROMPT: Dominant\nDefault dominant prompt',
   collaborativePrompt: '# INTERLOCUTOR ROLE PROMPT: Collaborative\nDefault collaborative prompt',
   feedbackConditionId: 'explicit_correction',
   feedbackPrompt: '# FEEDBACK CONDITION: Explicit Correction\nDefault explicit feedback',
+  conditionCombinationPrompts: EMPTY_CONDITION_COMBINATION_PROMPTS,
   taskCardId: 'school_event_invitation',
   taskCardPrompt: '# TASK CARD: School Event Invitation\nDefault task card',
 };
@@ -53,6 +68,7 @@ const CUSTOM_PROMPT = {
   collaborativePrompt: '# INTERLOCUTOR ROLE PROMPT: Collaborative\nEdited collaborative prompt',
   feedbackConditionId: 'explicit_correction',
   feedbackPrompt: '# FEEDBACK CONDITION: Explicit Correction\nEdited feedback prompt',
+  conditionCombinationPrompts: CUSTOM_CONDITION_COMBINATION_PROMPTS,
   taskCardId: 'school_event_invitation',
   taskCardPrompt: '# TASK CARD: School Event Invitation\nEdited task card prompt',
 };
@@ -63,7 +79,9 @@ const CUSTOM_VERSION = {
   savedAt: '2026-06-12T00:00:00.000Z',
   source: 'custom',
   createdBy: 'admin-user',
+  hash: 'hash-custom',
   isActive: true,
+  label: 'Custom practice',
 };
 
 const FILES = new Map(
@@ -158,14 +176,24 @@ function validateRealtimePromptConfig(value) {
   }
   return {
     ok: true,
-    config: Object.fromEntries(required.map((key) => [key, value[key].trim()])),
+    config: {
+      ...Object.fromEntries(required.map((key) => [key, value[key].trim()])),
+      conditionCombinationPrompts: {
+        ...EMPTY_CONDITION_COMBINATION_PROMPTS,
+        ...(value.conditionCombinationPrompts ?? {}),
+      },
+    },
   };
 }
 
 function loadRealtimePromptRoute(options = {}) {
   const calls = {
+    activate: [],
+    delete: [],
     deactivate: 0,
+    list: 0,
     readActive: 0,
+    readVersion: [],
     savedConfigs: [],
   };
   const processMock = {
@@ -207,14 +235,39 @@ function loadRealtimePromptRoute(options = {}) {
       if (specifier === '@/lib/realtime-prompt-store') {
         return {
           RealtimePromptStoreError,
+          activateRealtimePromptVersion: async (versionId) => {
+            calls.activate.push(versionId);
+            return options.activeVersion ?? CUSTOM_VERSION;
+          },
           deactivateActiveRealtimePromptVersion: async () => {
             calls.deactivate += 1;
             if (options.deactivateError) throw options.deactivateError;
+          },
+          deleteRealtimePromptVersion: async (versionId) => {
+            calls.delete.push(versionId);
+            if (options.deleteError) throw options.deleteError;
+          },
+          listRealtimePromptVersions: async () => {
+            calls.list += 1;
+            return (
+              options.promptVersions ?? [
+                {
+                  id: CUSTOM_VERSION.promptId,
+                  label: CUSTOM_VERSION.label,
+                  createdAt: CUSTOM_VERSION.savedAt,
+                  hash: CUSTOM_VERSION.hash,
+                },
+              ]
+            );
           },
           readActiveRealtimePromptVersion: async () => {
             calls.readActive += 1;
             if (options.readActiveError) throw options.readActiveError;
             return options.activeVersion ?? null;
+          },
+          readRealtimePromptVersion: async (versionId) => {
+            calls.readVersion.push(versionId);
+            return options.readVersion ?? null;
           },
           saveRealtimePromptVersion: async (config, saveOptions) => {
             calls.savedConfigs.push({ config, options: saveOptions });
@@ -225,7 +278,9 @@ function loadRealtimePromptRoute(options = {}) {
               savedAt: '2026-06-12T00:00:00.000Z',
               source: 'custom',
               createdBy: saveOptions.createdBy,
+              hash: 'hash-custom',
               isActive: true,
+              label: saveOptions.label ?? 'Custom practice',
             };
           },
         };
@@ -268,6 +323,7 @@ function promptFields(value) {
     collaborativePrompt: value.collaborativePrompt,
     feedbackConditionId: value.feedbackConditionId,
     feedbackPrompt: value.feedbackPrompt,
+    conditionCombinationPrompts: value.conditionCombinationPrompts,
     taskCardId: value.taskCardId,
     taskCardPrompt: value.taskCardPrompt,
   };
@@ -322,7 +378,7 @@ test('POST saves a new active version with edited feedback and task card prompt 
   assert.deepEqual(plain(calls.savedConfigs), [
     {
       config: CUSTOM_PROMPT,
-      options: { createdBy: 'admin-user' },
+      options: { createdBy: 'admin-user', label: null },
     },
   ]);
 });
