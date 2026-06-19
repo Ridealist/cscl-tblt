@@ -6,10 +6,8 @@ DEPLOY_REF="${DEPLOY_REF:-origin/main}"
 REMOTE_NAME="${REMOTE_NAME:-origin}"
 BRANCH_NAME="${BRANCH_NAME:-main}"
 CLIENT_PROCESS_NAME="${CLIENT_PROCESS_NAME:-cscl-client}"
-AGENT_SERVICES=(
-  "${PIPELINE_AGENT_SERVICE:-cscl-agent-pipeline}"
-  "${REALTIME_AGENT_SERVICE:-cscl-agent-realtime}"
-)
+AGENT_SERVICES_VALUE="${AGENT_SERVICES:-${AGENT_SERVICE:-cscl-agent}}"
+read -r -a AGENT_SERVICES <<< "$AGENT_SERVICES_VALUE"
 # Runtime state files restored after checkout. In production, config.json and
 # prompt_config.json are retained only for local fallback/import/reference; the
 # Supabase source of truth is app_settings and realtime_prompt_versions.
