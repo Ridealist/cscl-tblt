@@ -96,7 +96,13 @@ function parseRealtimeRoomMetadata(metadata?: string): {
 }
 
 function isRealtimeRoomName(name: string) {
-  return name.startsWith('realtime-') || name.startsWith('eval-') || name.startsWith('task-');
+  return (
+    name.startsWith('realtime-') ||
+    name.startsWith('eval-') ||
+    name.startsWith('eval_') ||
+    name.startsWith('task-') ||
+    name.startsWith('task_')
+  );
 }
 
 async function getRoomCounts(svc: RoomServiceClient, roomName: string): Promise<RoomCounts> {
