@@ -25,7 +25,7 @@ class EgressRecorder:
         self.session_id = session_id
         self.egress_id: str | None = None
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self._filepath = f"recordings/{room_name}--{ts}.mp3"
+        self._filepath = f"recordings/{room_name}-{session_id}-{ts}.mp3"
 
     @property
     def filepath(self) -> str:
