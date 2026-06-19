@@ -496,266 +496,25 @@ pnpm prompts:check
 
 ## 프로덕션 배포 (AWS EC2)
 
-### 현재 배포 환경
+현재 production 기준값과 배포 절차는 `docs/operations/`를 따른다.
 
-| 항목                 | 값                                                 |
-| -------------------- | -------------------------------------------------- |
-| 서버                 | AWS EC2 `m5.large` (2 vCPU, 8GB RAM)               |
-| OS                   | Ubuntu 22.04 LTS                                   |
-| 도메인               | `tblt-agent.net` (AWS Route 53)                    |
-| 서버 IP              | `3.35.234.204`                                     |
-| 프로젝트 경로        | `/opt/cscl-tblt/`                                  |
-| Agent 프로세스 관리  | systemd (`cscl-agent.service`)                     |
-| Client 프로세스 관리 | PM2 (`cscl-client`)                                |
-| 리버스 프록시        | nginx + Let's Encrypt SSL                          |
-| 음성 녹음 저장소     | AWS S3 (`tblt-agent-recordings`, `ap-northeast-2`) |
+- [Production Environment](docs/operations/production-environment.md): 현재 EC2, 서비스명, 운영 모드, 외부 서비스 기준값
+- [Deployment Runbook](docs/operations/deployment-runbook.md): GitHub Actions 배포, 재시작, health check 절차
+- [Capacity Plan](docs/operations/capacity-plan.md): 평상시/실험일 인스턴스와 Realtime 동시 세션 기준
+- [Incident Checklist](docs/operations/incident-checklist.md): 장애 확인 순서와 주요 로그
 
-### 서버 디렉토리 구조
+요약:
 
-```
-/opt/cscl-tblt/
-├── .env                  # Agent 환경변수 (EnvironmentFile)
-├── config.json           # 로컬 fallback/import용 운영 설정
-├── logs/                 # 대화 로그 JSON (자동 생성)
-├── agent/                # Python Agent
-│   └── .venv/            # uv로 생성된 가상환경
-└── client/               # Next.js 클라이언트
-    └── .env.local        # Next.js 환경변수
-```
-
-> `logs/`는 agent 로컬 파일 출력이다. Realtime custom prompt는 Next.js admin/token 경로와 Python realtime agent 모두 Supabase `realtime_prompt_versions`를 사용한다. legacy `prompt_config.json`은 migration 참고용이며 runtime source로 사용하지 않는다.
-> 운영 설정은 Supabase `app_settings`를 사용하며, Supabase가 없는 로컬 개발 환경에서만 `config.json` fallback을 사용한다.
-
-기존 EC2 production 서버에 Supabase를 적용하는 절차는 [Production Supabase Runbook](docs/production-supabase-runbook.md)을 따른다.
-
----
-
-### 최초 서버 세팅 절차
-
-#### 1. 패키지 설치
-
-```bash
-sudo add-apt-repository ppa:deadsnakes/ppa -y
-sudo apt-get update && sudo apt-get upgrade -y
-sudo apt-get install -y python3.11 python3.11-venv python3-pip git nginx
-
-curl -LsSf https://astral.sh/uv/install.sh | sh
-source $HOME/.local/bin/env
-
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt-get install -y nodejs
-sudo npm install -g pnpm pm2
-```
-
-#### 2. 코드 업로드
-
-```bash
-# GitHub 사용 시
-cd /opt
-sudo git clone <repo_url> cscl-tblt
-sudo chown -R ubuntu:ubuntu cscl-tblt
-
-# 로컬에서 직접 전송 시 (로컬 터미널에서 실행)
-scp -i your-key.pem -r /path/to/CSCL_TBLT ubuntu@<서버_IP>:/opt/cscl-tblt
-```
-
-#### 3. 환경변수 설정
-
-**`/opt/cscl-tblt/.env`** (Agent용):
-
-```env
-LIVEKIT_URL=wss://cscl-t8duxbt1.livekit.cloud
-LIVEKIT_API_KEY=<값>
-LIVEKIT_API_SECRET=<값>
-OPENAI_API_KEY=<값>
-
-S3_BUCKET=tblt-agent-recordings
-S3_REGION=ap-northeast-2
-AWS_ACCESS_KEY=<값>
-AWS_SECRET_ACCESS_KEY=<값>
-S3_ENDPOINT=
-```
-
-**`/opt/cscl-tblt/client/.env.local`** (Next.js용):
-
-```env
-LIVEKIT_URL=wss://cscl-t8duxbt1.livekit.cloud
-LIVEKIT_API_KEY=<값>
-LIVEKIT_API_SECRET=<값>
-NEXT_PUBLIC_SUPABASE_URL=<Supabase Project URL>
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<Supabase publishable key>
-SUPABASE_SECRET_KEY=<Supabase secret key>
-STUDENT_SESSION_SECRET=<long random server-only secret>
-CONVERSATION_LOG_FILE_FALLBACK=false
-```
-
-Python realtime agent도 custom prompt version fetch를 위해 root **`/opt/cscl-tblt/.env`**에 Supabase URL과 secret을 읽을 수 있어야 한다. `NEXT_PUBLIC_SUPABASE_URL`/`SUPABASE_SECRET_KEY`를 같은 값으로 두거나, agent 전용으로 `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`를 둘 수 있다.
-
-> `S3_ENDPOINT`는 AWS S3 사용 시 반드시 비워두어야 합니다. 값을 넣으면 Egress 업로드 실패.
-> Cloudflare R2 등 S3 호환 스토리지 사용 시에만 `https://...` 형식으로 입력.
-
-#### 4. app_settings 초기값 확인
-
-```bash
-cp /opt/cscl-tblt/config.example.json /opt/cscl-tblt/config.json
-```
-
-`config.json`은 로컬 fallback 및 import 참고용이다. Production에서는 Supabase `app_settings(id = 'default')` row가 운영 설정의 source of truth다. 반/그룹 수와 수업 운영 모드 변경은 `https://tblt-agent.net/admin` 페이지에서 수행한다.
-
-#### 5. Turn Detector 모델 다운로드 (최초 1회 필수)
-
-```bash
-cd /opt/cscl-tblt/agent
-uv sync
-uv run python main.py download-files
-```
-
-> 이 단계를 건너뛰면 세션 시작 시 `languages.json not found` 에러로 Agent가 즉시 종료됩니다.
-
-#### 6. Agent systemd 서비스 등록
-
-```bash
-sudo tee /etc/systemd/system/cscl-agent-pipeline.service << 'EOF'
-[Unit]
-Description=CSCL TBLT Pipeline Agent
-After=network.target
-
-[Service]
-User=ubuntu
-WorkingDirectory=/opt/cscl-tblt/agent
-ExecStart=/home/ubuntu/.local/bin/uv run python main.py start
-Restart=always
-RestartSec=5
-EnvironmentFile=/opt/cscl-tblt/.env
-Environment=AGENT_WORKER_MODE=pipeline
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo tee /etc/systemd/system/cscl-agent-realtime.service << 'EOF'
-[Unit]
-Description=CSCL TBLT Realtime Agent
-After=network.target
-
-[Service]
-User=ubuntu
-WorkingDirectory=/opt/cscl-tblt/agent
-ExecStart=/home/ubuntu/.local/bin/uv run python main.py start
-Restart=always
-RestartSec=5
-EnvironmentFile=/opt/cscl-tblt/.env
-Environment=AGENT_WORKER_MODE=realtime
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable cscl-agent-pipeline cscl-agent-realtime
-sudo systemctl start cscl-agent-pipeline cscl-agent-realtime
-```
-
-상태 확인:
-
-```bash
-sudo systemctl status cscl-agent-pipeline
-sudo systemctl status cscl-agent-realtime
-```
-
-로그 확인:
-
-```bash
-sudo journalctl -u cscl-agent-pipeline -f
-sudo journalctl -u cscl-agent-realtime -f
-```
-
-#### 7. Client 빌드 및 PM2 실행
-
-```bash
-cd /opt/cscl-tblt/client
-pnpm install
-pnpm build
-pm2 start "pnpm start" --name cscl-client --cwd /opt/cscl-tblt/client
-pm2 save
-pm2 startup  # 출력된 명령어를 복사해서 실행
-```
-
-#### 8. nginx + SSL 설정
-
-```bash
-# Let's Encrypt 인증서 발급 (도메인 DNS A 레코드가 서버 IP를 가리키고 있어야 함)
-sudo apt-get install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d tblt-agent.net
-
-# nginx 설정 (certbot 실행 후 수동으로 확인/교체)
-sudo tee /etc/nginx/sites-available/cscl << 'EOF'
-server {
-    listen 80;
-    server_name tblt-agent.net;
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl;
-    server_name tblt-agent.net;
-
-    ssl_certificate /etc/letsencrypt/live/tblt-agent.net/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/tblt-agent.net/privkey.pem;
-
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
-EOF
-
-sudo ln -s /etc/nginx/sites-available/cscl /etc/nginx/sites-enabled/
-sudo rm -f /etc/nginx/sites-enabled/default   # 기본 페이지 비활성화
-sudo nginx -t && sudo systemctl restart nginx
-```
-
-> EC2 보안 그룹 인바운드 규칙에 포트 80(HTTP), 443(HTTPS), 22(SSH)가 열려있어야 합니다.
-
----
-
-### 코드 업데이트 배포 절차
-
-```bash
-cd /opt/cscl-tblt
-
-# 코드 pull (GitHub 사용 시)
-git pull
-
-# Agent 의존성이 바뀐 경우 반영
-cd agent
-uv sync
-
-# Agent 재시작
-sudo systemctl restart cscl-agent-pipeline cscl-agent-realtime
-
-  ## 정상 재시작 확인 (에러 없이 "active (running)" 이어야 함)
-  sudo systemctl status cscl-agent-pipeline
-  sudo systemctl status cscl-agent-realtime
-
-# Client 재빌드 및 재시작
-cd /opt/cscl-tblt/client
-pnpm install
-pnpm build # 빌드 완료까지 1~2분 소요
-pm2 restart cscl-client
-
-  ## 빌드 중 오류가 나면:
-  # 빌드 로그 확인
-  pnpm build 2>&1 | tail -30
-
-  # 재시작 후 PM2 로그 확인
-  pm2 logs cscl-client --lines 30
-
-```
+| 항목 | 현재 기준 |
+|---|---|
+| Production domain | `https://tblt-agent.net/` |
+| App path | `/opt/cscl-tblt` |
+| Client | PM2 `cscl-client`, port `3000` |
+| Agent | systemd `cscl-agent.service` |
+| Operation mode source of truth | Supabase `app_settings` |
+| Current production mode | `realtime` |
+| Deploy script | `scripts/deploy-production.sh` |
+| Health check | `https://tblt-agent.net/api/health` |
 
 ---
 
@@ -784,7 +543,7 @@ Production 배포는 GitHub Actions가 SSH로 EC2에 접속해 `scripts/deploy-p
 서버 조건:
 
 - `/opt/cscl-tblt`가 Git checkout이어야 한다.
-- 배포 사용자가 `systemctl restart/is-active cscl-agent-pipeline cscl-agent-realtime`를 password 없이 실행할 수 있어야 한다.
+- 배포 사용자가 `systemctl restart/is-active cscl-agent`를 password 없이 실행할 수 있어야 한다.
 - `pnpm`, `uv`, `pm2`, `curl`이 설치되어 있어야 한다.
 - 서버의 `.env`, `client/.env.local`, `config.json`, `prompt_config.json`은 배포 중 백업 후 복원된다.
 - `config.json`은 git 추적 대상이 아니며, Supabase가 없는 로컬 fallback/import 용도로만 사용한다.
@@ -794,8 +553,7 @@ Production 배포는 GitHub Actions가 SSH로 EC2에 접속해 `scripts/deploy-p
 
 배포 후 health check:
 
-- `cscl-agent-pipeline` active 확인
-- `cscl-agent-realtime` active 확인
+- `cscl-agent` active 확인
 - `cscl-client` PM2 process 확인 및 재시작
 - `http://localhost:3000/api/health` 응답 확인
 
@@ -807,10 +565,8 @@ Production 배포는 GitHub Actions가 SSH로 EC2에 접속해 `scripts/deploy-p
 
 ```bash
 # Agent 상태
-sudo systemctl status cscl-agent-pipeline
-sudo systemctl status cscl-agent-realtime
-sudo journalctl -u cscl-agent-pipeline --no-pager | tail -30
-sudo journalctl -u cscl-agent-realtime --no-pager | tail -30
+sudo systemctl status cscl-agent
+sudo journalctl -u cscl-agent --no-pager | tail -30
 
 # Client 상태
 pm2 list
@@ -857,5 +613,5 @@ sudo nginx -t
 - 그룹 대화 모드 STT/LLM/TTS: LiveKit Cloud inference에서 처리
 - 개별 대화 모드: 학생 1명당 realtime Agent 세션 1개
 - 개별 대화 모드에는 OpenAI Realtime 사용량과 동시 세션 한도 확인 필요
-- `m5.large` (8GB RAM)으로 15세션 안정 운영 확인
-- t3 계열은 지속 부하 시 CPU 크레딧 소진으로 스로틀링 발생 — 비권장
+- 현재 production 기준은 [Capacity Plan](docs/operations/capacity-plan.md)을 따른다.
+- t3 계열은 지속 고부하 수업 운영 시 CPU 크레딧 소진으로 스로틀링될 수 있다.
