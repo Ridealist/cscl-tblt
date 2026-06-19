@@ -845,8 +845,105 @@ sudo nginx -t
 - **종료**: 룸 `disconnected` 이벤트 발생 시 자동 종료
 - **관련 코드**: `agent/egress_recorder.py`
 
+### 음성 녹음 (Egress) 다운로드 방법
+
+- **로컬 다운로드**: `scripts/download_s3_recordings.sh [output_dir]`
+- **날짜 필터**: `SINCE_YYYYMMDD=20260701 scripts/download_s3_recordings.sh [output_dir]`
+- **삭제 dry run**: `BEFORE_YYYYMMDD=20260601 scripts/delete_s3_recordings.sh`
+- **실제 삭제**: `BEFORE_YYYYMMDD=20260601 APPLY=true scripts/delete_s3_recordings.sh`
+- **LastModified 기준 삭제**: `BEFORE_LAST_MODIFIED=2026-06-01T00:00:00Z scripts/delete_s3_recordings.sh`
+
 > Egress는 LiveKit Cloud 인프라에서 실행되므로 서버 부하 없음.
 > 단, S3 버킷 및 IAM 권한(`s3:PutObject`) 설정이 되어 있어야 함.
+
+#### 로컬 다운로드/삭제 스크립트 사용법
+
+S3에 저장된 녹음 파일을 로컬로 받거나 정리할 때는 아래 스크립트를 사용한다.
+
+사전 조건:
+
+- 로컬에 AWS CLI(`aws`)가 설치되어 있어야 한다.
+- `.env` 또는 지정한 `ENV_FILE`에 최소한 다음 값이 있어야 한다.
+  - `S3_BUCKET`
+  - `S3_REGION`
+  - `AWS_ACCESS_KEY` 또는 `AWS_ACCESS_KEY_ID`
+  - `AWS_SECRET_ACCESS_KEY`
+- AWS IAM 권한:
+  - 다운로드: `s3:ListBucket`, `s3:GetObject`
+  - 삭제: `s3:ListBucket`, `s3:DeleteObject`
+
+스크립트는 기본적으로 프로젝트 루트의 `.env`를 읽는다. 운영 서버의 값을 쓰고 싶으면 `ENV_FILE=/opt/cscl-tblt/.env`처럼 지정하면 된다.
+
+#### `scripts/download_s3_recordings.sh`
+
+전체 녹음 파일을 로컬 디렉터리로 다운로드한다.
+
+```bash
+scripts/download_s3_recordings.sh
+```
+
+기본 다운로드 경로는 `./downloads/recordings`이다. 다른 경로로 받고 싶으면 첫 번째 인자로 넘긴다.
+
+```bash
+scripts/download_s3_recordings.sh ./tmp/recordings
+```
+
+파일명에 포함된 날짜 기준으로 특정 시점 이후만 받고 싶으면 `SINCE_YYYYMMDD`를 사용한다. 형식은 반드시 `YYYYMMDD`다.
+
+```bash
+SINCE_YYYYMMDD=20260701 scripts/download_s3_recordings.sh
+SINCE_YYYYMMDD=20260601 scripts/download_s3_recordings.sh ./tmp/recordings
+```
+
+이 필터는 S3 `LastModified`가 아니라 파일명 규칙 `recordings/{룸명}--YYYYMMDD_HHMMSS.mp3`의 날짜 부분을 기준으로 동작한다.
+
+사용 가능한 환경변수:
+
+- `ENV_FILE`: 읽어올 env 파일 경로
+- `S3_PREFIX`: 기본값 `recordings`
+- `SINCE_YYYYMMDD`: 해당 날짜 이상인 파일만 다운로드
+- `S3_ENDPOINT`: Cloudflare R2, MinIO 같은 S3 호환 스토리지용 endpoint
+
+#### `scripts/delete_s3_recordings.sh`
+
+S3 객체 삭제는 실수 비용이 크므로 기본값이 dry run이다. `APPLY=true`를 주지 않으면 실제 삭제하지 않고 삭제 대상만 출력한다.
+
+파일명 날짜 기준으로 특정 날짜 이전 파일을 확인:
+
+```bash
+BEFORE_YYYYMMDD=20260601 scripts/delete_s3_recordings.sh
+```
+
+파일명 날짜 기준으로 실제 삭제:
+
+```bash
+BEFORE_YYYYMMDD=20260601 APPLY=true scripts/delete_s3_recordings.sh
+```
+
+S3 객체의 `LastModified` 기준으로 특정 시각 이전 파일을 확인:
+
+```bash
+BEFORE_LAST_MODIFIED=2026-06-01T00:00:00Z scripts/delete_s3_recordings.sh
+```
+
+`LastModified` 기준 실제 삭제:
+
+```bash
+BEFORE_LAST_MODIFIED=2026-06-01T00:00:00Z APPLY=true scripts/delete_s3_recordings.sh
+```
+
+주의사항:
+
+- `BEFORE_YYYYMMDD`와 `BEFORE_LAST_MODIFIED`는 동시에 설정할 수 없다.
+- `BEFORE_YYYYMMDD` 형식은 `YYYYMMDD`다.
+- `BEFORE_LAST_MODIFIED` 형식은 UTC ISO-8601이어야 한다. 예: `2026-06-01T00:00:00Z`
+- 실제 삭제 전에 dry run 출력이 의도한 대상과 맞는지 먼저 확인하는 것이 좋다.
+
+운영 서버 env를 직접 써서 삭제 대상을 확인하려면:
+
+```bash
+ENV_FILE=/opt/cscl-tblt/.env BEFORE_YYYYMMDD=20260601 scripts/delete_s3_recordings.sh
+```
 
 ---
 
