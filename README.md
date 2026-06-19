@@ -596,7 +596,7 @@ sudo nginx -t
 
 세션 시작 시 자동으로 LiveKit Egress API가 호출되어 모든 참가자(학생 + AI) 음성이 혼합된 MP3 파일이 S3에 저장됩니다.
 
-- **저장 경로**: `s3://tblt-agent-recordings/recordings/{룸명}--{타임스탬프}.mp3`
+- **저장 경로**: `s3://tblt-agent-recordings/recordings/{룸명}-{LiveKit room SID}-{타임스탬프}.mp3`
 - **트리거**: `session.start()` 직후 자동 시작
 - **종료**: 룸 `disconnected` 이벤트 발생 시 자동 종료
 - **관련 코드**: `agent/egress_recorder.py`
@@ -651,7 +651,7 @@ SINCE_YYYYMMDD=20260701 scripts/download_s3_recordings.sh
 SINCE_YYYYMMDD=20260601 scripts/download_s3_recordings.sh ./tmp/recordings
 ```
 
-이 필터는 S3 `LastModified`가 아니라 파일명 규칙 `recordings/{룸명}--YYYYMMDD_HHMMSS.mp3`의 날짜 부분을 기준으로 동작한다.
+이 필터는 S3 `LastModified`가 아니라 파일명 규칙 `recordings/{룸명}-{LiveKit room SID}-YYYYMMDD_HHMMSS.mp3`의 날짜 부분을 기준으로 동작한다.
 
 사용 가능한 환경변수:
 

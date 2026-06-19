@@ -12,7 +12,7 @@ usage() {
 Usage: scripts/delete_s3_recordings.sh
 
 Lists or deletes recording files from the configured S3 bucket/prefix based on
-the date embedded in the file name: recordings/{room}--YYYYMMDD_HHMMSS.mp3
+the date embedded in the file name: recordings/{room}-{livekit_room_id}-YYYYMMDD_HHMMSS.mp3
 
 Environment:
   ENV_FILE   Path to an env file to source before delete (default: ./.env)
@@ -116,7 +116,7 @@ list_matching_keys_by_filename_date() {
   "${list_cmd[@]}" | while read -r date time size key; do
     [[ -n "${key:-}" ]] || continue
 
-    if [[ "$key" =~ --([0-9]{8})_[0-9]{6}\.mp3$ ]] && [[ "${BASH_REMATCH[1]}" < "$cutoff" ]]; then
+    if [[ "$key" =~ -([0-9]{8})_[0-9]{6}\.mp3$ ]] && [[ "${BASH_REMATCH[1]}" < "$cutoff" ]]; then
       printf '%s\n' "$key"
     fi
   done
