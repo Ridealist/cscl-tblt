@@ -1,6 +1,11 @@
-# CSCL TBLT — 프로덕션 운영 가이드
+# CSCL TBLT — Legacy Pipeline Production Guide
 
-실제 교실 환경(수업) 배포를 기준으로 작성된 운영 문서.
+> Status: archived legacy reference.
+> 이 문서는 `pipeline` 구현 시절에 작성한 과거 production 운영 자료다. 15세션 부하 분석, Silero VAD 병목, `m5.xlarge` 선택 근거 등은 당시 `pipeline` 그룹 대화 운영을 설명하기 위한 기록이며, 현재 production 기준으로 사용하지 않는다.
+>
+> 현재 production 기준값은 [Production Environment](../operations/production-environment.md), 배포 절차는 [Deployment Runbook](../operations/deployment-runbook.md), 용량 기준은 [Capacity Plan](../operations/capacity-plan.md)을 따른다.
+
+과거 실제 교실 환경(수업) 배포를 기준으로 작성된 운영 문서.
 인프라 선택 근거, 부하 분석, 외부 서비스 제약, 알려진 이슈 및 해결책을 기록한다.
 
 ---
