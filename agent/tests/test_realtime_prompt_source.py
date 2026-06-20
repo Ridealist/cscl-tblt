@@ -24,14 +24,14 @@ def _write_feedback_source(source: Path) -> None:
         {
           "no_corrective": {
             "file": "no_corrective.md",
-            "marker": "# FEEDBACK CONDITION PROMPT: No Corrective Feedback"
+            "marker": "# FEEDBACK CONDITION PROMPT: No Feedback"
           }
         }
         """,
         encoding="utf-8",
     )
     (feedbacks / "no_corrective.md").write_text(
-        "# FEEDBACK CONDITION PROMPT: No Corrective Feedback\nno feedback",
+        "# FEEDBACK CONDITION PROMPT: No Feedback\nno feedback",
         encoding="utf-8",
     )
 
@@ -42,6 +42,9 @@ def test_prompt_sources_are_read_as_realtime_prompt_config() -> None:
     manifest = check_prompts.read_manifest(SOURCE_PATH)
     task_cards = check_prompts.read_task_card_manifest(SOURCE_PATH, manifest)
     task_card_id = manifest["defaultTaskCardId"]
+    condition_combinations = check_prompts.read_condition_combination_manifest(
+        SOURCE_PATH, manifest
+    )
 
     assert set(config["realtime"]) == {
         "basePrompt",
@@ -49,6 +52,7 @@ def test_prompt_sources_are_read_as_realtime_prompt_config() -> None:
         "collaborativePrompt",
         "feedbackConditionId",
         "feedbackPrompt",
+        "conditionCombinationPrompts",
         "taskCardId",
         "taskCardPrompt",
     }
@@ -60,6 +64,13 @@ def test_prompt_sources_are_read_as_realtime_prompt_config() -> None:
     assert config["realtime"]["taskCardPrompt"] == (
         task_cards[task_card_id]["base_path"] / task_cards[task_card_id]["file"]
     ).read_text(encoding="utf-8").strip()
+    assert set(config["realtime"]["conditionCombinationPrompts"]) == set(
+        check_prompts.CONDITION_COMBINATION_PROMPT_KEYS
+    )
+    for key, entry in condition_combinations.items():
+        assert config["realtime"]["conditionCombinationPrompts"][key] == (
+            entry["base_path"] / entry["file"]
+        ).read_text(encoding="utf-8").strip()
 
 
 def test_prompt_source_parser_splits_pasted_document_sections() -> None:
@@ -127,6 +138,7 @@ def test_prompt_folder_rejects_wrong_file_heading(tmp_path) -> None:
           },
           "feedbackConditionManifest": "feedbacks/manifest.json",
           "defaultFeedbackConditionId": "no_corrective",
+          "conditionCombinationManifest": "condition-combinations/manifest.json",
           "taskCardManifest": "task-cards/manifest.json",
           "defaultTaskCardId": "example"
         }
@@ -178,6 +190,7 @@ def test_prompt_folder_rejects_missing_file(tmp_path) -> None:
           },
           "feedbackConditionManifest": "feedbacks/manifest.json",
           "defaultFeedbackConditionId": "no_corrective",
+          "conditionCombinationManifest": "condition-combinations/manifest.json",
           "taskCardManifest": "task-cards/manifest.json",
           "defaultTaskCardId": "example"
         }

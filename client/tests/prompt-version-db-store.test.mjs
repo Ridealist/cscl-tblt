@@ -17,9 +17,9 @@ const PRACTICE_ROW = {
   feedback_condition_id: 'no_corrective',
   feedback_prompt: 'Feedback prompt',
   condition_combination_prompts: {
-    dominant_no_corrective: 'Dominant no corrective prompt',
+    dominant_no_feedback: 'Dominant no feedback prompt',
     dominant_explicit_correction: 'Dominant explicit correction prompt',
-    collaborative_no_corrective: 'Collaborative no corrective prompt',
+    collaborative_no_feedback: 'Collaborative no feedback prompt',
     collaborative_explicit_correction: 'Collaborative explicit correction prompt',
   },
   task_card_id: 'school_event_invitation',
@@ -33,9 +33,9 @@ const PRACTICE_ROW = {
 };
 
 const EMPTY_CONDITION_COMBINATION_PROMPTS = {
-  dominant_no_corrective: '',
+  dominant_no_feedback: '',
   dominant_explicit_correction: '',
-  collaborative_no_corrective: '',
+  collaborative_no_feedback: '',
   collaborative_explicit_correction: '',
 };
 
@@ -110,9 +110,19 @@ function validateRealtimePromptConfig(value) {
 }
 
 function normalizeConditionCombinationPrompts(value) {
+  const source = value && typeof value === 'object' ? value : {};
   return {
     ...EMPTY_CONDITION_COMBINATION_PROMPTS,
-    ...(value && typeof value === 'object' ? value : {}),
+    dominant_no_feedback:
+      typeof source.dominant_no_feedback === 'string'
+        ? source.dominant_no_feedback
+        : (source.dominant_no_corrective ?? ''),
+    dominant_explicit_correction: source.dominant_explicit_correction ?? '',
+    collaborative_no_feedback:
+      typeof source.collaborative_no_feedback === 'string'
+        ? source.collaborative_no_feedback
+        : (source.collaborative_no_corrective ?? ''),
+    collaborative_explicit_correction: source.collaborative_explicit_correction ?? '',
   };
 }
 

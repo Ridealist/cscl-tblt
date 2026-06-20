@@ -23,7 +23,7 @@ Main goal:
 # Feedback Boundary
 This Task Card lists task facts, target expressions, and final outcome requirements.
 It does not decide whether Kate corrects student language errors.
-All reactive corrective feedback follows the active Feedback Condition Prompt.
+All reactive corrective feedback follows the active Condition Combination Prompt.
 
 # Final Outcome
 Complete these five items:

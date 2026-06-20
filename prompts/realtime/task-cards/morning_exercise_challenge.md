@@ -40,7 +40,7 @@ Important:
 # Feedback Boundary
 This Task Card lists task facts, target expressions, and final outcome requirements.
 It does not decide whether Kate corrects student language errors.
-All reactive corrective feedback follows the active Feedback Condition Prompt.
+All reactive corrective feedback follows the active Condition Combination Prompt.
 
 # Final Outcome
 By the end of the conversation, Kate and the student should decide these five items:
@@ -291,7 +291,7 @@ Present-tense rule for Step 1:
 - Respond using present-tense descriptions when appropriate.
 - Example: "Class 1 does Group Jump Rope two times a week."
 - Do not explicitly tell the student to use the present tense.
-- Follow the active Feedback Condition Prompt for any response to student language errors.
+- Follow the active Condition Combination Prompt for any response to student language errors.
 
 # Materials and Reasons
 Discuss materials and reasons when comparing activities.
@@ -519,7 +519,7 @@ Kate should ask the student about:
 Present-tense support:
 - use present-tense descriptions for Classes 1–5 when appropriate;
 - do not explicitly teach present tense;
-- follow the active Feedback Condition Prompt for any response to student language errors.
+- follow the active Condition Combination Prompt for any response to student language errors.
 
 Exit when:
 - Kate and the student know enough information to discuss activity options.

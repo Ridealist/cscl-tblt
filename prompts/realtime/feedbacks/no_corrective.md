@@ -1,7 +1,7 @@
-# FEEDBACK CONDITION PROMPT: No Corrective Feedback
+# FEEDBACK CONDITION PROMPT: No Feedback
 
 # Active Feedback Condition
-- NO CORRECTIVE FEEDBACK
+- NO FEEDBACK
 
 This prompt controls Kate's response to student language errors.
 It does not change Kate's task role, task facts, safety rules, or interactional style.

@@ -38,17 +38,28 @@ const DEFAULT_REALTIME_PROMPT_METADATA = {
 };
 
 const EMPTY_CONDITION_COMBINATION_PROMPTS = {
-  dominant_no_corrective: '',
+  dominant_no_feedback: '',
   dominant_explicit_correction: '',
-  collaborative_no_corrective: '',
+  collaborative_no_feedback: '',
   collaborative_explicit_correction: '',
 };
 
 const CUSTOM_CONDITION_COMBINATION_PROMPTS = {
-  dominant_no_corrective: 'Dominant no corrective condition prompt.',
+  dominant_no_feedback: 'Dominant no feedback condition prompt.',
   dominant_explicit_correction: 'Dominant explicit correction condition prompt.',
-  collaborative_no_corrective: 'Collaborative no corrective condition prompt.',
+  collaborative_no_feedback: 'Collaborative no feedback condition prompt.',
   collaborative_explicit_correction: 'Collaborative explicit correction condition prompt.',
+};
+
+const DEFAULT_CONDITION_COMBINATION_PROMPTS = {
+  dominant_no_feedback:
+    '# CONDITION COMBINATION PROMPT: Dominant + No Feedback\nDefault dominant no-feedback condition prompt.',
+  dominant_explicit_correction:
+    '# CONDITION COMBINATION PROMPT: Dominant + Explicit Correction\nDefault dominant explicit condition prompt.',
+  collaborative_no_feedback:
+    '# CONDITION COMBINATION PROMPT: Collaborative + No Feedback\nDefault collaborative no-feedback condition prompt.',
+  collaborative_explicit_correction:
+    '# CONDITION COMBINATION PROMPT: Collaborative + Explicit Correction\nDefault collaborative explicit condition prompt.',
 };
 
 const DEFAULT_PROMPT = {
@@ -57,7 +68,7 @@ const DEFAULT_PROMPT = {
   collaborativePrompt: '# INTERLOCUTOR ROLE PROMPT: Collaborative\nDefault collaborative prompt',
   feedbackConditionId: 'explicit_correction',
   feedbackPrompt: '# FEEDBACK CONDITION: Explicit Correction\nDefault explicit feedback',
-  conditionCombinationPrompts: EMPTY_CONDITION_COMBINATION_PROMPTS,
+  conditionCombinationPrompts: DEFAULT_CONDITION_COMBINATION_PROMPTS,
   taskCardId: 'school_event_invitation',
   taskCardPrompt: '# TASK CARD: School Event Invitation\nDefault task card',
 };
@@ -98,6 +109,7 @@ const FILES = new Map(
       },
       feedbackConditionManifest: 'feedbacks/manifest.json',
       defaultFeedbackConditionId: 'no_corrective',
+      conditionCombinationManifest: 'condition-combinations/manifest.json',
       taskCardManifest: 'task-cards/manifest.json',
       defaultTaskCardId: 'school_event_invitation',
     }),
@@ -107,8 +119,8 @@ const FILES = new Map(
     '/repo/prompts/realtime/feedbacks/manifest.json': JSON.stringify({
       no_corrective: {
         file: 'no_corrective.md',
-        title: 'No Corrective Feedback',
-        marker: '# FEEDBACK CONDITION: No Corrective Feedback',
+        title: 'No Feedback',
+        marker: '# FEEDBACK CONDITION: No Feedback',
       },
       explicit_correction: {
         file: 'explicit_correction.md',
@@ -117,8 +129,38 @@ const FILES = new Map(
       },
     }),
     '/repo/prompts/realtime/feedbacks/no_corrective.md':
-      '# FEEDBACK CONDITION: No Corrective Feedback\nDefault no-corrective feedback',
+      '# FEEDBACK CONDITION: No Feedback\nDefault no-feedback feedback',
     '/repo/prompts/realtime/feedbacks/explicit_correction.md': DEFAULT_PROMPT.feedbackPrompt,
+    '/repo/prompts/realtime/condition-combinations/manifest.json': JSON.stringify({
+      dominant_no_feedback: {
+        file: 'dominant_no_feedback.md',
+        title: 'Dominant - No Feedback',
+        marker: '# CONDITION COMBINATION PROMPT: Dominant + No Feedback',
+      },
+      dominant_explicit_correction: {
+        file: 'dominant_explicit_correction.md',
+        title: 'Dominant - Explicit Correction',
+        marker: '# CONDITION COMBINATION PROMPT: Dominant + Explicit Correction',
+      },
+      collaborative_no_feedback: {
+        file: 'collaborative_no_feedback.md',
+        title: 'Collaborative - No Feedback',
+        marker: '# CONDITION COMBINATION PROMPT: Collaborative + No Feedback',
+      },
+      collaborative_explicit_correction: {
+        file: 'collaborative_explicit_correction.md',
+        title: 'Collaborative - Explicit Correction',
+        marker: '# CONDITION COMBINATION PROMPT: Collaborative + Explicit Correction',
+      },
+    }),
+    '/repo/prompts/realtime/condition-combinations/dominant_no_feedback.md':
+      DEFAULT_CONDITION_COMBINATION_PROMPTS.dominant_no_feedback,
+    '/repo/prompts/realtime/condition-combinations/dominant_explicit_correction.md':
+      DEFAULT_CONDITION_COMBINATION_PROMPTS.dominant_explicit_correction,
+    '/repo/prompts/realtime/condition-combinations/collaborative_no_feedback.md':
+      DEFAULT_CONDITION_COMBINATION_PROMPTS.collaborative_no_feedback,
+    '/repo/prompts/realtime/condition-combinations/collaborative_explicit_correction.md':
+      DEFAULT_CONDITION_COMBINATION_PROMPTS.collaborative_explicit_correction,
     '/repo/prompts/realtime/task-cards/manifest.json': JSON.stringify({
       school_event_invitation: {
         file: 'school_event_invitation.md',
@@ -227,6 +269,7 @@ function loadRealtimePromptRoute(options = {}) {
 
       if (specifier === '@/lib/realtime-prompt-config') {
         return {
+          CONDITION_COMBINATION_PROMPT_KEYS: Object.keys(EMPTY_CONDITION_COMBINATION_PROMPTS),
           DEFAULT_REALTIME_PROMPT_METADATA,
           validateRealtimePromptConfig,
         };
@@ -367,7 +410,7 @@ test('GET returns tracked markdown defaults when no active prompt version exists
   );
 });
 
-test('POST saves a new active version with edited feedback and task card prompt snapshots', async () => {
+test('POST saves a new active version with edited condition-combination and task card prompt snapshots', async () => {
   const { POST, calls } = loadRealtimePromptRoute();
 
   const response = await POST(postRequest(CUSTOM_PROMPT));

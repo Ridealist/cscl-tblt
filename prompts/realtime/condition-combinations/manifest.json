@@ -1,0 +1,22 @@
+{
+  "dominant_no_feedback": {
+    "file": "dominant_no_feedback.md",
+    "title": "Dominant - No Feedback",
+    "marker": "# CONDITION COMBINATION PROMPT: Dominant + No Feedback"
+  },
+  "dominant_explicit_correction": {
+    "file": "dominant_explicit_correction.md",
+    "title": "Dominant - Explicit Correction",
+    "marker": "# CONDITION COMBINATION PROMPT: Dominant + Explicit Correction"
+  },
+  "collaborative_no_feedback": {
+    "file": "collaborative_no_feedback.md",
+    "title": "Collaborative - No Feedback",
+    "marker": "# CONDITION COMBINATION PROMPT: Collaborative + No Feedback"
+  },
+  "collaborative_explicit_correction": {
+    "file": "collaborative_explicit_correction.md",
+    "title": "Collaborative - Explicit Correction",
+    "marker": "# CONDITION COMBINATION PROMPT: Collaborative + Explicit Correction"
+  }
+}

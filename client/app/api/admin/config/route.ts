@@ -14,7 +14,7 @@ interface FeedbackConditionOption {
 
 function fallbackFeedbackConditions(): FeedbackConditionOption[] {
   return [
-    { id: 'no_corrective', title: 'No Corrective Feedback' },
+    { id: 'no_corrective', title: 'No Feedback' },
     { id: 'explicit_correction', title: 'Explicit Correction' },
   ];
 }
