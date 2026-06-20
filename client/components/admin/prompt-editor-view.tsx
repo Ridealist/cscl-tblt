@@ -5,7 +5,6 @@ import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type {
   ConditionCombinationPromptKey,
-  RealtimeFeedbackConditionSummary,
   RealtimePromptConfig,
   RealtimePromptState,
   RealtimePromptVersionSummary,
@@ -87,18 +86,6 @@ const PROMPT_GROUPS: PromptGroup[] = [
       },
     ],
   },
-  {
-    title: 'Feedback Condition Prompt',
-    description: '이 버전에 저장되는 feedback condition과 corrective feedback 규칙입니다.',
-    fields: [
-      {
-        key: 'feedbackPrompt',
-        title: 'Feedback Condition Prompt',
-        description: '학생 오류에 대한 피드백 제공 방식을 제어합니다.',
-        rows: 14,
-      },
-    ],
-  },
 ];
 
 const EMPTY_PROMPT: RealtimePromptConfig = {
@@ -114,20 +101,20 @@ const EMPTY_PROMPT: RealtimePromptConfig = {
 
 const CONDITION_COMBINATION_PROMPTS = [
   {
-    key: 'dominant_no_corrective',
-    title: 'Dominant - No Corrective Feedback',
+    key: 'dominant_no_feedback',
+    title: 'Dominant - No Feedback',
   },
   {
     key: 'dominant_explicit_correction',
-    title: 'Dominant - Explicit Corrective Feedback',
+    title: 'Dominant - Explicit Correction',
   },
   {
-    key: 'collaborative_no_corrective',
-    title: 'Collaborative - No Corrective Feedback',
+    key: 'collaborative_no_feedback',
+    title: 'Collaborative - No Feedback',
   },
   {
     key: 'collaborative_explicit_correction',
-    title: 'Collaborative - Explicit Corrective Feedback',
+    title: 'Collaborative - Explicit Correction',
   },
 ] as const satisfies Array<{ key: ConditionCombinationPromptKey; title: string }>;
 
@@ -726,9 +713,6 @@ function PracticePromptEditorView() {
   const [promptVersionId, setPromptVersionId] = useState<string | null>(null);
   const [promptVersionLabel, setPromptVersionLabel] = useState<string | null>(null);
   const [promptVersions, setPromptVersions] = useState<PromptVersionSummary[]>([]);
-  const [feedbackConditions, setFeedbackConditions] = useState<RealtimeFeedbackConditionSummary[]>(
-    []
-  );
   const [taskCards, setTaskCards] = useState<RealtimeTaskCardSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -749,26 +733,6 @@ function PracticePromptEditorView() {
       ),
     [prompt.conditionCombinationPrompts]
   );
-  const selectedFeedbackCondition = useMemo(
-    () =>
-      feedbackConditions.find((condition) => condition.id === prompt.feedbackConditionId) ?? null,
-    [feedbackConditions, prompt.feedbackConditionId]
-  );
-  const visiblePromptGroups = useMemo(
-    () =>
-      PROMPT_GROUPS.map((group) =>
-        group.title === 'Feedback Condition Prompt'
-          ? {
-              ...group,
-              description: selectedFeedbackCondition
-                ? `이 버전의 Feedback 조건 규칙입니다.`
-                : group.description,
-            }
-          : group
-      ),
-    [selectedFeedbackCondition]
-  );
-
   function formatPromptSavedAt(value: string | null) {
     return value ? new Date(value).toLocaleString('ko-KR') : '저장 이력 없음';
   }
@@ -777,13 +741,6 @@ function PracticePromptEditorView() {
     const next = promptConfigFromResponse(data);
     setPrompt(next);
     setSavedPrompt(next);
-    setFeedbackConditions(
-      data.feedbackConditions.map((condition) =>
-        condition.id === data.feedbackConditionId
-          ? { ...condition, prompt: data.feedbackPrompt }
-          : condition
-      )
-    );
     setTaskCards(data.taskCards);
     setUsingDefault(data.usingDefault);
     setPromptId(data.promptId);
@@ -949,7 +906,7 @@ function PracticePromptEditorView() {
         <div>
           <h3 className="text-foreground text-sm font-semibold">Condition Combination Prompt</h3>
           <p className="text-muted-foreground text-xs">
-            역할 조건과 피드백 조건 조합별 보조 프롬프트입니다.
+            역할 조건과 피드백 조건 조합별로 적용되는 corrective feedback 규칙입니다.
           </p>
         </div>
         <span className="text-muted-foreground shrink-0 font-mono text-xs">
@@ -1005,7 +962,7 @@ function PracticePromptEditorView() {
                 <div id={editorId} className="px-3 pb-3">
                   <textarea
                     value={promptText}
-                    rows={10}
+                    rows={14}
                     spellCheck={false}
                     onChange={(e) => {
                       const nextPrompt = e.target.value;
@@ -1121,15 +1078,12 @@ function PracticePromptEditorView() {
             </div>
           </section>
 
-          {visiblePromptGroups.map((group) => {
+          {PROMPT_GROUPS.map((group) => {
             const singleField = group.fields.length === 1 ? group.fields[0] : null;
-            const characterCount =
-              group.title === 'Feedback Condition Prompt'
-                ? feedbackConditions.reduce(
-                    (total, condition) => total + condition.prompt.length,
-                    0
-                  )
-                : group.fields.reduce((total, field) => total + prompt[field.key].length, 0);
+            const characterCount = group.fields.reduce(
+              (total, field) => total + prompt[field.key].length,
+              0
+            );
 
             return (
               <section key={group.title} className="flex flex-col gap-3">
@@ -1142,50 +1096,7 @@ function PracticePromptEditorView() {
                     {characterCount.toLocaleString('ko-KR')}자
                   </span>
                 </div>
-                {group.title === 'Feedback Condition Prompt' ? (
-                  <div className="flex flex-col gap-4">
-                    {feedbackConditions.map((condition) => (
-                      <div
-                        key={condition.id}
-                        className="border-border flex flex-col gap-2 border-l pl-4"
-                      >
-                        <div className="flex items-end justify-between gap-3">
-                          <div>
-                            <h4 className="text-foreground text-xs font-semibold">
-                              {condition.title}
-                            </h4>
-                            <p className="text-muted-foreground font-mono text-xs">
-                              {condition.id}
-                            </p>
-                          </div>
-                          <span className="text-muted-foreground shrink-0 font-mono text-xs">
-                            {condition.prompt.length.toLocaleString('ko-KR')}자
-                          </span>
-                        </div>
-                        <textarea
-                          value={condition.prompt}
-                          rows={singleField?.rows ?? 14}
-                          spellCheck={false}
-                          onChange={(e) => {
-                            const nextPrompt = e.target.value;
-                            setFeedbackConditions((current) =>
-                              current.map((item) =>
-                                item.id === condition.id ? { ...item, prompt: nextPrompt } : item
-                              )
-                            );
-                            setPrompt((current) => ({
-                              ...current,
-                              feedbackConditionId: condition.id,
-                              feedbackPrompt: nextPrompt,
-                            }));
-                          }}
-                          className="border-input bg-background text-foreground focus:ring-primary min-h-32 w-full resize-y rounded-lg border px-3 py-2 font-mono text-xs leading-5 outline-none focus:ring-2 disabled:opacity-50"
-                          disabled={saving}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                ) : singleField ? (
+                {singleField ? (
                   renderPromptTextarea(singleField)
                 ) : (
                   <div className="flex flex-col gap-4">

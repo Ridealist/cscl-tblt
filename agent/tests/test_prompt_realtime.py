@@ -24,6 +24,15 @@ def _read_default_prompt_sources():
     config["feedbackPrompt"] = (
         source_dir / "feedbacks" / feedbacks[feedback_id]["file"]
     ).read_text(encoding="utf-8").strip()
+    condition_combinations = json.loads(
+        (source_dir / manifest["conditionCombinationManifest"]).read_text(encoding="utf-8")
+    )
+    config["conditionCombinationPrompts"] = {
+        key: (source_dir / "condition-combinations" / entry["file"])
+        .read_text(encoding="utf-8")
+        .strip()
+        for key, entry in condition_combinations.items()
+    }
     task_cards = json.loads(
         (source_dir / manifest["taskCardManifest"]).read_text(encoding="utf-8")
     )
@@ -37,10 +46,20 @@ def _read_default_prompt_sources():
 
 def _expected_prompt(config, role: str) -> str:
     role_key = f"{role}Prompt"
-    return (
-        f"{config['basePrompt']}\n\n{config[role_key]}\n\n"
-        f"{config['feedbackPrompt']}\n\n{config['taskCardPrompt']}"
+    feedback_suffix = (
+        "explicit_correction"
+        if config["feedbackConditionId"] == "explicit_correction"
+        else "no_feedback"
     )
+    condition_prompt = config.get("conditionCombinationPrompts", {}).get(
+        f"{role}_{feedback_suffix}",
+        "",
+    )
+    chunks = [config["basePrompt"], config[role_key]]
+    if condition_prompt:
+        chunks.append(condition_prompt)
+    chunks.append(config["taskCardPrompt"])
+    return "\n\n".join(chunks)
 
 
 def _prompt_version_row(
@@ -84,6 +103,7 @@ def _write_prompt_source(source_dir):
           },
           "feedbackConditionManifest": "feedbacks/manifest.json",
           "defaultFeedbackConditionId": "no_corrective",
+          "conditionCombinationManifest": "condition-combinations/manifest.json",
           "taskCardManifest": "task-cards/manifest.json",
           "defaultTaskCardId": "example"
         }
@@ -106,7 +126,7 @@ def _write_prompt_source(source_dir):
         {
           "no_corrective": {
             "file": "no_corrective.md",
-            "marker": "# FEEDBACK CONDITION PROMPT: No Corrective Feedback"
+            "marker": "# FEEDBACK CONDITION PROMPT: No Feedback"
           },
           "explicit_correction": {
             "file": "explicit_correction.md",
@@ -117,13 +137,63 @@ def _write_prompt_source(source_dir):
         encoding="utf-8",
     )
     (source_dir / "feedbacks" / "no_corrective.md").write_text(
-        "# FEEDBACK CONDITION PROMPT: No Corrective Feedback\nno feedback",
+        "# FEEDBACK CONDITION PROMPT: No Feedback\nno feedback",
         encoding="utf-8",
     )
     (source_dir / "feedbacks" / "explicit_correction.md").write_text(
         "# FEEDBACK CONDITION PROMPT: Explicit Correction\nexplicit feedback",
         encoding="utf-8",
     )
+    (source_dir / "condition-combinations").mkdir()
+    (source_dir / "condition-combinations" / "manifest.json").write_text(
+        """
+        {
+          "dominant_no_feedback": {
+            "file": "dominant_no_feedback.md",
+            "marker": "# CONDITION COMBINATION PROMPT: Dominant + No Feedback"
+          },
+          "dominant_explicit_correction": {
+            "file": "dominant_explicit_correction.md",
+            "marker": "# CONDITION COMBINATION PROMPT: Dominant + Explicit Correction"
+          },
+          "collaborative_no_feedback": {
+            "file": "collaborative_no_feedback.md",
+            "marker": "# CONDITION COMBINATION PROMPT: Collaborative + No Feedback"
+          },
+          "collaborative_explicit_correction": {
+            "file": "collaborative_explicit_correction.md",
+            "marker": "# CONDITION COMBINATION PROMPT: Collaborative + Explicit Correction"
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+    for filename, marker, body in (
+        (
+            "dominant_no_feedback.md",
+            "# CONDITION COMBINATION PROMPT: Dominant + No Feedback",
+            "dominant no feedback combo",
+        ),
+        (
+            "dominant_explicit_correction.md",
+            "# CONDITION COMBINATION PROMPT: Dominant + Explicit Correction",
+            "dominant explicit combo",
+        ),
+        (
+            "collaborative_no_feedback.md",
+            "# CONDITION COMBINATION PROMPT: Collaborative + No Feedback",
+            "collaborative no feedback combo",
+        ),
+        (
+            "collaborative_explicit_correction.md",
+            "# CONDITION COMBINATION PROMPT: Collaborative + Explicit Correction",
+            "collaborative explicit combo",
+        ),
+    ):
+        (source_dir / "condition-combinations" / filename).write_text(
+            f"{marker}\n{body}",
+            encoding="utf-8",
+        )
     (task_cards_dir / "manifest.json").write_text(
         """
         {
@@ -174,6 +244,29 @@ def test_realtime_prompt_adds_session_info_after_markdown_prompt(tmp_path, monke
     assert "Junbo" in prompt_with_name
 
 
+def test_realtime_prompt_stack_records_chunks_and_final_prompt() -> None:
+    source = prompt_realtime.load_prompt_source(feedback_condition_id="explicit_correction")
+    stack = prompt_realtime.build_prompt_stack_from_source(source, "Junbo", role="dominant")
+
+    assert stack["schema_version"] == 1
+    assert stack["mode"] == "realtime_practice"
+    assert stack["agent_role"] == "dominant"
+    assert stack["feedback_condition_id"] == "explicit_correction"
+    assert stack["condition_combination_key"] == "dominant_explicit_correction"
+    assert stack["task_card_id"] == source.task_card_id
+    assert stack["participant_name"] == "Junbo"
+    assert stack["stack_order"] == [
+        "base",
+        "role:dominant",
+        "condition_combination:dominant_explicit_correction",
+        f"task_card:{source.task_card_id}",
+    ]
+    assert [chunk["id"] for chunk in stack["chunks"]] == stack["stack_order"]
+    assert "# CONDITION COMBINATION PROMPT: Dominant + Explicit Correction" in stack["final_prompt"]
+    assert "# FEEDBACK CONDITION PROMPT:" not in stack["final_prompt"]
+    assert "Your friend's name is Junbo." in stack["final_prompt"]
+
+
 def test_realtime_prompt_defaults_live_only_in_markdown_sources() -> None:
     assert not hasattr(prompt_realtime, "BASE_PROMPT")
     assert not hasattr(prompt_realtime, "ROLE_PROMPTS")
@@ -206,6 +299,7 @@ def test_realtime_prompt_uses_supabase_prompt_version(monkeypatch) -> None:
         "collaborativePrompt": row["collaborative_prompt"],
         "feedbackConditionId": row["feedback_condition_id"],
         "feedbackPrompt": row["feedback_prompt"],
+        "conditionCombinationPrompts": row["condition_combination_prompts"],
         "taskCardId": row["task_card_id"],
         "taskCardPrompt": row["task_card_prompt"],
     }
@@ -252,9 +346,36 @@ def test_realtime_prompt_version_uses_task_card_snapshot_without_examples(
 
     assert prompt == (
         "Runtime base prompt.\n\nRuntime dominant role.\n\n"
-        "Runtime feedback condition.\n\n# TASK CARD: Runtime\nRuntime task card."
+        "# TASK CARD: Runtime\nRuntime task card."
     )
     assert "CONVERSATION EXAMPLE" not in prompt
+
+
+def test_realtime_prompt_version_removes_obsolete_conversation_example_stack_line(
+    monkeypatch,
+) -> None:
+    row = _prompt_version_row(
+        task_card_prompt="# TASK CARD: Runtime\nRuntime task card.",
+    )
+    row["base_prompt"] = (
+        "# BASE PROMPT: Runtime\n"
+        "# Prompt Stack\n"
+        "Use this prompt with:\n"
+        "1. ONE Interlocutor Role Prompt\n"
+        "2. ONE Condition Combination Prompt\n"
+        "3. ONE Task Card\n"
+        "4. ONE Conversation Example, when available"
+    )
+    monkeypatch.setattr(
+        prompt_realtime,
+        "_fetch_prompt_version_row",
+        lambda prompt_version_id: row,
+    )
+
+    prompt = build_prompt(role="dominant", prompt_version_id=row["id"])
+
+    assert "4. ONE Conversation Example, when available" not in prompt
+    assert "3. ONE Task Card" in prompt
 
 
 def test_realtime_prompt_version_inserts_selected_condition_combination_before_task_card(
@@ -263,9 +384,9 @@ def test_realtime_prompt_version_inserts_selected_condition_combination_before_t
     row = _prompt_version_row(
         task_card_prompt="# TASK CARD: Runtime\nRuntime task card.",
         condition_combination_prompts={
-            "dominant_no_corrective": "Dominant no corrective condition.",
+            "dominant_no_feedback": "Dominant no feedback condition.",
             "dominant_explicit_correction": "Dominant explicit condition.",
-            "collaborative_no_corrective": "Collaborative no corrective condition.",
+            "collaborative_no_feedback": "Collaborative no feedback condition.",
             "collaborative_explicit_correction": "Collaborative explicit condition.",
         },
     )
@@ -279,12 +400,11 @@ def test_realtime_prompt_version_inserts_selected_condition_combination_before_t
 
     assert prompt == (
         "Runtime base prompt.\n\nRuntime collaborative role.\n\n"
-        "Runtime feedback condition.\n\nCollaborative explicit condition.\n\n"
-        "# TASK CARD: Runtime\nRuntime task card."
+        "Collaborative explicit condition.\n\n# TASK CARD: Runtime\nRuntime task card."
     )
-    assert "Dominant no corrective condition." not in prompt
+    assert "Dominant no feedback condition." not in prompt
     assert "Dominant explicit condition." not in prompt
-    assert "Collaborative no corrective condition." not in prompt
+    assert "Collaborative no feedback condition." not in prompt
 
 
 def test_realtime_prompt_version_skips_empty_condition_combination_prompt(
@@ -306,7 +426,7 @@ def test_realtime_prompt_version_skips_empty_condition_combination_prompt(
 
     assert prompt == (
         "Runtime base prompt.\n\nRuntime collaborative role.\n\n"
-        "Runtime feedback condition.\n\n# TASK CARD: Runtime\nRuntime task card."
+        "# TASK CARD: Runtime\nRuntime task card."
     )
 
 
@@ -326,7 +446,7 @@ def test_realtime_prompt_version_runtime_feedback_condition_overrides_snapshot(
         feedback_condition_id="explicit_correction",
         task_card_prompt="# TASK CARD: Runtime\nRuntime task card.",
         condition_combination_prompts={
-            "dominant_no_corrective": "Dominant no corrective condition.",
+            "dominant_no_feedback": "Dominant no feedback condition.",
             "dominant_explicit_correction": "Dominant explicit condition.",
         },
     )
@@ -347,11 +467,34 @@ def test_realtime_prompt_version_runtime_feedback_condition_overrides_snapshot(
     )
 
     assert source.feedback_condition == "no_corrective"
-    assert "# FEEDBACK CONDITION PROMPT: No Corrective Feedback" in prompt
-    assert "Dominant no corrective condition." in prompt
+    assert "Dominant no feedback condition." in prompt
     assert "Dominant explicit condition." not in prompt
     assert "Runtime feedback condition." not in prompt
     assert "explicit feedback" not in prompt
+
+
+def test_realtime_prompt_version_reads_legacy_no_corrective_condition_combination_key(
+    monkeypatch,
+) -> None:
+    row = _prompt_version_row(
+        feedback_condition_id="no_corrective",
+        task_card_prompt="# TASK CARD: Runtime\nRuntime task card.",
+        condition_combination_prompts={
+            "dominant_no_corrective": "Legacy dominant no feedback condition.",
+        },
+    )
+    monkeypatch.setattr(
+        prompt_realtime,
+        "_fetch_prompt_version_row",
+        lambda prompt_version_id: row,
+    )
+
+    prompt = build_prompt(role="dominant", prompt_version_id=row["id"])
+
+    assert prompt == (
+        "Runtime base prompt.\n\nRuntime dominant role.\n\n"
+        "Legacy dominant no feedback condition.\n\n# TASK CARD: Runtime\nRuntime task card."
+    )
 
 
 def test_realtime_opening_comes_from_supabase_prompt_version(
@@ -378,8 +521,8 @@ def test_realtime_prompt_call_feedback_condition_overrides_default_selection(
         feedback_condition_id="explicit_correction",
     )
 
-    assert "# FEEDBACK CONDITION PROMPT: Explicit Correction" in prompt
-    assert "# FEEDBACK CONDITION PROMPT: No Corrective Feedback" not in prompt
+    assert "# CONDITION COMBINATION PROMPT: Dominant + Explicit Correction" in prompt
+    assert "# CONDITION COMBINATION PROMPT: Dominant + No Feedback" not in prompt
 
 
 def test_realtime_prompt_call_task_card_id_overrides_default_selection(
@@ -427,7 +570,7 @@ def test_realtime_prompt_uses_collaborative_prompt_from_supabase_version(
 
     assert build_prompt(role="passive", prompt_version_id=row["id"]) == (
         "Runtime base prompt.\n\nRuntime collaborative role.\n\n"
-        "Runtime feedback condition.\n\n# TASK CARD: Runtime\nRuntime task card."
+        "# TASK CARD: Runtime\nRuntime task card."
     )
 
 

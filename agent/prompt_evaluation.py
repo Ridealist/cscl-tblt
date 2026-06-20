@@ -237,6 +237,38 @@ def build_prompt_from_source(
     return prompt
 
 
+def build_prompt_stack_from_source(
+    source: ResolvedEvaluationPrompt,
+    participant_name: str | None = None,
+    role: str | None = None,
+) -> dict:
+    del role
+    name = participant_name.strip() if participant_name else ""
+    chunks = [
+        {
+            "id": f"evaluation_prompt:{source.evaluation_prompt_id}",
+            "title": f"Evaluation Prompt: {source.evaluation_prompt_id}",
+            "content": source.prompt,
+        }
+    ]
+
+    return {
+        "schema_version": 1,
+        "mode": "realtime_evaluation",
+        "source": source.source,
+        "prompt_version_id": source.prompt_version_id,
+        "saved_at": source.saved_at,
+        "evaluation_id": source.evaluation_id,
+        "evaluation_prompt_id": source.evaluation_prompt_id,
+        "evaluation_prompt_version": source.evaluation_prompt_version,
+        "evaluation_character": source.evaluation_character,
+        "participant_name": name or None,
+        "stack_order": [chunk["id"] for chunk in chunks],
+        "chunks": chunks,
+        "final_prompt": build_prompt_from_source(source, participant_name),
+    }
+
+
 def build_prompt(
     participant_name: str | None = None,
     evaluation_id: str | None = None,

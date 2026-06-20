@@ -14,11 +14,15 @@ const EVALUATION_MANIFEST_PATH = join(
   "manifest.json",
 );
 const CONDITION_COMBINATION_PROMPT_KEYS = [
-  "dominant_no_corrective",
+  "dominant_no_feedback",
   "dominant_explicit_correction",
-  "collaborative_no_corrective",
+  "collaborative_no_feedback",
   "collaborative_explicit_correction",
 ];
+const CONDITION_COMBINATION_PROMPT_ALIASES = {
+  dominant_no_feedback: ["dominant_no_corrective"],
+  collaborative_no_feedback: ["collaborative_no_corrective"],
+};
 
 function parseDotenv(text) {
   for (const rawLine of text.split(/\r?\n/)) {
@@ -67,10 +71,13 @@ function normalizeConditionCombinationPrompts(value) {
   const source =
     value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return Object.fromEntries(
-    CONDITION_COMBINATION_PROMPT_KEYS.map((key) => [
-      key,
-      typeof source[key] === "string" ? source[key].trim() : "",
-    ]),
+    CONDITION_COMBINATION_PROMPT_KEYS.map((key) => {
+      const candidates = [key, ...(CONDITION_COMBINATION_PROMPT_ALIASES[key] ?? [])];
+      const text = candidates
+        .map((candidate) => source[candidate])
+        .find((candidate) => typeof candidate === "string" && candidate.trim());
+      return [key, typeof text === "string" ? text.trim() : ""];
+    }),
   );
 }
 

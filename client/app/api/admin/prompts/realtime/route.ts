@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 import {
+  CONDITION_COMBINATION_PROMPT_KEYS,
   DEFAULT_REALTIME_PROMPT_METADATA,
   type RealtimeFeedbackConditionSummary,
   type RealtimePromptConfig,
@@ -30,6 +31,7 @@ const PROMPT_FIELDS = ['basePrompt', 'dominantPrompt', 'collaborativePrompt'] as
 type PromptManifest = Record<(typeof PROMPT_FIELDS)[number], { file: string; marker: string }> & {
   feedbackConditionManifest?: string;
   defaultFeedbackConditionId?: string;
+  conditionCombinationManifest?: string;
   taskCardManifest?: string;
   defaultTaskCardId?: string;
   taskCardPrompt?: { file: string; marker: string };
@@ -51,6 +53,10 @@ type TaskCardManifest = Record<
     level?: string;
     marker: string;
   }
+>;
+type ConditionCombinationManifest = Record<
+  string,
+  { file: string; title?: string; marker: string }
 >;
 type PromptDefaults = RealtimePromptConfig & {
   feedbackConditions: RealtimeFeedbackConditionSummary[];
@@ -122,11 +128,13 @@ async function readDefaultPromptConfigForTask(
     )
   );
   const feedbackCondition = await readFeedbackConditionConfig(manifest, feedbackConditionId);
+  const conditionCombinationPrompts = await readConditionCombinationPromptConfig(manifest);
   const taskCard = await readTaskCardConfig(manifest, taskCardId);
   const result = validateRealtimePromptConfig({
     ...config,
     feedbackConditionId: feedbackCondition.feedbackConditionId,
     feedbackPrompt: feedbackCondition.feedbackPrompt,
+    conditionCombinationPrompts,
     taskCardId: taskCard.taskCardId,
     taskCardPrompt: taskCard.taskCardPrompt,
   });
@@ -198,6 +206,38 @@ async function readFeedbackConditionConfig(
     feedbackPrompt,
     feedbackConditions,
   };
+}
+
+async function readConditionCombinationPromptConfig(
+  manifest: Partial<PromptManifest>
+): Promise<RealtimePromptConfig['conditionCombinationPrompts']> {
+  const manifestFile =
+    typeof manifest.conditionCombinationManifest === 'string' &&
+    manifest.conditionCombinationManifest
+      ? manifest.conditionCombinationManifest
+      : null;
+  if (!manifestFile) {
+    throw new Error('Condition combination prompt manifest가 설정되어 있지 않습니다.');
+  }
+
+  const conditionManifest = JSON.parse(
+    await readFile(join(DEFAULT_PROMPT_SOURCE_DIR, manifestFile), 'utf-8')
+  ) as ConditionCombinationManifest;
+  const basePath = join(DEFAULT_PROMPT_SOURCE_DIR, manifestFile, '..');
+  const entries = await Promise.all(
+    CONDITION_COMBINATION_PROMPT_KEYS.map(async (key) => {
+      const entry = conditionManifest[key];
+      if (!entry || typeof entry.file !== 'string' || typeof entry.marker !== 'string') {
+        throw new Error(`Condition combination prompt를 찾을 수 없습니다: ${key}`);
+      }
+      const prompt = (await readFile(join(basePath, entry.file), 'utf-8')).trim();
+      if (!prompt.startsWith(entry.marker)) {
+        throw new Error(`${entry.file} 파일은 ${entry.marker} 헤딩으로 시작해야 합니다.`);
+      }
+      return [key, prompt] as const;
+    })
+  );
+  return Object.fromEntries(entries) as RealtimePromptConfig['conditionCombinationPrompts'];
 }
 
 async function readTaskCardConfig(

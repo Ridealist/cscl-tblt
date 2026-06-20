@@ -69,6 +69,8 @@ interface SessionMetadata extends Record<string, unknown> {
   feedback_condition_id?: string;
   task_card_id?: string;
   prompt_id?: string;
+  prompt_stack?: unknown;
+  prompt_stack_error?: string;
   prompt_source?: string;
   prompt_version_id?: string;
   prompt_saved_at?: string;
@@ -79,6 +81,34 @@ interface SessionMetadata extends Record<string, unknown> {
   student_display_name?: string;
   student_name?: string;
   student_number?: string;
+}
+
+interface PromptStackChunk {
+  id?: string;
+  title?: string;
+  content?: string;
+}
+
+interface PromptStackMetadata extends Record<string, unknown> {
+  schema_version?: number;
+  mode?: string;
+  source?: string;
+  prompt_version_id?: string | null;
+  saved_at?: string | null;
+  agent_role?: string;
+  feedback_condition_id?: string | null;
+  feedback_condition_label?: string | null;
+  condition_combination_key?: string | null;
+  condition_combination_title?: string | null;
+  task_card_id?: string | null;
+  evaluation_id?: string;
+  evaluation_prompt_id?: string;
+  evaluation_prompt_version?: string | null;
+  evaluation_character?: string;
+  participant_name?: string | null;
+  stack_order?: string[];
+  chunks?: PromptStackChunk[];
+  final_prompt?: string;
 }
 
 interface LogData {
@@ -128,6 +158,55 @@ function promptLabel(metadata?: SessionMetadata) {
   if (metadata.prompt_source === 'default' || metadata.prompt_id === 'default')
     return 'Default prompt';
   return null;
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function textValue(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function formatFeedbackCondition(value: unknown) {
+  const id = textValue(value);
+  if (id === 'no_corrective') return 'No Feedback';
+  if (id === 'explicit_correction') return 'Explicit Correction';
+  return id;
+}
+
+function formatConditionCombination(value: unknown) {
+  const key = textValue(value);
+  if (!key) return null;
+  if (key === 'dominant_no_feedback') return 'Dominant + No Feedback';
+  if (key === 'dominant_no_corrective') return 'Dominant + No Feedback';
+  if (key === 'dominant_explicit_correction') return 'Dominant + Explicit Correction';
+  if (key === 'collaborative_no_feedback') return 'Collaborative + No Feedback';
+  if (key === 'collaborative_no_corrective') return 'Collaborative + No Feedback';
+  if (key === 'collaborative_explicit_correction') return 'Collaborative + Explicit Correction';
+  return key;
+}
+
+function promptStackChunkTitle(chunk: PromptStackChunk, index: number) {
+  const id = textValue(chunk.id);
+  if (id?.startsWith('condition_combination:')) {
+    const combination = formatConditionCombination(id.slice('condition_combination:'.length));
+    if (combination) return `Condition Combination Prompt: ${combination}`;
+  }
+  const title = textValue(chunk.title);
+  if (title?.includes('dominant_no_corrective')) {
+    return title.replace('dominant_no_corrective', 'dominant_no_feedback');
+  }
+  if (title?.includes('collaborative_no_corrective')) {
+    return title.replace('collaborative_no_corrective', 'collaborative_no_feedback');
+  }
+  return title ?? id ?? `Chunk ${index + 1}`;
+}
+
+function promptStackFromMetadata(metadata?: SessionMetadata): PromptStackMetadata | null {
+  const stack = objectValue(metadata?.prompt_stack);
+  return stack ? (stack as PromptStackMetadata) : null;
 }
 
 function useParticipantColors() {
@@ -368,9 +447,102 @@ function SessionList({ onSelect }: { onSelect: (s: SessionMeta) => void }) {
 
 // ─── 대화 뷰 ─────────────────────────────────────────────────────────────────
 
+function PromptStackPanel({
+  error,
+  expanded,
+  onToggle,
+  promptStack,
+}: {
+  error?: string;
+  expanded: boolean;
+  onToggle: () => void;
+  promptStack: PromptStackMetadata | null;
+}) {
+  const chunks = Array.isArray(promptStack?.chunks)
+    ? promptStack.chunks.filter((chunk) => objectValue(chunk))
+    : [];
+  const detailValues: Array<[string, unknown]> = [
+    ['Mode', promptStack?.mode],
+    ['Source', promptStack?.source],
+    ['Role', promptStack?.agent_role],
+    [
+      'Feedback',
+      promptStack?.feedback_condition_label ??
+        formatFeedbackCondition(promptStack?.feedback_condition_id),
+    ],
+    [
+      'Combination',
+      promptStack?.condition_combination_title ??
+        formatConditionCombination(promptStack?.condition_combination_key),
+    ],
+    ['Task', promptStack?.task_card_id],
+    ['Eval', promptStack?.evaluation_id],
+    ['Prompt', promptStack?.evaluation_prompt_id ?? promptStack?.prompt_version_id],
+    ['Participant', promptStack?.participant_name],
+  ];
+  const details = detailValues
+    .map(([label, value]) => [label, textValue(value)] as const)
+    .filter(([, value]) => value);
+
+  return (
+    <div className="mb-3 rounded-lg border bg-white dark:bg-neutral-950">
+      <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={expanded}
+          className="border-border hover:bg-muted rounded-md border px-2 py-1 text-xs font-semibold transition-colors"
+        >
+          {expanded ? 'Hide Prompt Stack' : 'Show Prompt Stack'}
+        </button>
+        {details.map(([label, value]) => (
+          <span key={label} className="bg-muted rounded px-2 py-0.5 text-xs font-semibold">
+            {label}: {value}
+          </span>
+        ))}
+        {error && (
+          <span className="text-destructive rounded bg-red-50 px-2 py-0.5 text-xs font-semibold dark:bg-red-950/40">
+            Error
+          </span>
+        )}
+      </div>
+      {expanded && (
+        <div className="space-y-3 p-3">
+          {error && (
+            <pre className="text-destructive max-h-40 overflow-auto rounded-md bg-red-50 p-3 font-mono text-xs break-words whitespace-pre-wrap dark:bg-red-950/40">
+              {error}
+            </pre>
+          )}
+          {chunks.map((chunk, index) => {
+            const title = promptStackChunkTitle(chunk, index);
+            const content = textValue(chunk.content) ?? '';
+            return (
+              <details key={chunk.id ?? `${title}-${index}`} open={index === 0}>
+                <summary className="cursor-pointer text-xs font-semibold">{title}</summary>
+                <pre className="bg-muted/50 mt-2 max-h-72 overflow-auto rounded-md p-3 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap">
+                  {content}
+                </pre>
+              </details>
+            );
+          })}
+          {promptStack?.final_prompt && (
+            <details open>
+              <summary className="cursor-pointer text-xs font-semibold">Final Prompt</summary>
+              <pre className="bg-muted/50 mt-2 max-h-96 overflow-auto rounded-md p-3 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap">
+                {promptStack.final_prompt}
+              </pre>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ConversationView({ session, onBack }: { session: SessionMeta; onBack: () => void }) {
   const [log, setLog] = useState<LogData | null>(null);
   const [connected, setConnected] = useState(false);
+  const [showPromptStack, setShowPromptStack] = useState(false);
   const getColor = useParticipantColors();
 
   useEffect(() => {
@@ -393,7 +565,13 @@ function ConversationView({ session, onBack }: { session: SessionMeta; onBack: (
     return () => es.close();
   }, [session.filename, session.id, session.source]);
 
+  useEffect(() => {
+    setShowPromptStack(false);
+  }, [session.filename, session.id]);
+
   const metadata = log?.metadata ?? session.metadata;
+  const promptStack = promptStackFromMetadata(metadata);
+  const promptStackError = metadata?.prompt_stack_error;
   const role = metadata?.agent_role ?? metadata?.agent_stance;
   const purpose = inferDashboardSessionPurpose({ metadata, room: session.room });
   const activityType = inferDashboardActivityType({ metadata, room: session.room });
@@ -432,7 +610,7 @@ function ConversationView({ session, onBack }: { session: SessionMeta; onBack: (
         )}
         {purpose !== 'evaluation' && metadata?.feedback_condition_id && (
           <span className="bg-muted rounded px-2 py-0.5 text-xs font-semibold">
-            {metadata.feedback_condition_id}
+            {formatFeedbackCondition(metadata.feedback_condition_id)}
           </span>
         )}
         {purpose !== 'evaluation' && promptLabel(metadata) && (
@@ -457,6 +635,14 @@ function ConversationView({ session, onBack }: { session: SessionMeta; onBack: (
           {connected ? '연결됨' : '연결 끊김'}
         </span>
       </div>
+      {(promptStack || promptStackError) && (
+        <PromptStackPanel
+          error={promptStackError}
+          expanded={showPromptStack}
+          onToggle={() => setShowPromptStack((value) => !value)}
+          promptStack={promptStack}
+        />
+      )}
       <div className="flex flex-1 overflow-hidden rounded-lg border">
         <Conversation className="flex-1">
           <ConversationContent className="gap-3">

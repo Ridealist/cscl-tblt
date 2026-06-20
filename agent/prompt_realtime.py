@@ -19,11 +19,15 @@ DEFAULT_PROMPT_SOURCE_DIR = Path(__file__).parent.parent / "prompts" / "realtime
 PROMPT_SOURCE_MANIFEST_PATH = DEFAULT_PROMPT_SOURCE_DIR / "manifest.json"
 PROMPT_FIELDS = ("basePrompt", "dominantPrompt", "collaborativePrompt")
 CONDITION_COMBINATION_PROMPT_KEYS = (
-    "dominant_no_corrective",
+    "dominant_no_feedback",
     "dominant_explicit_correction",
-    "collaborative_no_corrective",
+    "collaborative_no_feedback",
     "collaborative_explicit_correction",
 )
+CONDITION_COMBINATION_PROMPT_ALIASES = {
+    "dominant_no_feedback": ("dominant_no_corrective",),
+    "collaborative_no_feedback": ("collaborative_no_corrective",),
+}
 PROMPT_VERSION_COLUMNS = ",".join(
     (
         "id",
@@ -92,23 +96,59 @@ def normalize_feedback_condition(value: str | None = None) -> FeedbackCondition:
 
 def normalize_condition_combination_prompts(value: object) -> dict[str, str]:
     source = value if isinstance(value, dict) else {}
-    return {
-        key: source[key].strip() if isinstance(source.get(key), str) else ""
-        for key in CONDITION_COMBINATION_PROMPT_KEYS
-    }
+    prompts: dict[str, str] = {}
+    for key in CONDITION_COMBINATION_PROMPT_KEYS:
+        candidates = (key, *CONDITION_COMBINATION_PROMPT_ALIASES.get(key, ()))
+        prompt = next(
+            (
+                source[candidate].strip()
+                for candidate in candidates
+                if isinstance(source.get(candidate), str) and source[candidate].strip()
+            ),
+            "",
+        )
+        prompts[key] = prompt
+    return prompts
+
+
+def _condition_combination_feedback_suffix(feedback: str | None) -> str:
+    if normalize_feedback_condition(feedback) == "explicit_correction":
+        return "explicit_correction"
+    return "no_feedback"
 
 
 def _condition_combination_key(
     role: str | None,
     feedback: str | None,
 ) -> str:
-    return f"{normalize_role(role)}_{normalize_feedback_condition(feedback)}"
+    return f"{normalize_role(role)}_{_condition_combination_feedback_suffix(feedback)}"
+
+
+def _feedback_condition_label(feedback: str | None) -> str:
+    return (
+        "Explicit Correction"
+        if normalize_feedback_condition(feedback) == "explicit_correction"
+        else "No Feedback"
+    )
+
+
+def _condition_combination_title(role: str | None, feedback: str | None) -> str:
+    return f"{normalize_role(role).title()} + {_feedback_condition_label(feedback)}"
 
 
 def _valid_prompt_text(value: object) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
+
+
+def _strip_obsolete_prompt_stack_lines(prompt: str) -> str:
+    lines = [
+        line
+        for line in prompt.splitlines()
+        if line.strip() != "4. ONE Conversation Example, when available"
+    ]
+    return "\n".join(lines).strip()
 
 
 def _extract_task_card_opening(task_card_prompt: str) -> str | None:
@@ -169,16 +209,36 @@ def _load_feedback_source(
     return selected_id, value
 
 
-def _load_default_feedback_prompt(
-    feedback_condition_id: str | None = None,
-) -> tuple[FeedbackCondition, str] | None:
+def _load_condition_combination_source(source_dir: Path, manifest: dict) -> dict[str, str] | None:
+    manifest_file = manifest.get("conditionCombinationManifest")
+    if not isinstance(manifest_file, str) or not manifest_file:
+        return None
+
     try:
-        manifest = json.loads(PROMPT_SOURCE_MANIFEST_PATH.read_text(encoding="utf-8"))
+        combinations = json.loads((source_dir / manifest_file).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    if not isinstance(manifest, dict):
+    if not isinstance(combinations, dict):
         return None
-    return _load_feedback_source(DEFAULT_PROMPT_SOURCE_DIR, manifest, feedback_condition_id)
+
+    values: dict[str, str] = {}
+    base_path = (source_dir / manifest_file).parent
+    for key in CONDITION_COMBINATION_PROMPT_KEYS:
+        entry = combinations.get(key)
+        if not isinstance(entry, dict):
+            return None
+        filename = entry.get("file")
+        marker = entry.get("marker")
+        if not isinstance(filename, str) or not isinstance(marker, str):
+            return None
+        try:
+            value = (base_path / filename).read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        if not value or not value.startswith(marker):
+            return None
+        values[key] = value
+    return values
 
 
 def _load_task_card_source(
@@ -334,10 +394,6 @@ def _load_prompt_version_source(
         else None
     )
     selected_feedback = runtime_feedback or row_feedback
-    if runtime_feedback and runtime_feedback != row_feedback:
-        default_feedback = _load_default_feedback_prompt(runtime_feedback)
-        if default_feedback:
-            selected_feedback, feedback_prompt = default_feedback
     saved_at = row.get("created_at")
 
     if not all(
@@ -345,7 +401,6 @@ def _load_prompt_version_source(
             base_prompt,
             dominant_prompt,
             collaborative_prompt,
-            feedback_prompt,
             task_card_prompt,
         )
     ):
@@ -354,13 +409,13 @@ def _load_prompt_version_source(
         )
 
     return ResolvedRealtimePrompt(
-        base_prompt=base_prompt,
+        base_prompt=_strip_obsolete_prompt_stack_lines(base_prompt),
         role_prompts={
             "dominant": dominant_prompt,
             "collaborative": collaborative_prompt,
         },
         feedback_condition=selected_feedback,
-        feedback_prompt=feedback_prompt,
+        feedback_prompt=feedback_prompt or "",
         condition_combination_prompts=normalize_condition_combination_prompts(
             row.get("condition_combination_prompts")
         ),
@@ -381,6 +436,7 @@ def _load_prompt_source_dir(
     dict[AgentRole, str],
     FeedbackCondition,
     str,
+    dict[str, str],
     str,
 ] | None:
     try:
@@ -405,11 +461,17 @@ def _load_prompt_source_dir(
             return None
         if not values[key] or not values[key].startswith(marker):
             return None
+        if key == "basePrompt":
+            values[key] = _strip_obsolete_prompt_stack_lines(values[key])
 
     feedback_source = _load_feedback_source(path, manifest, feedback_condition_id)
     if not feedback_source:
         return None
     selected_feedback, feedback_prompt = feedback_source
+
+    condition_combination_prompts = _load_condition_combination_source(path, manifest)
+    if condition_combination_prompts is None:
+        return None
 
     task_card_source = _load_task_card_source(path, manifest, task_card_id)
     if not task_card_source:
@@ -424,6 +486,7 @@ def _load_prompt_source_dir(
         },
         selected_feedback,
         feedback_prompt,
+        condition_combination_prompts,
         task_card_prompt,
     )
 
@@ -436,6 +499,7 @@ def load_default_prompt_config(
     dict[AgentRole, str],
     FeedbackCondition,
     str,
+    dict[str, str],
     str,
 ]:
     config = _load_prompt_source_dir(DEFAULT_PROMPT_SOURCE_DIR, task_card_id, feedback_condition_id)
@@ -452,6 +516,7 @@ def _resolved_prompt_from_tuple(
         dict[AgentRole, str],
         FeedbackCondition,
         str,
+        dict[str, str],
         str,
     ],
     *,
@@ -465,6 +530,7 @@ def _resolved_prompt_from_tuple(
         role_prompts,
         selected_feedback,
         feedback_prompt,
+        condition_combination_prompts,
         task_card_prompt,
     ) = config
     return ResolvedRealtimePrompt(
@@ -472,7 +538,9 @@ def _resolved_prompt_from_tuple(
         role_prompts=role_prompts,
         feedback_condition=selected_feedback,
         feedback_prompt=feedback_prompt,
-        condition_combination_prompts=normalize_condition_combination_prompts(None),
+        condition_combination_prompts=normalize_condition_combination_prompts(
+            condition_combination_prompts
+        ),
         task_card_prompt=task_card_prompt,
         source=source,
         prompt_version_id=prompt_version_id,
@@ -542,7 +610,6 @@ def build_prompt_from_source(
     chunks = [
         source.base_prompt,
         source.role_prompts[agent_role],
-        source.feedback_prompt,
     ]
     if condition_prompt.strip():
         chunks.append(condition_prompt.strip())
@@ -561,6 +628,68 @@ def build_prompt_from_source(
         )
 
     return prompt
+
+
+def build_prompt_stack_from_source(
+    source: ResolvedRealtimePrompt,
+    participant_name: str | None = None,
+    role: str | None = "dominant",
+) -> dict:
+    agent_role = normalize_role(role)
+    condition_key = _condition_combination_key(agent_role, source.feedback_condition)
+    condition_prompt = source.condition_combination_prompts.get(condition_key, "").strip()
+    name = participant_name.strip() if participant_name else ""
+    chunks = [
+        {
+            "id": "base",
+            "title": "Base Prompt",
+            "content": source.base_prompt,
+        },
+        {
+            "id": f"role:{agent_role}",
+            "title": f"Interlocutor Role Prompt: {agent_role}",
+            "content": source.role_prompts[agent_role],
+        },
+    ]
+    if condition_prompt:
+        chunks.append(
+            {
+                "id": f"condition_combination:{condition_key}",
+                "title": (
+                    "Condition Combination Prompt: "
+                    f"{_condition_combination_title(agent_role, source.feedback_condition)}"
+                ),
+                "content": condition_prompt,
+            }
+        )
+    chunks.append(
+        {
+            "id": f"task_card:{source.task_card_id or 'unknown'}",
+            "title": f"Task Card: {source.task_card_id or 'unknown'}",
+            "content": source.task_card_prompt,
+        }
+    )
+
+    return {
+        "schema_version": 1,
+        "mode": "realtime_practice",
+        "source": source.source,
+        "prompt_version_id": source.prompt_version_id,
+        "saved_at": source.saved_at,
+        "agent_role": agent_role,
+        "feedback_condition_id": source.feedback_condition,
+        "feedback_condition_label": _feedback_condition_label(source.feedback_condition),
+        "condition_combination_key": condition_key,
+        "condition_combination_title": _condition_combination_title(
+            agent_role,
+            source.feedback_condition,
+        ),
+        "task_card_id": source.task_card_id,
+        "participant_name": name or None,
+        "stack_order": [chunk["id"] for chunk in chunks],
+        "chunks": chunks,
+        "final_prompt": build_prompt_from_source(source, participant_name, role),
+    }
 
 
 def build_prompt(
