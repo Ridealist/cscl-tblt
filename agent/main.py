@@ -22,6 +22,7 @@ from egress_recorder import EgressRecorder
 from logger import ConversationLogger
 from prompt_evaluation import (
     build_prompt_from_source as build_evaluation_prompt_from_source,
+    build_prompt_stack_from_source as build_evaluation_prompt_stack_from_source,
     get_opening_sentence_from_source as get_evaluation_opening_sentence_from_source,
     load_prompt_source as load_evaluation_prompt_source,
 )
@@ -29,6 +30,7 @@ from prompt_pipeline import build_prompt as build_pipeline_prompt
 from prompt_pipeline import _clean_names
 from prompt_realtime import (
     build_prompt_from_source as build_realtime_prompt_from_source,
+    build_prompt_stack_from_source as build_realtime_prompt_stack_from_source,
     get_opening_sentence_from_source as get_realtime_opening_sentence_from_source,
     load_prompt_source as load_realtime_prompt_source,
     normalize_feedback_condition as normalize_realtime_feedback_condition,
@@ -46,6 +48,13 @@ log = logging.getLogger("agent")
 
 server = AgentServer()
 CONFIG_PATH = Path(__file__).parent.parent / "config.json"
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
 def _read_runtime_agent_defaults() -> tuple[str, str]:
@@ -92,6 +101,9 @@ REALTIME_TTS_EXTRA_KWARGS_BY_SESSION_PURPOSE = {
         # "emotion": "excited",
     },
 }
+PROMPT_STACK_LOGGING_ENABLED = _env_flag("LOG_PROMPT_STACK") or _env_flag(
+    "PROMPT_STACK_LOGGING_ENABLED"
+)
 
 log.info(
     "Agent worker configuration: worker_mode=%s role=%s default_mode=%s default_role=%s "
@@ -103,6 +115,28 @@ log.info(
     bool(os.environ.get("LIVEKIT_URL")),
     bool(os.environ.get("OPENAI_API_KEY")),
 )
+
+
+def _prompt_stack_metadata(
+    prompt_source,
+    build_prompt_stack_fn,
+    participant_name: str | None,
+    role: str,
+) -> dict:
+    if not PROMPT_STACK_LOGGING_ENABLED:
+        return {}
+
+    try:
+        return {
+            "prompt_stack": build_prompt_stack_fn(
+                prompt_source,
+                participant_name,
+                role=role,
+            )
+        }
+    except Exception as exc:
+        log.exception("Prompt stack metadata build failed")
+        return {"prompt_stack_error": str(exc)}
 
 
 def _resolve_realtime_worker() -> tuple[str, str]:
@@ -680,6 +714,7 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
             "evaluation_character": prompt_source.evaluation_character,
         }
         build_prompt_fn = build_evaluation_prompt_from_source
+        build_prompt_stack_fn = build_evaluation_prompt_stack_from_source
         get_opening_sentence_fn = get_evaluation_opening_sentence_from_source
         resolved_task_card_id = None
         resolved_feedback_condition_id = None
@@ -691,6 +726,7 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
             prompt_version_id,
         )
         build_prompt_fn = build_realtime_prompt_from_source
+        build_prompt_stack_fn = build_realtime_prompt_stack_from_source
         get_opening_sentence_fn = get_realtime_opening_sentence_from_source
         resolved_task_card_id = prompt_source.task_card_id or task_card_id
         resolved_feedback_condition_id = prompt_source.feedback_condition
@@ -741,6 +777,7 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
             "prompt_version_id": prompt_source.prompt_version_id,
             "prompt_saved_at": prompt_source.saved_at,
             "prompt_source": prompt_source.source,
+            **_prompt_stack_metadata(prompt_source, build_prompt_stack_fn, None, role),
         }
         if is_evaluation
         else {
@@ -751,6 +788,7 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
             "prompt_id": prompt_source.prompt_version_id or "default",
             "prompt_version_id": prompt_source.prompt_version_id,
             "prompt_saved_at": prompt_source.saved_at,
+            **_prompt_stack_metadata(prompt_source, build_prompt_stack_fn, None, role),
         }
     )
     conv_logger = ConversationLogger(
@@ -782,6 +820,14 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
             p.name,
             participant["name"],
         )
+        stack_metadata = _prompt_stack_metadata(
+            prompt_source,
+            build_prompt_stack_fn,
+            participant["name"],
+            role,
+        )
+        if stack_metadata:
+            conv_logger.update_metadata(stack_metadata)
 
     assistant = RealtimeAssistant(
         get_name_fn=lambda: participant["name"],
