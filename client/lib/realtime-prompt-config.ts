@@ -10,15 +10,22 @@ export interface RealtimePromptConfig {
 }
 
 export const CONDITION_COMBINATION_PROMPT_KEYS = [
-  'dominant_no_corrective',
+  'dominant_no_feedback',
   'dominant_explicit_correction',
-  'collaborative_no_corrective',
+  'collaborative_no_feedback',
   'collaborative_explicit_correction',
 ] as const;
 
 export type ConditionCombinationPromptKey = (typeof CONDITION_COMBINATION_PROMPT_KEYS)[number];
 
 export type ConditionCombinationPrompts = Record<ConditionCombinationPromptKey, string>;
+
+const CONDITION_COMBINATION_PROMPT_ALIASES: Partial<
+  Record<ConditionCombinationPromptKey, string[]>
+> = {
+  dominant_no_feedback: ['dominant_no_corrective'],
+  collaborative_no_feedback: ['collaborative_no_corrective'],
+};
 
 export interface RealtimeFeedbackConditionSummary {
   id: string;
@@ -71,11 +78,27 @@ export const DEFAULT_REALTIME_PROMPT_METADATA: RealtimePromptMetadata = {
 
 const PROMPT_FIELDS = ['basePrompt', 'dominantPrompt', 'collaborativePrompt'] as const;
 
+function stripObsoletePromptStackLines(prompt: string) {
+  return prompt
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== '4. ONE Conversation Example, when available')
+    .join('\n')
+    .trim();
+}
+
+function normalizePromptFieldText(field: (typeof PROMPT_FIELDS)[number], text: string) {
+  const trimmed = text.trim();
+  return field === 'basePrompt' ? stripObsoletePromptStackLines(trimmed) : trimmed;
+}
+
 export function normalizeConditionCombinationPrompts(value: unknown): ConditionCombinationPrompts {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   return Object.fromEntries(
     CONDITION_COMBINATION_PROMPT_KEYS.map((key) => {
-      const text = (source as Record<string, unknown>)[key];
+      const candidates = [key, ...(CONDITION_COMBINATION_PROMPT_ALIASES[key] ?? [])];
+      const text = candidates
+        .map((candidate) => (source as Record<string, unknown>)[candidate])
+        .find((candidate) => typeof candidate === 'string' && candidate.trim());
       return [key, typeof text === 'string' ? text.trim() : ''];
     })
   ) as ConditionCombinationPrompts;
@@ -114,7 +137,7 @@ export function validateRealtimePromptConfig(
         error: `${field} 값은 ${REALTIME_PROMPT_MAX_CHARS.toLocaleString('ko-KR')}자 이하여야 합니다.`,
       };
     }
-    config[field] = text.trim();
+    config[field] = normalizePromptFieldText(field, text);
   }
 
   const feedbackConditionId =

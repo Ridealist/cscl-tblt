@@ -13,6 +13,12 @@ PROMPT_FIELDS = (
     "dominantPrompt",
     "collaborativePrompt",
 )
+CONDITION_COMBINATION_PROMPT_KEYS = (
+    "dominant_no_feedback",
+    "dominant_explicit_correction",
+    "collaborative_no_feedback",
+    "collaborative_explicit_correction",
+)
 LEGACY_PROMPT_FIELDS = (
     *PROMPT_FIELDS,
     "taskCardPrompt",
@@ -55,16 +61,20 @@ def read_manifest(path):
     default_task_card_id = manifest.get("defaultTaskCardId")
     feedback_condition_manifest = manifest.get("feedbackConditionManifest")
     default_feedback_condition_id = manifest.get("defaultFeedbackConditionId")
+    condition_combination_manifest = manifest.get("conditionCombinationManifest")
     if not isinstance(feedback_condition_manifest, str) or not feedback_condition_manifest:
         raise ValueError("Prompt manifest entry feedbackConditionManifest must be a string.")
     if not isinstance(default_feedback_condition_id, str) or not default_feedback_condition_id:
         raise ValueError("Prompt manifest entry defaultFeedbackConditionId must be a string.")
+    if not isinstance(condition_combination_manifest, str) or not condition_combination_manifest:
+        raise ValueError("Prompt manifest entry conditionCombinationManifest must be a string.")
     if not isinstance(task_card_manifest, str) or not task_card_manifest:
         raise ValueError("Prompt manifest entry taskCardManifest must be a string.")
     if not isinstance(default_task_card_id, str) or not default_task_card_id:
         raise ValueError("Prompt manifest entry defaultTaskCardId must be a string.")
     entries["feedbackConditionManifest"] = feedback_condition_manifest
     entries["defaultFeedbackConditionId"] = default_feedback_condition_id
+    entries["conditionCombinationManifest"] = condition_combination_manifest
     entries["taskCardManifest"] = task_card_manifest
     entries["defaultTaskCardId"] = default_task_card_id
     return entries
@@ -130,6 +140,39 @@ def read_task_card_manifest(path, manifest):
             "file": filename,
             "marker": marker,
             "base_path": task_card_manifest_path.parent,
+        }
+    return entries
+
+
+def read_condition_combination_manifest(path, manifest):
+    manifest_file = manifest.get("conditionCombinationManifest")
+    if not isinstance(manifest_file, str):
+        return None
+    condition_manifest_path = path / manifest_file
+    try:
+        combinations = json.loads(condition_manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"Condition combination manifest is not readable: {condition_manifest_path}"
+        ) from exc
+    if not isinstance(combinations, dict) or not combinations:
+        raise ValueError("Condition combination manifest must be a non-empty JSON object.")
+
+    entries = {}
+    for key in CONDITION_COMBINATION_PROMPT_KEYS:
+        entry = combinations.get(key)
+        if not isinstance(entry, dict):
+            raise ValueError(f"Condition combination manifest is missing an object entry for {key}.")
+        filename = entry.get("file")
+        marker = entry.get("marker")
+        if not isinstance(filename, str) or not filename:
+            raise ValueError(f"Condition combination {key}.file must be a string.")
+        if not isinstance(marker, str) or not marker:
+            raise ValueError(f"Condition combination {key}.marker must be a string.")
+        entries[key] = {
+            "file": filename,
+            "marker": marker,
+            "base_path": condition_manifest_path.parent,
         }
     return entries
 
@@ -223,6 +266,24 @@ def read_prompt_folder(path):
         if feedback_id == default_feedback_condition_id:
             realtime["feedbackConditionId"] = feedback_id
             realtime["feedbackPrompt"] = value
+
+    condition_combination_prompts = {}
+    for key, entry in read_condition_combination_manifest(path, manifest).items():
+        prompt_path = entry["base_path"] / entry["file"]
+        try:
+            value = prompt_path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise ValueError(
+                f"Condition combination source file is not readable: {prompt_path}"
+            ) from exc
+        if not value:
+            raise ValueError(f"Condition combination source file is empty: {prompt_path}")
+        if not value.startswith(entry["marker"]):
+            raise ValueError(
+                f"Condition combination source file {prompt_path} must start with {entry['marker']!r}"
+            )
+        condition_combination_prompts[key] = value
+    realtime["conditionCombinationPrompts"] = condition_combination_prompts
 
     task_cards = read_task_card_manifest(path, manifest)
     default_task_card_id = manifest["defaultTaskCardId"]

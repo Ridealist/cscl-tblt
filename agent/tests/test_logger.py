@@ -135,7 +135,7 @@ def test_conversation_logger_dual_writes_pending_events_to_mock_writer(tmp_path)
     logger.update_metadata(
         {
             "egress_id": "egress-123",
-            "recording_path": "recordings/realtime-minji--20260612_010101.mp3",
+            "recording_path": "recordings/realtime_minji-RM_livekit-20260612_010101.mp3",
         }
     )
     logger.close()
@@ -348,7 +348,7 @@ def test_supabase_writer_posts_evaluation_session_fields() -> None:
 
     writer = SupabaseConversationWriter(
         "livekit-room-sid",
-        "eval-9-minji-12345678",
+        "eval_9_2_minji_12345678",
         {
             "activity_type": "free_conversation",
             "agent_mode": "realtime",
@@ -408,7 +408,7 @@ def test_supabase_writer_retries_without_evaluation_columns_when_schema_is_stale
     }
     writer = SupabaseConversationWriter(
         "livekit-room-sid",
-        "eval-9-minji-12345678",
+        "eval_9_2_minji_12345678",
         metadata,
         SupabaseConversationConfig(url="http://supabase.test", key="secret"),
         opener=opener,
@@ -523,7 +523,7 @@ def test_supabase_writer_patches_recording_metadata_and_session_end() -> None:
     metadata = {
         "agent_mode": "pipeline",
         "egress_id": "egress-123",
-        "recording_path": "recordings/9-1--20260612_010101.mp3",
+        "recording_path": "recordings/9-1-RM_livekit-20260612_010101.mp3",
     }
     writer.sync_session_metadata(metadata)
     writer.end_session(metadata)

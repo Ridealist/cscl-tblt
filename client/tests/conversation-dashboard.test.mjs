@@ -83,7 +83,7 @@ test('dashboard grouping uses purpose, class metadata, and student labels for re
   const sessions = [
     {
       id: 'eval-session',
-      room: 'eval-9-minji-kim-a1b2c3d4',
+      room: 'eval_9_2_minji_kim_a1b2c3d4',
       session_id: 'RM_eval',
       metadata: {
         agent_mode: 'realtime',
@@ -95,7 +95,7 @@ test('dashboard grouping uses purpose, class metadata, and student labels for re
     },
     {
       id: 'task-session',
-      room: 'task-9-jun-ho-b2c3d4e5',
+      room: 'task_9_3_jun_ho_b2c3d4e5',
       session_id: 'RM_task',
       metadata: {
         agent_mode: 'realtime',
@@ -134,13 +134,13 @@ test('dashboard search matches student metadata and room fallback', () => {
   const sessions = [
     {
       id: '1',
-      room: 'eval-9-minji-kim-a1b2c3d4',
+      room: 'eval_9_2_minji_kim_a1b2c3d4',
       session_id: 'RM_1',
       metadata: { student_display_name: 'Minji Kim' },
     },
     {
       id: '2',
-      room: 'task-9-jun-ho-b2c3d4e5',
+      room: 'task_9_3_jun_ho_b2c3d4e5',
       session_id: 'RM_2',
       metadata: { student_number: '20260002' },
     },
@@ -150,7 +150,7 @@ test('dashboard search matches student metadata and room fallback', () => {
     '1',
   ]);
   assert.deepEqual(
-    plain(filterDashboardSessions(sessions, 'jun-ho').map((session) => session.id)),
+    plain(filterDashboardSessions(sessions, 'jun_ho').map((session) => session.id)),
     ['2']
   );
 });

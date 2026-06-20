@@ -56,7 +56,7 @@ function textNumber(value: unknown): string | undefined {
 function parseRoomClass(room: string): string | undefined {
   const pipelineMatch = room.match(/^(\d+)반-/);
   if (pipelineMatch) return pipelineMatch[1];
-  const realtimeMatch = room.match(/^(?:eval|task)-([^-]+)-/);
+  const realtimeMatch = room.match(/^(?:eval|task)[-_]([^-_]+)[-_]/);
   return realtimeMatch?.[1];
 }
 
@@ -68,7 +68,13 @@ function parsePipelineRoom(room: string): { cls: string; grp: string } {
 }
 
 function isRealtimeRoomName(room: string) {
-  return room.startsWith('realtime-') || room.startsWith('eval-') || room.startsWith('task-');
+  return (
+    room.startsWith('realtime-') ||
+    room.startsWith('eval-') ||
+    room.startsWith('eval_') ||
+    room.startsWith('task-') ||
+    room.startsWith('task_')
+  );
 }
 
 export function buildLogSessionsQuery(filters: DashboardFilters): string {
@@ -89,8 +95,8 @@ export function inferDashboardSessionPurpose(
   if (rawActivity === 'free_conversation' || rawActivity === 'task_solution') {
     return getSessionPurposeForActivity(rawActivity);
   }
-  if (session.room.startsWith('eval-')) return 'evaluation';
-  if (session.room.startsWith('task-')) return 'practice';
+  if (session.room.startsWith('eval-') || session.room.startsWith('eval_')) return 'evaluation';
+  if (session.room.startsWith('task-') || session.room.startsWith('task_')) return 'practice';
   return undefined;
 }
 

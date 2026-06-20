@@ -98,8 +98,8 @@ export function LobbyView({
     return (
       name
         .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
         .slice(0, 40) || 'student'
     );
   }
@@ -113,7 +113,8 @@ export function LobbyView({
   function makeActivityRoomName(name: string, activityType: ActivityType) {
     const prefix = activityType === 'free_conversation' ? 'eval' : 'task';
     const slug = name ? makeStudentSlug(name) : 'student';
-    return `${prefix}-${activeClass ?? 'class'}-${slug}-${makeRoomSuffix()}`;
+    // Realtime rooms identify one logged-in student; pipeline rooms use the active class/group.
+    return `${prefix}_${student.classNumber}_${student.rollNumber}_${slug}_${makeRoomSuffix()}`;
   }
 
   function handleJoin() {

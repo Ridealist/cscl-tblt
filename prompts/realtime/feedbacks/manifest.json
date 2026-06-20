@@ -1,8 +1,8 @@
 {
   "no_corrective": {
     "file": "no_corrective.md",
-    "title": "No Corrective Feedback",
-    "marker": "# FEEDBACK CONDITION PROMPT: No Corrective Feedback"
+    "title": "No Feedback",
+    "marker": "# FEEDBACK CONDITION PROMPT: No Feedback"
   },
   "explicit_correction": {
     "file": "explicit_correction.md",
