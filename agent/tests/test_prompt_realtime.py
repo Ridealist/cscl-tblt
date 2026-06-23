@@ -551,7 +551,7 @@ def test_realtime_opening_comes_from_selected_task_card(tmp_path, monkeypatch) -
         "Hi, I'm Kate. Today, let's choose one school event and make an invitation."
     )
     assert get_opening_sentence("healthy_habit_stamp_card") == (
-        "Hi, I'm Kate. Let's choose three healthy habits for Class 6's stamp card."
+        "Hi, I'm Kate. Let's choose three healthy habits for our Class's stamp card."
     )
 
 
