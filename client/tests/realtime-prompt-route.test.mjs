@@ -299,6 +299,7 @@ function loadRealtimePromptRoute(options = {}) {
                   label: CUSTOM_VERSION.label,
                   createdAt: CUSTOM_VERSION.savedAt,
                   hash: CUSTOM_VERSION.hash,
+                  taskCardId: CUSTOM_VERSION.taskCardId,
                 },
               ]
             );
@@ -386,6 +387,7 @@ test('GET returns active Supabase prompt version without leaking internal row fi
   assert.equal(response.jsonBody.usingDefault, false);
   assert.deepEqual(promptFields(response.jsonBody), CUSTOM_PROMPT);
   assert.equal(response.jsonBody.promptId, CUSTOM_VERSION.promptId);
+  assert.equal(response.jsonBody.promptVersions[0].taskCardId, CUSTOM_VERSION.taskCardId);
   assert.equal(response.jsonBody.savedAt, CUSTOM_VERSION.savedAt);
   assert.equal(response.jsonBody.source, 'custom');
   assert.equal('isActive' in response.jsonBody, false);

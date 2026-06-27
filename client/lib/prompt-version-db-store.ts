@@ -15,6 +15,7 @@ export type PromptVersionSummary = {
   label: string;
   createdAt: string;
   hash: string;
+  taskCardId?: string;
 };
 
 type PromptVersionRow = {
@@ -186,12 +187,14 @@ function summaryFromRow(row: PromptVersionRow): PromptVersionSummary | null {
   const id = text(row.id);
   const createdAt = text(row.created_at);
   const hash = text(row.hash);
+  const taskCardId = text(row.task_card_id);
   if (!id || !createdAt || !hash) return null;
   return {
     id,
     label: text(row.label) ?? `${text(row.purpose) ?? 'prompt'} ${createdAt}`,
     createdAt,
     hash,
+    ...(taskCardId ? { taskCardId } : {}),
   };
 }
 
