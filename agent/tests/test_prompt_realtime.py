@@ -279,7 +279,7 @@ def test_realtime_default_prompt_source_records_default_task_card_id() -> None:
     source = prompt_realtime.load_prompt_source()
 
     assert source.source == "default"
-    assert source.task_card_id == "morning_exercise_challenge"
+    assert source.task_card_id == "healthy_habit_stamp_card"
     assert source.prompt_version_id is None
 
 
@@ -534,12 +534,24 @@ def test_realtime_prompt_call_task_card_id_overrides_default_selection(
     assert "# TASK CARD: Our Class Morning Exercise Challenge" not in prompt
 
 
+def test_realtime_prompt_call_healthy_habit_task_card_id_overrides_default_selection(
+    tmp_path, monkeypatch
+) -> None:
+    prompt = build_prompt(role="dominant", task_card_id="healthy_habit_stamp_card")
+
+    assert "# TASK CARD: Our Class Healthy Habit Stamp Card" in prompt
+    assert "# TASK CARD: Our Class Morning Exercise Challenge" not in prompt
+
+
 def test_realtime_opening_comes_from_selected_task_card(tmp_path, monkeypatch) -> None:
     assert get_opening_sentence("morning_exercise_challenge") == (
         "Hi, I'm Kate. Let's choose one morning exercise activity for our Class."
     )
     assert get_opening_sentence("school_event_invitation") == (
         "Hi, I'm Kate. Today, let's choose one school event and make an invitation."
+    )
+    assert get_opening_sentence("healthy_habit_stamp_card") == (
+        "Hi, I'm Kate. Let's choose three healthy habits for our Class's stamp card."
     )
 
 

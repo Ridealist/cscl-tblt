@@ -15,5 +15,5 @@
   "defaultFeedbackConditionId": "no_corrective",
   "conditionCombinationManifest": "condition-combinations/manifest.json",
   "taskCardManifest": "task-cards/manifest.json",
-  "defaultTaskCardId": "morning_exercise_challenge"
+  "defaultTaskCardId": "healthy_habit_stamp_card"
 }
