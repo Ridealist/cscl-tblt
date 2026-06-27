@@ -279,7 +279,8 @@ def test_realtime_default_prompt_source_records_default_task_card_id() -> None:
     source = prompt_realtime.load_prompt_source()
 
     assert source.source == "default"
-    assert source.task_card_id == "healthy_habit_stamp_card"
+    assert source.task_card_id == "special_activity_plan"
+    assert source.task_card_prompt.startswith("# TASK CARD: Our Class Special Activity Plan")
     assert source.prompt_version_id is None
 
 
@@ -543,6 +544,15 @@ def test_realtime_prompt_call_healthy_habit_task_card_id_overrides_default_selec
     assert "# TASK CARD: Our Class Morning Exercise Challenge" not in prompt
 
 
+def test_realtime_prompt_default_uses_special_activity_plan_task_card(
+    tmp_path, monkeypatch
+) -> None:
+    prompt = build_prompt(role="dominant")
+
+    assert "# TASK CARD: Our Class Special Activity Plan" in prompt
+    assert "# TASK CARD: Our Class Healthy Habit Stamp Card" not in prompt
+
+
 def test_realtime_opening_comes_from_selected_task_card(tmp_path, monkeypatch) -> None:
     assert get_opening_sentence("morning_exercise_challenge") == (
         "Hi, I'm Kate. Let's choose one morning exercise activity for our Class."
@@ -553,6 +563,18 @@ def test_realtime_opening_comes_from_selected_task_card(tmp_path, monkeypatch) -
     assert get_opening_sentence("healthy_habit_stamp_card") == (
         "Hi, I'm Kate. Let's choose three healthy habits for our Class's stamp card."
     )
+
+
+def test_realtime_opening_comes_from_special_activity_plan_without_placeholder(
+    tmp_path, monkeypatch
+) -> None:
+    opening = get_opening_sentence("special_activity_plan")
+
+    assert opening == (
+        "Hi, I'm Kate. Let's choose three special activity plan for our class. "
+        'Let\'s start from step 1. When you are ready, say "Okay."'
+    )
+    assert "(곧 입력 예정)" not in opening
 
 
 def test_realtime_opening_falls_back_when_task_card_has_no_opening(

@@ -69,9 +69,12 @@ const DEFAULT_PROMPT = {
   feedbackConditionId: 'explicit_correction',
   feedbackPrompt: '# FEEDBACK CONDITION: Explicit Correction\nDefault explicit feedback',
   conditionCombinationPrompts: DEFAULT_CONDITION_COMBINATION_PROMPTS,
-  taskCardId: 'school_event_invitation',
-  taskCardPrompt: '# TASK CARD: School Event Invitation\nDefault task card',
+  taskCardId: 'special_activity_plan',
+  taskCardPrompt: '# TASK CARD: Our Class Special Activity Plan\nDefault special task card',
 };
+
+const SCHOOL_EVENT_TASK_CARD_PROMPT =
+  '# TASK CARD: School Event Invitation\nDefault school task card';
 
 const CUSTOM_PROMPT = {
   basePrompt: '# BASE PROMPT:\nEdited base prompt',
@@ -111,7 +114,7 @@ const FILES = new Map(
       defaultFeedbackConditionId: 'no_corrective',
       conditionCombinationManifest: 'condition-combinations/manifest.json',
       taskCardManifest: 'task-cards/manifest.json',
-      defaultTaskCardId: 'school_event_invitation',
+      defaultTaskCardId: 'special_activity_plan',
     }),
     '/repo/prompts/realtime/base.md': DEFAULT_PROMPT.basePrompt,
     '/repo/prompts/realtime/roles/dominant.md': DEFAULT_PROMPT.dominantPrompt,
@@ -169,8 +172,16 @@ const FILES = new Map(
         level: 'A2',
         marker: '# TASK CARD: School Event Invitation',
       },
+      special_activity_plan: {
+        file: 'special_activity_plan.md',
+        title: 'L5-T3. Our Class Special Activity Plan',
+        topic: 'planning a special class activity',
+        level: 'A1-A2',
+        marker: '# TASK CARD:',
+      },
     }),
-    '/repo/prompts/realtime/task-cards/school_event_invitation.md': DEFAULT_PROMPT.taskCardPrompt,
+    '/repo/prompts/realtime/task-cards/school_event_invitation.md': SCHOOL_EVENT_TASK_CARD_PROMPT,
+    '/repo/prompts/realtime/task-cards/special_activity_plan.md': DEFAULT_PROMPT.taskCardPrompt,
   })
 );
 

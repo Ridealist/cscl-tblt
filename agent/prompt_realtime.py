@@ -158,12 +158,17 @@ def _extract_task_card_opening(task_card_prompt: str) -> str | None:
             continue
 
         opening_lines = []
+        started = False
         for candidate in lines[index + 1 :]:
             stripped = candidate.strip()
             if stripped.startswith("#"):
                 break
-            if stripped:
-                opening_lines.append(stripped)
+            if not stripped:
+                if started:
+                    break
+                continue
+            opening_lines.append(stripped)
+            started = True
         opening = " ".join(opening_lines).strip()
         return opening or None
     return None

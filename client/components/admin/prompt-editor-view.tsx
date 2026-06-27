@@ -99,7 +99,7 @@ const EMPTY_PROMPT: RealtimePromptConfig = {
   feedbackConditionId: 'no_corrective',
   feedbackPrompt: '',
   conditionCombinationPrompts: normalizeConditionCombinationPrompts(null),
-  taskCardId: 'school_event_invitation',
+  taskCardId: 'special_activity_plan',
   taskCardPrompt: '',
 };
 
