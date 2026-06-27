@@ -5,6 +5,7 @@ import { AdminLogoutButton } from '@/components/admin/admin-logout-button';
 import { PromptEditorView } from '@/components/admin/prompt-editor-view';
 import { type AgentMode, getAgentModeLabel } from '@/lib/agent-mode';
 import { type AgentRole, getAgentRoleLabel } from '@/lib/agent-role';
+import { promptVersionCustomLabelDisplay } from '@/lib/prompt-version-display';
 import type { RealtimePromptSource } from '@/lib/realtime-prompt-config';
 import {
   type ActivityType,
@@ -276,9 +277,9 @@ type EvaluationPromptMetadataResponse = {
 };
 
 type ActivePromptVersionMetadata = {
+  customVersionLabel: string;
   promptId: string;
   savedAt: string | null;
-  versionLabel: string;
 };
 
 function sleep(ms: number) {
@@ -308,9 +309,12 @@ function metadataFromPracticePrompt(
   data: PracticePromptMetadataResponse
 ): ActivePromptVersionMetadata {
   return {
+    customVersionLabel: promptVersionCustomLabelDisplay({
+      id: data.promptId,
+      label: data.promptVersionLabel,
+      usingDefault: data.usingDefault,
+    }),
     promptId: data.promptId,
-    versionLabel:
-      data.promptVersionLabel ?? (data.usingDefault ? 'Tracked markdown default' : '이름 없음'),
     savedAt: data.savedAt,
   };
 }
@@ -319,9 +323,12 @@ function metadataFromEvaluationPrompt(
   data: EvaluationPromptMetadataResponse
 ): ActivePromptVersionMetadata {
   return {
+    customVersionLabel: promptVersionCustomLabelDisplay({
+      id: data.evaluationPromptId,
+      label: data.promptVersionLabel,
+      usingDefault: data.usingDefault,
+    }),
     promptId: data.evaluationPromptId,
-    versionLabel:
-      data.promptVersionLabel ?? (data.usingDefault ? 'Tracked markdown default' : '이름 없음'),
     savedAt: data.savedAt,
   };
 }
@@ -394,8 +401,8 @@ function ActivePromptVersionSection({ sessionPurpose }: { sessionPurpose: Sessio
             <span className="text-foreground font-mono font-semibold">{metadata.promptId}</span>
           </div>
           <div className="flex items-center justify-between gap-4 px-3 py-2">
-            <span className="text-muted-foreground">버전 이름</span>
-            <span className="text-foreground font-semibold">{metadata.versionLabel}</span>
+            <span className="text-muted-foreground">사용자 지정 버전명</span>
+            <span className="text-foreground font-semibold">{metadata.customVersionLabel}</span>
           </div>
           <div className="flex items-center justify-between gap-4 px-3 py-2">
             <span className="text-muted-foreground">저장 시각</span>
