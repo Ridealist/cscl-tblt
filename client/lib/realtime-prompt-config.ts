@@ -54,6 +54,7 @@ export interface RealtimePromptVersionSummary {
   label: string;
   createdAt: string;
   hash: string;
+  taskCardId?: string;
 }
 
 export type RealtimePromptState = RealtimePromptConfig &
