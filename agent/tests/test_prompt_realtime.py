@@ -553,6 +553,37 @@ def test_realtime_prompt_default_uses_special_activity_plan_task_card(
     assert "# TASK CARD: Our Class Healthy Habit Stamp Card" not in prompt
 
 
+def test_special_activity_plan_prompt_sources_stay_consistent() -> None:
+    source_dir = prompt_realtime.DEFAULT_PROMPT_SOURCE_DIR
+    task_card = (
+        source_dir / "task-cards" / "special_activity_plan.md"
+    ).read_text(encoding="utf-8")
+    manifest = json.loads(
+        (source_dir / "condition-combinations" / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    condition_prompts = [
+        (
+            source_dir / "condition-combinations" / manifest[key]["file"]
+        ).read_text(encoding="utf-8")
+        for key in prompt_realtime.CONDITION_COMBINATION_PROMPT_KEYS
+    ]
+
+    required_final_sentence = '"We choose ___, ___, and ___ because ___."'
+    assert required_final_sentence in task_card
+    assert "Class 3 does it on Wednesday afternoon." in task_card
+    assert "Class 5 does it on Monday afternoons." in task_card
+
+    combined_condition_prompts = "\n\n".join(condition_prompts)
+    assert "Let’s include ___, ___, and ___ because ___." not in combined_condition_prompts
+    assert "Class 3 does it Friday afternoon" not in combined_condition_prompts
+    assert "Class 3 does it before class" not in combined_condition_prompts
+    assert "Class 5 does it on Friday afternoon" not in combined_condition_prompts
+    assert "Eating fruit is fun and relaxing" not in combined_condition_prompts
+    assert "Delicious and healthy" not in combined_condition_prompts
+
+
 def test_realtime_opening_comes_from_selected_task_card(tmp_path, monkeypatch) -> None:
     assert get_opening_sentence("morning_exercise_challenge") == (
         "Hi, I'm Kate. Let's choose one morning exercise activity for our Class."
@@ -571,7 +602,7 @@ def test_realtime_opening_comes_from_special_activity_plan_without_placeholder(
     opening = get_opening_sentence("special_activity_plan")
 
     assert opening == (
-        "Hi, I'm Kate. Let's choose three special activity plan for our class. "
+        "Hi, I'm Kate. Let's choose three special activities for our class. "
         'Let\'s start from step 1. When you are ready, say "Okay."'
     )
     assert "(곧 입력 예정)" not in opening
