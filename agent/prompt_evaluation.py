@@ -8,7 +8,7 @@ from urllib.request import Request, urlopen
 
 
 DEFAULT_EVALUATION_ID = "pretest_6_10"
-DEFAULT_OPENING_SENTENCE = "Hi, I’m Kate. I just moved to Korea. Nice to meet you!"
+DEFAULT_OPENING_SENTENCE = "Hi, I’m Jack. I just moved to Korea. Nice to meet you!"
 DEFAULT_PROMPT_SOURCE_DIR = Path(__file__).parent.parent / "prompts" / "evaluation"
 PROMPT_SOURCE_MANIFEST_PATH = DEFAULT_PROMPT_SOURCE_DIR / "manifest.json"
 PROMPT_VERSION_COLUMNS = ",".join(
@@ -136,7 +136,7 @@ def _load_prompt_version_source(prompt_version_id: str) -> ResolvedEvaluationPro
     version_id = _valid_text(row.get("id")) or prompt_version_id.strip()
     evaluation_id = _valid_text(row.get("evaluation_id"))
     prompt = _valid_text(row.get("evaluation_prompt"))
-    evaluation_character = _valid_text(row.get("evaluation_character")) or "Kate"
+    evaluation_character = _valid_text(row.get("evaluation_character")) or "Jack"
     opening_sentence = _valid_text(row.get("evaluation_opening_sentence"))
     if not evaluation_id or not prompt or not opening_sentence:
         raise PromptVersionFetchError(
@@ -207,7 +207,7 @@ def load_prompt_source(
         prompt=prompt,
         evaluation_prompt_id=prompt_id,
         evaluation_prompt_version=prompt_version,
-        evaluation_character=_valid_text(entry.get("character")) or "Kate",
+        evaluation_character=_valid_text(entry.get("character")) or "Jack",
         opening_sentence=_extract_opening(prompt) or DEFAULT_OPENING_SENTENCE,
     )
 

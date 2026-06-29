@@ -226,9 +226,9 @@ function loadTokenRoute(options = {}) {
               evaluationId: evaluationId ?? 'pretest_6_10',
               evaluationPromptId: 'pretest_6_10',
               evaluationPromptVersion: '2026-06-10',
-              evaluationCharacter: 'Kate',
-              openingSentence: 'Hi, I’m Kate. I just moved to Korea. Nice to meet you!',
-              prompt: '# PRE-TEST INTERACTION PROMPT: Kate',
+              evaluationCharacter: 'Jack',
+              openingSentence: 'Hi, I’m Jack. I just moved to Korea. Nice to meet you!',
+              prompt: '# PRE-TEST INTERACTION PROMPT: Jack',
               promptVersionId: null,
               savedAt: null,
               evaluations: [],
@@ -337,9 +337,9 @@ test('token route marks eval-prefixed realtime rooms as evaluation sessions', as
       evaluationId: 'pretest_6_10',
       evaluationPromptId: 'manifest-prompt-id',
       evaluationPromptVersion: 'manifest-version-1',
-      evaluationCharacter: 'Kate',
-      openingSentence: 'Hi, I’m Kate. I just moved to Korea. Nice to meet you!',
-      prompt: '# PRE-TEST INTERACTION PROMPT: Kate',
+      evaluationCharacter: 'Jack',
+      openingSentence: 'Hi, I’m Jack. I just moved to Korea. Nice to meet you!',
+      prompt: '# PRE-TEST INTERACTION PROMPT: Jack',
       promptVersionId: 'eval-version-1',
       savedAt: '2026-06-13T01:00:00.000Z',
       evaluations: [],
@@ -367,7 +367,7 @@ test('token route marks eval-prefixed realtime rooms as evaluation sessions', as
   assert.equal(metadata.agentMode, 'realtime');
   assert.equal(metadata.sessionPurpose, 'evaluation');
   assert.equal(metadata.activityType, 'free_conversation');
-  assert.equal(metadata.evaluationCharacter, 'Kate');
+  assert.equal(metadata.evaluationCharacter, 'Jack');
   assert.equal(metadata.evaluationId, 'pretest_6_10');
   assert.equal(metadata.evaluationPromptId, 'manifest-prompt-id');
   assert.equal(metadata.evaluationPromptVersion, 'manifest-version-1');

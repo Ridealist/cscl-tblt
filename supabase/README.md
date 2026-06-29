@@ -151,7 +151,7 @@ set num_classes = excluded.num_classes,
 ```
 
 Use `session_purpose = 'practice'` for the existing TBLT task-solution flow, and
-`session_purpose = 'evaluation'` for Kate free-conversation source-data
+`session_purpose = 'evaluation'` for Jack free-conversation source-data
 collection. Non-evaluation `class_sessions` rows are normalized to `practice` by
 the session-purpose migration, and existing rows are backfilled with
 `activity_type` plus evaluation prompt fields where metadata or `eval-*` room

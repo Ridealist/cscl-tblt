@@ -10,9 +10,9 @@ const require = createRequire(import.meta.url);
 const ts = require('typescript');
 
 const DEFAULT_PROMPT =
-  '# PRE-TEST INTERACTION PROMPT: Kate\n# Opening\nHello default.\n# Body\nDefault prompt.';
+  '# PRE-TEST INTERACTION PROMPT: Jack\n# Opening\nHello default.\n# Body\nDefault prompt.';
 const CUSTOM_PROMPT =
-  '# PRE-TEST INTERACTION PROMPT: Kate\n# Opening\nHello custom.\n# Body\nCustom prompt.';
+  '# PRE-TEST INTERACTION PROMPT: Jack\n# Opening\nHello custom.\n# Body\nCustom prompt.';
 
 const FILES = new Map(
   Object.entries({
@@ -20,9 +20,9 @@ const FILES = new Map(
       defaultEvaluationId: 'pretest_6_10',
       evaluations: {
         pretest_6_10: {
-          character: 'Kate',
+          character: 'Jack',
           file: 'pretest_6_10.md',
-          marker: '# PRE-TEST INTERACTION PROMPT: Kate',
+          marker: '# PRE-TEST INTERACTION PROMPT: Jack',
           promptId: 'pretest_6_10',
           version: '2026-06-10',
         },
