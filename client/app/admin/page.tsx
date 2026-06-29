@@ -270,6 +270,7 @@ type PracticePromptMetadataResponse = {
 };
 
 type EvaluationPromptMetadataResponse = {
+  evaluationCharacter: string;
   evaluationPromptId: string;
   promptVersionLabel: string | null;
   savedAt: string | null;
@@ -430,9 +431,24 @@ function RealtimeSessionSection({
   feedbackConditions: FeedbackConditionOption[];
 }) {
   const [rooms, setRooms] = useState<RealtimeRoomStatus[]>([]);
+  const [activeEvaluationCharacter, setActiveEvaluationCharacter] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [terminating, setTerminating] = useState<string | null>(null);
   const [message, setMessage] = useState<{ room: string; text: string; ok: boolean } | null>(null);
+
+  const fetchActiveEvaluationCharacter = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/prompts/evaluation', { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok || typeof data.evaluationCharacter !== 'string') {
+        setActiveEvaluationCharacter(null);
+        return;
+      }
+      setActiveEvaluationCharacter(data.evaluationCharacter);
+    } catch {
+      setActiveEvaluationCharacter(null);
+    }
+  }, []);
 
   const fetchRooms = useCallback(async () => {
     setLoading(true);
@@ -449,7 +465,13 @@ function RealtimeSessionSection({
 
   useEffect(() => {
     fetchRooms();
-  }, [fetchRooms]);
+    fetchActiveEvaluationCharacter();
+  }, [fetchActiveEvaluationCharacter, fetchRooms]);
+
+  const refreshRealtimeStatus = useCallback(() => {
+    fetchRooms();
+    fetchActiveEvaluationCharacter();
+  }, [fetchActiveEvaluationCharacter, fetchRooms]);
 
   async function handleTerminate(room: string) {
     if (!window.confirm(`[${room}] 개별 세션을 종료하시겠습니까?`)) return;
@@ -502,7 +524,7 @@ function RealtimeSessionSection({
           </p>
         </div>
         <button
-          onClick={fetchRooms}
+          onClick={refreshRealtimeStatus}
           className="text-muted-foreground hover:text-foreground text-xs underline underline-offset-2 transition-colors"
         >
           새로고침
@@ -560,7 +582,7 @@ function RealtimeSessionSection({
                       </span>
                       {' · Character '}
                       <span className="text-foreground font-semibold">
-                        {room.evaluationCharacter ?? '미기록'}
+                        {activeEvaluationCharacter ?? room.evaluationCharacter ?? '미기록'}
                       </span>
                     </span>
                   </>
