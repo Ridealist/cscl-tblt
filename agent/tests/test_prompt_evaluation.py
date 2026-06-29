@@ -13,11 +13,11 @@ def test_evaluation_prompt_loads_default_source() -> None:
     assert source.evaluation_id == "pretest_6_10"
     assert source.evaluation_prompt_id == "pretest_6_10"
     assert source.evaluation_prompt_version == "2026-06-10"
-    assert source.evaluation_character == "Kate"
-    assert source.prompt.startswith("# PRE-TEST INTERACTION PROMPT: Kate")
+    assert source.evaluation_character == "Jack"
+    assert source.prompt.startswith("# PRE-TEST INTERACTION PROMPT: Jack")
     assert (
         get_opening_sentence_from_source(source)
-        == "Hi, I’m Kate. I just moved to Korea. Nice to meet you!"
+        == "Hi, I’m Jack. I just moved to Korea. Nice to meet you!"
     )
 
 
@@ -69,14 +69,14 @@ def test_evaluation_prompt_uses_supabase_prompt_version_snapshot(monkeypatch) ->
             "purpose": "evaluation",
             "evaluation_id": "pretest_6_10",
             "evaluation_prompt": (
-                "# PRE-TEST INTERACTION PROMPT: Kate\n"
+                "# PRE-TEST INTERACTION PROMPT: Jack\n"
                 "# Opening\n"
                 "Version hello.\n"
                 "# Body\n"
                 "Version evaluation prompt."
             ),
             "evaluation_prompt_version": "2026-06-10",
-            "evaluation_character": "Kate",
+            "evaluation_character": "Jack",
             "evaluation_opening_sentence": "Stored hello.",
             "source": "custom",
             "created_at": "2026-06-13T01:00:00.000Z",

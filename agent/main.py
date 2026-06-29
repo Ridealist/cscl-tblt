@@ -86,7 +86,9 @@ REALTIME_AGENT_NAMES = {
 }
 REALTIME_AGENT_NAME = "realtime-agent"
 REALTIME_TTS_VOICE_BY_SESSION_PURPOSE = {
-    "evaluation": "b7d50908-b17c-442d-ad8d-810c63997ed9",  # Kate / Sierra - California Girl
+    # "evaluation": "86e30c1d-714b-4074-a1f2-1cb6b552fb49", # Jack / Carson - Curious Conversationalist
+    "evaluation": "630ed21c-2c5c-41cf-9d82-10a7fd668370",  # Jack / Corey - Supportive Buddy
+    # "evaluation": "b7d50908-b17c-442d-ad8d-810c63997ed9",  # Kate / Sierra - California Girl
     "practice": "b7d50908-b17c-442d-ad8d-810c63997ed9",  # Kate / Sierra - California Girl
 }
 REALTIME_TTS_EXTRA_KWARGS_BY_SESSION_PURPOSE = {
@@ -678,7 +680,12 @@ class RealtimeAssistant(Agent):
         )
         await self.update_instructions(self.build_instructions(name))
 
-        character = getattr(self._prompt_source, "evaluation_character", None) or "Kate"
+        default_character = (
+            "Jack" if hasattr(self._prompt_source, "evaluation_character") else "Kate"
+        )
+        character = (
+            getattr(self._prompt_source, "evaluation_character", None) or default_character
+        )
         instruction = (
             f"Say only this exact opening as {character}, a friendly classmate, and nothing else: "
             f"{json.dumps(self._opening_sentence, ensure_ascii=False)}"

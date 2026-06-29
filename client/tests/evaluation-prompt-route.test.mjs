@@ -165,7 +165,7 @@ test('POST stores a new evaluation prompt version', async () => {
   const response = await POST(
     request('/api/admin/prompts/evaluation', {
       evaluationId: ' pretest_6_10 ',
-      prompt: '# PRE-TEST INTERACTION PROMPT: Kate\nEdited prompt.',
+      prompt: '# PRE-TEST INTERACTION PROMPT: Jack\nEdited prompt.',
       versionLabel: 'Edited evaluation prompt',
     })
   );
@@ -175,7 +175,7 @@ test('POST stores a new evaluation prompt version', async () => {
     {
       evaluationId: 'pretest_6_10',
       label: 'Edited evaluation prompt',
-      prompt: '# PRE-TEST INTERACTION PROMPT: Kate\nEdited prompt.',
+      prompt: '# PRE-TEST INTERACTION PROMPT: Jack\nEdited prompt.',
     },
   ]);
 });
