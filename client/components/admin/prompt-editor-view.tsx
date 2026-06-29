@@ -420,7 +420,7 @@ function EvaluationPromptView() {
           <div>
             <h2 className="text-foreground text-sm font-semibold">Evaluation 프롬프트</h2>
             <p className="text-muted-foreground text-xs">
-              자유 대화 평가 세션에서 Kate가 사용하는 manifest 기반 프롬프트입니다.
+              자유 대화 평가 세션에서 Jack이 사용하는 manifest 기반 프롬프트입니다.
             </p>
             <p className="text-muted-foreground text-xs">
               {promptState?.usingDefault

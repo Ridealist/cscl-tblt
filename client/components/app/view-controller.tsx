@@ -55,13 +55,17 @@ export function ViewController({
   onJoin,
   onStudentLogin,
   onStudentLogout,
+  sessionActivityType,
   sessionNotice,
   student,
 }: ViewControllerProps) {
   const { isConnected } = useSessionContext();
   const { resolvedTheme } = useTheme();
-  const agentDisplayName = 'Kate';
-  const agentAvatarSrc = '/agents/kate_photo_20260615.png';
+  const isEvaluationSession = sessionActivityType === 'free_conversation';
+  const agentDisplayName = isEvaluationSession ? 'Jack' : 'Kate';
+  const agentAvatarSrc = isEvaluationSession
+    ? '/agents/jack_photo.png'
+    : '/agents/kate_photo_20260615.png';
 
   return (
     <AnimatePresence mode="wait">
