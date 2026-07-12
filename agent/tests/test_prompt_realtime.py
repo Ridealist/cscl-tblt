@@ -279,7 +279,8 @@ def test_realtime_default_prompt_source_records_default_task_card_id() -> None:
     source = prompt_realtime.load_prompt_source()
 
     assert source.source == "default"
-    assert source.task_card_id == "healthy_habit_stamp_card"
+    assert source.task_card_id == "special_activity_plan"
+    assert source.task_card_prompt.startswith("# TASK CARD: Our Class Special Activity Plan")
     assert source.prompt_version_id is None
 
 
@@ -543,6 +544,46 @@ def test_realtime_prompt_call_healthy_habit_task_card_id_overrides_default_selec
     assert "# TASK CARD: Our Class Morning Exercise Challenge" not in prompt
 
 
+def test_realtime_prompt_default_uses_special_activity_plan_task_card(
+    tmp_path, monkeypatch
+) -> None:
+    prompt = build_prompt(role="dominant")
+
+    assert "# TASK CARD: Our Class Special Activity Plan" in prompt
+    assert "# TASK CARD: Our Class Healthy Habit Stamp Card" not in prompt
+
+
+def test_special_activity_plan_prompt_sources_stay_consistent() -> None:
+    source_dir = prompt_realtime.DEFAULT_PROMPT_SOURCE_DIR
+    task_card = (
+        source_dir / "task-cards" / "special_activity_plan.md"
+    ).read_text(encoding="utf-8")
+    manifest = json.loads(
+        (source_dir / "condition-combinations" / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    condition_prompts = [
+        (
+            source_dir / "condition-combinations" / manifest[key]["file"]
+        ).read_text(encoding="utf-8")
+        for key in prompt_realtime.CONDITION_COMBINATION_PROMPT_KEYS
+    ]
+
+    required_final_sentence = '"We choose ___, ___, and ___ because ___."'
+    assert required_final_sentence in task_card
+    assert "Class 3 does it on Wednesday afternoon." in task_card
+    assert "Class 5 does it on Monday afternoons." in task_card
+
+    combined_condition_prompts = "\n\n".join(condition_prompts)
+    assert "Let’s include ___, ___, and ___ because ___." not in combined_condition_prompts
+    assert "Class 3 does it Friday afternoon" not in combined_condition_prompts
+    assert "Class 3 does it before class" not in combined_condition_prompts
+    assert "Class 5 does it on Friday afternoon" not in combined_condition_prompts
+    assert "Eating fruit is fun and relaxing" not in combined_condition_prompts
+    assert "Delicious and healthy" not in combined_condition_prompts
+
+
 def test_realtime_opening_comes_from_selected_task_card(tmp_path, monkeypatch) -> None:
     assert get_opening_sentence("morning_exercise_challenge") == (
         "Hi, I'm Kate. Let's choose one morning exercise activity for our Class."
@@ -553,6 +594,18 @@ def test_realtime_opening_comes_from_selected_task_card(tmp_path, monkeypatch) -
     assert get_opening_sentence("healthy_habit_stamp_card") == (
         "Hi, I'm Kate. Let's choose three healthy habits for our Class's stamp card."
     )
+
+
+def test_realtime_opening_comes_from_special_activity_plan_without_placeholder(
+    tmp_path, monkeypatch
+) -> None:
+    opening = get_opening_sentence("special_activity_plan")
+
+    assert opening == (
+        "Hi, I'm Kate. Let's choose three special activities for our class. "
+        'Let\'s start from step 1. When you are ready, say "Okay."'
+    )
+    assert "(곧 입력 예정)" not in opening
 
 
 def test_realtime_opening_falls_back_when_task_card_has_no_opening(

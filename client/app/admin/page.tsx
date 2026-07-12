@@ -5,6 +5,7 @@ import { AdminLogoutButton } from '@/components/admin/admin-logout-button';
 import { PromptEditorView } from '@/components/admin/prompt-editor-view';
 import { type AgentMode, getAgentModeLabel } from '@/lib/agent-mode';
 import { type AgentRole, getAgentRoleLabel } from '@/lib/agent-role';
+import { promptVersionCustomLabelDisplay } from '@/lib/prompt-version-display';
 import type { RealtimePromptSource } from '@/lib/realtime-prompt-config';
 import {
   type ActivityType,
@@ -269,6 +270,7 @@ type PracticePromptMetadataResponse = {
 };
 
 type EvaluationPromptMetadataResponse = {
+  evaluationCharacter: string;
   evaluationPromptId: string;
   promptVersionLabel: string | null;
   savedAt: string | null;
@@ -276,9 +278,9 @@ type EvaluationPromptMetadataResponse = {
 };
 
 type ActivePromptVersionMetadata = {
+  customVersionLabel: string;
   promptId: string;
   savedAt: string | null;
-  versionLabel: string;
 };
 
 function sleep(ms: number) {
@@ -308,9 +310,12 @@ function metadataFromPracticePrompt(
   data: PracticePromptMetadataResponse
 ): ActivePromptVersionMetadata {
   return {
+    customVersionLabel: promptVersionCustomLabelDisplay({
+      id: data.promptId,
+      label: data.promptVersionLabel,
+      usingDefault: data.usingDefault,
+    }),
     promptId: data.promptId,
-    versionLabel:
-      data.promptVersionLabel ?? (data.usingDefault ? 'Tracked markdown default' : '이름 없음'),
     savedAt: data.savedAt,
   };
 }
@@ -319,9 +324,12 @@ function metadataFromEvaluationPrompt(
   data: EvaluationPromptMetadataResponse
 ): ActivePromptVersionMetadata {
   return {
+    customVersionLabel: promptVersionCustomLabelDisplay({
+      id: data.evaluationPromptId,
+      label: data.promptVersionLabel,
+      usingDefault: data.usingDefault,
+    }),
     promptId: data.evaluationPromptId,
-    versionLabel:
-      data.promptVersionLabel ?? (data.usingDefault ? 'Tracked markdown default' : '이름 없음'),
     savedAt: data.savedAt,
   };
 }
@@ -394,8 +402,8 @@ function ActivePromptVersionSection({ sessionPurpose }: { sessionPurpose: Sessio
             <span className="text-foreground font-mono font-semibold">{metadata.promptId}</span>
           </div>
           <div className="flex items-center justify-between gap-4 px-3 py-2">
-            <span className="text-muted-foreground">버전 이름</span>
-            <span className="text-foreground font-semibold">{metadata.versionLabel}</span>
+            <span className="text-muted-foreground">사용자 지정 버전명</span>
+            <span className="text-foreground font-semibold">{metadata.customVersionLabel}</span>
           </div>
           <div className="flex items-center justify-between gap-4 px-3 py-2">
             <span className="text-muted-foreground">저장 시각</span>
@@ -423,9 +431,24 @@ function RealtimeSessionSection({
   feedbackConditions: FeedbackConditionOption[];
 }) {
   const [rooms, setRooms] = useState<RealtimeRoomStatus[]>([]);
+  const [activeEvaluationCharacter, setActiveEvaluationCharacter] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [terminating, setTerminating] = useState<string | null>(null);
   const [message, setMessage] = useState<{ room: string; text: string; ok: boolean } | null>(null);
+
+  const fetchActiveEvaluationCharacter = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/prompts/evaluation', { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok || typeof data.evaluationCharacter !== 'string') {
+        setActiveEvaluationCharacter(null);
+        return;
+      }
+      setActiveEvaluationCharacter(data.evaluationCharacter);
+    } catch {
+      setActiveEvaluationCharacter(null);
+    }
+  }, []);
 
   const fetchRooms = useCallback(async () => {
     setLoading(true);
@@ -442,7 +465,13 @@ function RealtimeSessionSection({
 
   useEffect(() => {
     fetchRooms();
-  }, [fetchRooms]);
+    fetchActiveEvaluationCharacter();
+  }, [fetchActiveEvaluationCharacter, fetchRooms]);
+
+  const refreshRealtimeStatus = useCallback(() => {
+    fetchRooms();
+    fetchActiveEvaluationCharacter();
+  }, [fetchActiveEvaluationCharacter, fetchRooms]);
 
   async function handleTerminate(room: string) {
     if (!window.confirm(`[${room}] 개별 세션을 종료하시겠습니까?`)) return;
@@ -495,7 +524,7 @@ function RealtimeSessionSection({
           </p>
         </div>
         <button
-          onClick={fetchRooms}
+          onClick={refreshRealtimeStatus}
           className="text-muted-foreground hover:text-foreground text-xs underline underline-offset-2 transition-colors"
         >
           새로고침
@@ -553,7 +582,7 @@ function RealtimeSessionSection({
                       </span>
                       {' · Character '}
                       <span className="text-foreground font-semibold">
-                        {room.evaluationCharacter ?? '미기록'}
+                        {activeEvaluationCharacter ?? room.evaluationCharacter ?? '미기록'}
                       </span>
                     </span>
                   </>

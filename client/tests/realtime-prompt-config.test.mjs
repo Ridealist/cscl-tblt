@@ -65,3 +65,17 @@ test('validateRealtimePromptConfig removes obsolete conversation-example stack l
   );
   assert.equal(result.config.basePrompt.includes('3. ONE Task Card'), true);
 });
+
+test('validateRealtimePromptConfig defaults missing task card id to L5-T3', () => {
+  const { validateRealtimePromptConfig } = loadRealtimePromptConfig();
+  const result = validateRealtimePromptConfig({
+    basePrompt: '# BASE PROMPT:\nBase.',
+    collaborativePrompt: '# INTERLOCUTOR ROLE PROMPT: Collaborative\nCollaborative role.',
+    dominantPrompt: '# INTERLOCUTOR ROLE PROMPT: Dominant\nDominant role.',
+    feedbackPrompt: '# FEEDBACK CONDITION PROMPT: No Feedback\nNo feedback.',
+    taskCardPrompt: '# TASK CARD: Our Class Special Activity Plan\nTask card.',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.config.taskCardId, 'special_activity_plan');
+});

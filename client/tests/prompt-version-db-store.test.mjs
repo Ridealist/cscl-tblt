@@ -43,9 +43,9 @@ const EVALUATION_ROW = {
   id: '00000000-0000-4000-8000-000000000035',
   purpose: 'evaluation',
   evaluation_id: 'pretest_6_10',
-  evaluation_prompt: '# PRE-TEST INTERACTION PROMPT: Kate\n# Opening\nHello.',
+  evaluation_prompt: '# PRE-TEST INTERACTION PROMPT: Jack\n# Opening\nHello.',
   evaluation_prompt_version: '2026-06-10',
-  evaluation_character: 'Kate',
+  evaluation_character: 'Jack',
   evaluation_opening_sentence: 'Hello.',
   source: 'custom',
   is_active: true,
@@ -128,6 +128,7 @@ function normalizeConditionCombinationPrompts(value) {
 
 function loadPromptVersionDbStore(options = {}) {
   const calls = {
+    queries: [],
     rpcs: [],
   };
   const exports = loadModule('lib/prompt-version-db-store.ts', (specifier) => {
@@ -143,6 +144,28 @@ function loadPromptVersionDbStore(options = {}) {
     if (specifier === '@/lib/supabase/admin') {
       return {
         createSupabaseAdminClient: () => ({
+          from: (table) => {
+            const query = { filters: [], orderBy: null, select: null, table };
+            calls.queries.push(query);
+            const builder = {
+              select: (columns) => {
+                query.select = columns;
+                return builder;
+              },
+              eq: (column, value) => {
+                query.filters.push({ column, value });
+                return builder;
+              },
+              order: async (column, orderOptions) => {
+                query.orderBy = { column, options: orderOptions };
+                return {
+                  data: options.listData ?? [],
+                  error: options.listError ?? null,
+                };
+              },
+            };
+            return builder;
+          },
           rpc: async (name, args) => {
             calls.rpcs.push({ name, args });
             return {
@@ -162,6 +185,30 @@ function loadPromptVersionDbStore(options = {}) {
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
+
+test('listPromptVersions includes task card ids in practice summaries', async () => {
+  const { calls, listPromptVersions } = loadPromptVersionDbStore({
+    listData: [PRACTICE_ROW],
+  });
+
+  const versions = await listPromptVersions('practice');
+
+  assert.deepEqual(plain(versions), [
+    {
+      id: PRACTICE_ROW.id,
+      label: PRACTICE_ROW.label,
+      createdAt: PRACTICE_ROW.created_at,
+      hash: PRACTICE_ROW.hash,
+      taskCardId: PRACTICE_ROW.task_card_id,
+    },
+  ]);
+  assert.deepEqual(plain(calls.queries[0].filters), [
+    {
+      column: 'purpose',
+      value: 'practice',
+    },
+  ]);
+});
 
 test('activatePracticePromptVersion scopes the activation RPC to practice rows', async () => {
   const { activatePracticePromptVersion, calls } = loadPromptVersionDbStore({

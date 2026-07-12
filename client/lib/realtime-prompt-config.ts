@@ -54,6 +54,7 @@ export interface RealtimePromptVersionSummary {
   label: string;
   createdAt: string;
   hash: string;
+  taskCardId?: string;
 }
 
 export type RealtimePromptState = RealtimePromptConfig &
@@ -163,7 +164,7 @@ export function validateRealtimePromptConfig(
   const taskCardId =
     typeof source.taskCardId === 'string' && source.taskCardId.trim()
       ? source.taskCardId.trim()
-      : 'school_event_invitation';
+      : 'special_activity_plan';
   const taskCardPrompt = source.taskCardPrompt;
   if (typeof taskCardPrompt !== 'string' || !taskCardPrompt.trim()) {
     return { ok: false, error: 'taskCardPrompt 값이 비어 있습니다.' };
