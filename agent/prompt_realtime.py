@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -40,6 +41,7 @@ PROMPT_VERSION_COLUMNS = ",".join(
         "condition_combination_prompts",
         "task_card_id",
         "task_card_prompt",
+        "task_character",
         "source",
         "is_active",
         "created_at",
@@ -59,6 +61,12 @@ class ResolvedRealtimePrompt:
     feedback_prompt: str
     task_card_prompt: str
     source: PromptSource
+    character_id: str = "kate"
+    character_name: str = "Kate"
+    character_avatar_src: str = "/agents/kate_photo_20260615.png"
+    character_voice_id: str = "b7d50908-b17c-442d-ad8d-810c63997ed9"
+    character_tts_speed: float = 0.8
+    character_tts_volume: float = 1.1
     condition_combination_prompts: dict[str, str] = field(default_factory=dict)
     prompt_version_id: str | None = None
     saved_at: str | None = None
@@ -109,6 +117,133 @@ def normalize_condition_combination_prompts(value: object) -> dict[str, str]:
         )
         prompts[key] = prompt
     return prompts
+
+
+def _load_task_character(
+    source_dir: Path,
+    task_card_id: str | None,
+) -> dict[str, object]:
+    fallback = {
+        "id": "kate",
+        "display_name": "Kate",
+        "avatar_src": "/agents/kate_photo_20260615.png",
+        "voice_id": "b7d50908-b17c-442d-ad8d-810c63997ed9",
+        "tts_speed": 0.8,
+        "tts_volume": 1.1,
+    }
+    try:
+        manifest = json.loads((source_dir / "manifest.json").read_text(encoding="utf-8"))
+        task_manifest_file = manifest.get("taskCardManifest", "task-cards/manifest.json")
+        character_manifest_file = manifest.get(
+            "characterManifest", "characters/manifest.json"
+        )
+        selected_task_id = task_card_id or manifest.get("defaultTaskCardId")
+        task_cards = json.loads((source_dir / task_manifest_file).read_text(encoding="utf-8"))
+        characters = json.loads(
+            (source_dir / character_manifest_file).read_text(encoding="utf-8")
+        )
+        task_entry = task_cards.get(selected_task_id, {})
+        character_id = task_entry.get("characterId", "kate")
+        character = characters.get(character_id)
+    except (OSError, json.JSONDecodeError, TypeError, AttributeError):
+        return fallback
+    if not isinstance(character_id, str) or not isinstance(character, dict):
+        return fallback
+
+    def text_value(key: str, default: str) -> str:
+        value = character.get(key)
+        return value.strip() if isinstance(value, str) and value.strip() else default
+
+    def number_value(key: str, default: float) -> float:
+        value = character.get(key)
+        return float(value) if isinstance(value, (int, float)) else default
+
+    return {
+        "id": character_id,
+        "display_name": text_value("displayName", str(fallback["display_name"])),
+        "avatar_src": text_value("avatarSrc", str(fallback["avatar_src"])),
+        "voice_id": text_value("voiceId", str(fallback["voice_id"])),
+        "tts_speed": number_value("ttsSpeed", float(fallback["tts_speed"])),
+        "tts_volume": number_value("ttsVolume", float(fallback["tts_volume"])),
+    }
+
+
+def _normalize_task_character(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    required_text = ("id", "displayName", "avatarSrc", "voiceId")
+    if any(not isinstance(value.get(key), str) or not value[key].strip() for key in required_text):
+        return None
+    if not isinstance(value.get("ttsSpeed"), (int, float)) or not isinstance(
+        value.get("ttsVolume"), (int, float)
+    ):
+        return None
+    return {
+        "id": value["id"].strip(),
+        "display_name": value["displayName"].strip(),
+        "avatar_src": value["avatarSrc"].strip(),
+        "voice_id": value["voiceId"].strip(),
+        "tts_speed": float(value["ttsSpeed"]),
+        "tts_volume": float(value["ttsVolume"]),
+    }
+
+
+def _infer_task_character_from_prompt(prompt: str) -> str | None:
+    section_match = re.search(
+        r"^#+\s+Character Information\s*$([\s\S]*?)(?=^#|\Z)",
+        prompt,
+        re.IGNORECASE | re.MULTILINE,
+    )
+    if section_match:
+        name_match = re.search(
+            r"^\s*[*-]\s*Name:\s*(Kate|Jack)\s*$",
+            section_match.group(1),
+            re.IGNORECASE | re.MULTILINE,
+        )
+        if name_match:
+            return name_match.group(1).lower()
+    opening_match = re.search(
+        r"^#\s+Opening\s*$[\s\S]*?\bI(?:'|’|\s+a)m\s+(Kate|Jack)\b",
+        prompt,
+        re.IGNORECASE | re.MULTILINE,
+    )
+    return opening_match.group(1).lower() if opening_match else None
+
+
+def _resolve_task_character_snapshot(
+    value: object,
+    task_card_prompt: str,
+    task_card_id: str | None,
+) -> dict[str, object]:
+    stored = _normalize_task_character(value)
+    if stored:
+        return stored
+    inferred_id = _infer_task_character_from_prompt(task_card_prompt)
+    if inferred_id:
+        inferred = _load_task_character_for_id(DEFAULT_PROMPT_SOURCE_DIR, inferred_id)
+        if inferred:
+            return inferred
+    return _load_task_character(DEFAULT_PROMPT_SOURCE_DIR, task_card_id)
+
+
+def _load_task_character_for_id(
+    source_dir: Path,
+    character_id: str,
+) -> dict[str, object] | None:
+    try:
+        manifest = json.loads((source_dir / "manifest.json").read_text(encoding="utf-8"))
+        character_manifest_file = manifest.get(
+            "characterManifest", "characters/manifest.json"
+        )
+        characters = json.loads(
+            (source_dir / character_manifest_file).read_text(encoding="utf-8")
+        )
+        source = characters.get(character_id)
+    except (OSError, json.JSONDecodeError, TypeError, AttributeError):
+        return None
+    if not isinstance(source, dict):
+        return None
+    return _normalize_task_character({"id": character_id, **source})
 
 
 def _condition_combination_feedback_suffix(feedback: str | None) -> str:
@@ -413,6 +548,11 @@ def _load_prompt_version_source(
             f"Prompt version row is missing required prompt fields: {resolved_version_id}"
         )
 
+    character = _resolve_task_character_snapshot(
+        row.get("task_character"),
+        task_card_prompt,
+        resolved_task_card_id,
+    )
     return ResolvedRealtimePrompt(
         base_prompt=_strip_obsolete_prompt_stack_lines(base_prompt),
         role_prompts={
@@ -425,6 +565,12 @@ def _load_prompt_version_source(
             row.get("condition_combination_prompts")
         ),
         task_card_prompt=task_card_prompt,
+        character_id=str(character["id"]),
+        character_name=str(character["display_name"]),
+        character_avatar_src=str(character["avatar_src"]),
+        character_voice_id=str(character["voice_id"]),
+        character_tts_speed=float(character["tts_speed"]),
+        character_tts_volume=float(character["tts_volume"]),
         source="custom",
         prompt_version_id=resolved_version_id,
         saved_at=saved_at if isinstance(saved_at, str) and saved_at.strip() else None,
@@ -538,6 +684,7 @@ def _resolved_prompt_from_tuple(
         condition_combination_prompts,
         task_card_prompt,
     ) = config
+    character = _load_task_character(DEFAULT_PROMPT_SOURCE_DIR, task_card_id)
     return ResolvedRealtimePrompt(
         base_prompt=base_prompt,
         role_prompts=role_prompts,
@@ -547,6 +694,12 @@ def _resolved_prompt_from_tuple(
             condition_combination_prompts
         ),
         task_card_prompt=task_card_prompt,
+        character_id=str(character["id"]),
+        character_name=str(character["display_name"]),
+        character_avatar_src=str(character["avatar_src"]),
+        character_voice_id=str(character["voice_id"]),
+        character_tts_speed=float(character["tts_speed"]),
+        character_tts_volume=float(character["tts_volume"]),
         source=source,
         prompt_version_id=prompt_version_id,
         saved_at=saved_at,
@@ -562,12 +715,15 @@ def load_prompt_source(
     if isinstance(prompt_version_id, str) and prompt_version_id.strip():
         return _load_prompt_version_source(prompt_version_id, feedback_condition_id)
 
+    resolved_task_card_id = (
+        task_card_id.strip()
+        if isinstance(task_card_id, str) and task_card_id.strip()
+        else _read_default_task_card_id()
+    )
     return _resolved_prompt_from_tuple(
         load_default_prompt_config(task_card_id, feedback_condition_id),
         source="default",
-        task_card_id=task_card_id.strip()
-        if isinstance(task_card_id, str) and task_card_id.strip()
-        else _read_default_task_card_id(),
+        task_card_id=resolved_task_card_id,
     )
 
 
@@ -690,6 +846,16 @@ def build_prompt_stack_from_source(
             source.feedback_condition,
         ),
         "task_card_id": source.task_card_id,
+        "character_id": source.character_id,
+        "character_name": source.character_name,
+        "task_character": {
+            "id": source.character_id,
+            "displayName": source.character_name,
+            "avatarSrc": source.character_avatar_src,
+            "voiceId": source.character_voice_id,
+            "ttsSpeed": source.character_tts_speed,
+            "ttsVolume": source.character_tts_volume,
+        },
         "participant_name": name or None,
         "stack_order": [chunk["id"] for chunk in chunks],
         "chunks": chunks,

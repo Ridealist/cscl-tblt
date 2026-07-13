@@ -24,6 +24,24 @@ function loadRealtimePromptConfig() {
     {
       exports: module.exports,
       module,
+      require: (specifier) => {
+        if (specifier === '@/lib/agent-character') {
+          const kate = {
+            id: 'kate',
+            displayName: 'Kate',
+            avatarSrc: '/agents/kate.png',
+            voiceId: 'kate-voice',
+            ttsSpeed: 0.8,
+            ttsVolume: 1.1,
+          };
+          return {
+            KATE_TASK_CHARACTER: kate,
+            inferRealtimeTaskCharacter: () => null,
+            normalizeRealtimeTaskCharacter: (value) => value ?? null,
+          };
+        }
+        throw new Error(`Unexpected module: ${specifier}`);
+      },
     },
     { filename: 'lib/realtime-prompt-config.ts' }
   );

@@ -14,6 +14,7 @@
   "feedbackConditionManifest": "feedbacks/manifest.json",
   "defaultFeedbackConditionId": "no_corrective",
   "conditionCombinationManifest": "condition-combinations/manifest.json",
+  "characterManifest": "characters/manifest.json",
   "taskCardManifest": "task-cards/manifest.json",
-  "defaultTaskCardId": "special_activity_plan"
+  "defaultTaskCardId": "birthday_party_plan"
 }

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { KATE_TASK_CHARACTER } from '@/lib/agent-character';
 import {
   promptVersionCustomLabelDisplay,
   promptVersionDisplayLabel,
@@ -17,7 +18,10 @@ import type {
 import { normalizeConditionCombinationPrompts } from '@/lib/realtime-prompt-config';
 import type { SessionPurpose } from '@/lib/session-activity';
 
-type PromptField = Exclude<keyof RealtimePromptConfig, 'conditionCombinationPrompts'>;
+type PromptField = Exclude<
+  keyof RealtimePromptConfig,
+  'conditionCombinationPrompts' | 'taskCharacter'
+>;
 
 type PromptResponse = RealtimePromptState;
 type PromptVersionSummary = RealtimePromptVersionSummary;
@@ -101,6 +105,7 @@ const EMPTY_PROMPT: RealtimePromptConfig = {
   conditionCombinationPrompts: normalizeConditionCombinationPrompts(null),
   taskCardId: 'special_activity_plan',
   taskCardPrompt: '',
+  taskCharacter: KATE_TASK_CHARACTER,
 };
 
 const CONDITION_COMBINATION_PROMPTS = [
@@ -134,6 +139,7 @@ function promptConfigFromResponse(data: RealtimePromptConfig): RealtimePromptCon
     ),
     taskCardId: data.taskCardId,
     taskCardPrompt: data.taskCardPrompt,
+    taskCharacter: data.taskCharacter,
   };
 }
 
@@ -148,7 +154,8 @@ function samePrompt(a: RealtimePromptConfig | null, b: RealtimePromptConfig | nu
     JSON.stringify(a.conditionCombinationPrompts) ===
       JSON.stringify(b.conditionCombinationPrompts) &&
     a.taskCardId === b.taskCardId &&
-    a.taskCardPrompt === b.taskCardPrompt
+    a.taskCardPrompt === b.taskCardPrompt &&
+    JSON.stringify(a.taskCharacter) === JSON.stringify(b.taskCharacter)
   );
 }
 

@@ -43,6 +43,14 @@ const EMPTY_CONDITION_COMBINATION_PROMPTS = {
   collaborative_no_feedback: '',
   collaborative_explicit_correction: '',
 };
+const KATE_TASK_CHARACTER = {
+  id: 'kate',
+  displayName: 'Kate',
+  avatarSrc: '/agents/kate_photo.png',
+  voiceId: 'kate-voice',
+  ttsSpeed: 0.8,
+  ttsVolume: 1.1,
+};
 
 const CUSTOM_CONDITION_COMBINATION_PROMPTS = {
   dominant_no_feedback: 'Dominant no feedback condition prompt.',
@@ -71,6 +79,7 @@ const DEFAULT_PROMPT = {
   conditionCombinationPrompts: DEFAULT_CONDITION_COMBINATION_PROMPTS,
   taskCardId: 'special_activity_plan',
   taskCardPrompt: '# TASK CARD: Our Class Special Activity Plan\nDefault special task card',
+  taskCharacter: KATE_TASK_CHARACTER,
 };
 
 const SCHOOL_EVENT_TASK_CARD_PROMPT =
@@ -85,6 +94,7 @@ const CUSTOM_PROMPT = {
   conditionCombinationPrompts: CUSTOM_CONDITION_COMBINATION_PROMPTS,
   taskCardId: 'school_event_invitation',
   taskCardPrompt: '# TASK CARD: School Event Invitation\nEdited task card prompt',
+  taskCharacter: KATE_TASK_CHARACTER,
 };
 
 const CUSTOM_VERSION = {
@@ -235,6 +245,7 @@ function validateRealtimePromptConfig(value) {
         ...EMPTY_CONDITION_COMBINATION_PROMPTS,
         ...(value.conditionCombinationPrompts ?? {}),
       },
+      taskCharacter: value.taskCharacter ?? KATE_TASK_CHARACTER,
     },
   };
 }
@@ -283,6 +294,15 @@ function loadRealtimePromptRoute(options = {}) {
           CONDITION_COMBINATION_PROMPT_KEYS: Object.keys(EMPTY_CONDITION_COMBINATION_PROMPTS),
           DEFAULT_REALTIME_PROMPT_METADATA,
           validateRealtimePromptConfig,
+        };
+      }
+
+      if (specifier === '@/lib/realtime-character-source') {
+        return {
+          readRealtimeTaskCharacter: async (_taskCardId, prompt) =>
+            /\bJack\b/.test(prompt)
+              ? { ...KATE_TASK_CHARACTER, id: 'jack', displayName: 'Jack' }
+              : KATE_TASK_CHARACTER,
         };
       }
 
@@ -381,6 +401,7 @@ function promptFields(value) {
     conditionCombinationPrompts: value.conditionCombinationPrompts,
     taskCardId: value.taskCardId,
     taskCardPrompt: value.taskCardPrompt,
+    taskCharacter: value.taskCharacter,
   };
 }
 

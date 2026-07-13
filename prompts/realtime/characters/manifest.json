@@ -1,0 +1,16 @@
+{
+  "kate": {
+    "displayName": "Kate",
+    "avatarSrc": "/agents/kate_photo_20260615.png",
+    "voiceId": "b7d50908-b17c-442d-ad8d-810c63997ed9",
+    "ttsSpeed": 0.8,
+    "ttsVolume": 1.1
+  },
+  "jack": {
+    "displayName": "Jack",
+    "avatarSrc": "/agents/jack_photo.png",
+    "voiceId": "630ed21c-2c5c-41cf-9d82-10a7fd668370",
+    "ttsSpeed": 0.8,
+    "ttsVolume": 1.0
+  }
+}

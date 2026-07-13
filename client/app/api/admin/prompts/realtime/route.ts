@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
+import { readRealtimeTaskCharacter } from '@/lib/realtime-character-source';
 import {
   CONDITION_COMBINATION_PROMPT_KEYS,
   DEFAULT_REALTIME_PROMPT_METADATA,
@@ -29,6 +30,7 @@ const PROMPT_SOURCE_MANIFEST_PATH = join(DEFAULT_PROMPT_SOURCE_DIR, 'manifest.js
 const PROMPT_FIELDS = ['basePrompt', 'dominantPrompt', 'collaborativePrompt'] as const;
 
 type PromptManifest = Record<(typeof PROMPT_FIELDS)[number], { file: string; marker: string }> & {
+  characterManifest?: string;
   feedbackConditionManifest?: string;
   defaultFeedbackConditionId?: string;
   conditionCombinationManifest?: string;
@@ -47,6 +49,7 @@ type FeedbackConditionManifest = Record<
 type TaskCardManifest = Record<
   string,
   {
+    characterId?: string;
     file: string;
     title?: string;
     topic?: string;
@@ -82,6 +85,7 @@ function versionToPromptState(
     conditionCombinationPrompts: version.conditionCombinationPrompts,
     taskCardId: version.taskCardId,
     taskCardPrompt: version.taskCardPrompt,
+    taskCharacter: version.taskCharacter,
     promptId: version.promptId,
     savedAt: version.savedAt,
     source: version.source,
@@ -263,6 +267,7 @@ async function readTaskCardConfig(
       taskCards: [
         {
           id: 'legacy_task_card',
+          characterId: 'kate',
           title: 'Legacy Task Card',
           topic: null,
           level: null,
@@ -293,6 +298,8 @@ async function readTaskCardConfig(
       }
       return {
         id,
+        characterId:
+          typeof entry.characterId === 'string' && entry.characterId ? entry.characterId : 'kate',
         title: typeof entry.title === 'string' && entry.title ? entry.title : id,
         topic: typeof entry.topic === 'string' && entry.topic ? entry.topic : null,
         level: typeof entry.level === 'string' && entry.level ? entry.level : null,
@@ -449,12 +456,15 @@ export async function POST(req: Request) {
       typeof body?.taskCardId === 'string' ? body.taskCardId : undefined,
       requestedFeedbackConditionId
     );
+    const taskCardPrompt = getRequestPromptText(body, 'taskCardPrompt', defaults.taskCardPrompt);
+    const taskCharacter = await readRealtimeTaskCharacter(defaults.taskCardId, taskCardPrompt);
     const result = validateRealtimePromptConfig({
       ...body,
       feedbackConditionId: defaults.feedbackConditionId,
       feedbackPrompt: getRequestPromptText(body, 'feedbackPrompt', defaults.feedbackPrompt),
       taskCardId: defaults.taskCardId,
-      taskCardPrompt: getRequestPromptText(body, 'taskCardPrompt', defaults.taskCardPrompt),
+      taskCardPrompt,
+      taskCharacter,
     });
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: 400 });

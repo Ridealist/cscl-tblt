@@ -16,6 +16,13 @@ const CONDITION_COMBINATION_MIGRATION = readFileSync(
   ),
   'utf-8'
 );
+const TASK_CHARACTER_MIGRATION = readFileSync(
+  new URL(
+    '../../supabase/migrations/20260713000000_practice_task_character_snapshot.sql',
+    import.meta.url
+  ),
+  'utf-8'
+);
 
 test('compatibility realtime_prompt_versions view uses invoker security', () => {
   assert.match(
@@ -57,4 +64,11 @@ test('condition-combination migration adds JSONB storage and RPC parameters', ()
     CONDITION_COMBINATION_MIGRATION,
     /condition_combination_prompts\s*=\s*excluded\.condition_combination_prompts/i
   );
+});
+
+test('task-character migration snapshots practice character metadata', () => {
+  assert.match(TASK_CHARACTER_MIGRATION, /add column if not exists task_character jsonb/i);
+  assert.match(TASK_CHARACTER_MIGRATION, /p_task_character jsonb default null/i);
+  assert.match(TASK_CHARACTER_MIGRATION, /'taskCharacter', normalized_task_character/i);
+  assert.match(TASK_CHARACTER_MIGRATION, /jsonb_typeof\(task_character -> 'voiceId'\) = 'string'/i);
 });
