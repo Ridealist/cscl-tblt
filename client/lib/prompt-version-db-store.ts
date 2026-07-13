@@ -15,6 +15,7 @@ export type PromptVersionSummary = {
   label: string;
   createdAt: string;
   hash: string;
+  taskCardId?: string;
 };
 
 type PromptVersionRow = {
@@ -33,6 +34,7 @@ type PromptVersionRow = {
   condition_combination_prompts?: unknown;
   task_card_id?: unknown;
   task_card_prompt?: unknown;
+  task_character?: unknown;
   evaluation_prompt?: unknown;
   evaluation_prompt_version?: unknown;
   evaluation_character?: unknown;
@@ -109,6 +111,7 @@ const PROMPT_VERSION_COLUMNS = [
   'condition_combination_prompts',
   'task_card_id',
   'task_card_prompt',
+  'task_character',
   'evaluation_prompt',
   'evaluation_prompt_version',
   'evaluation_character',
@@ -163,6 +166,7 @@ export function hashPracticePromptConfig(config: RealtimePromptConfig): string {
     ),
     taskCardId: config.taskCardId,
     taskCardPrompt: config.taskCardPrompt,
+    taskCharacter: config.taskCharacter,
   });
 }
 
@@ -186,12 +190,14 @@ function summaryFromRow(row: PromptVersionRow): PromptVersionSummary | null {
   const id = text(row.id);
   const createdAt = text(row.created_at);
   const hash = text(row.hash);
+  const taskCardId = text(row.task_card_id);
   if (!id || !createdAt || !hash) return null;
   return {
     id,
     label: text(row.label) ?? `${text(row.purpose) ?? 'prompt'} ${createdAt}`,
     createdAt,
     hash,
+    ...(taskCardId ? { taskCardId } : {}),
   };
 }
 
@@ -220,6 +226,7 @@ function rowToPracticeVersion(row: PromptVersionRow): PracticePromptVersion {
     conditionCombinationPrompts: row.condition_combination_prompts,
     taskCardId: row.task_card_id,
     taskCardPrompt: row.task_card_prompt,
+    taskCharacter: row.task_character,
   });
   if (!result.ok) {
     throw new PromptVersionStoreError('prompt_version_invalid', result.error, 500);
@@ -409,6 +416,7 @@ export async function savePracticePromptVersion(
     p_label: options.label ?? null,
     p_task_card_id: config.taskCardId,
     p_task_card_prompt: config.taskCardPrompt,
+    p_task_character: config.taskCharacter,
   });
 
   if (error) {

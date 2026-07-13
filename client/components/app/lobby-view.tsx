@@ -2,6 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import {
+  type AgentCharacter,
+  JACK_CHARACTER,
+  KATE_CHARACTER,
+  normalizeAgentCharacter,
+} from '@/lib/agent-character';
 import { type AgentMode, getAgentModeLabel } from '@/lib/agent-mode';
 import {
   type ActivityType,
@@ -20,6 +26,7 @@ interface LobbyViewProps {
     agentMode: AgentMode,
     options?: {
       activityType?: ActivityType;
+      agentCharacter?: AgentCharacter;
       evaluationId?: string;
       sessionPurpose?: SessionPurpose;
     }
@@ -45,6 +52,7 @@ export function LobbyView({
   const [realtimeResetting, setRealtimeResetting] = useState(false);
   const [rooms, setRooms] = useState<{ name: string; numParticipants: number }[]>([]);
   const [error, setError] = useState('');
+  const [practiceCharacter, setPracticeCharacter] = useState<AgentCharacter>(KATE_CHARACTER);
   const displayNameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -79,6 +87,7 @@ export function LobbyView({
       setAvailableActivity(nextActivity);
       setSelectedActivity((current) => (current === nextActivity ? current : null));
       setRealtimeResetting(data.realtimeResetting === true);
+      setPracticeCharacter(normalizeAgentCharacter(data.practiceCharacter));
       setSelectedGroup((current) =>
         nextAgentMode === 'pipeline' && current !== null && current <= nextRooms.length
           ? current
@@ -140,13 +149,14 @@ export function LobbyView({
       const roomName = makeActivityRoomName(normalizedDisplayName, activityType);
       onJoin(normalizedDisplayName, roomName, 'realtime', {
         activityType,
+        agentCharacter: activityType === 'free_conversation' ? JACK_CHARACTER : practiceCharacter,
         sessionPurpose: getSessionPurposeForActivity(activityType),
       });
       return;
     }
     const roomName = selectedRoomName;
     if (!roomName) return;
-    onJoin(normalizedDisplayName, roomName, agentMode);
+    onJoin(normalizedDisplayName, roomName, agentMode, { agentCharacter: KATE_CHARACTER });
   }
 
   const joinDisabled =
@@ -279,8 +289,8 @@ export function LobbyView({
                   }`}
                 >
                   {activityType === 'free_conversation'
-                    ? 'Kate와 서로 알아가기'
-                    : 'Kate와 영어 과제 해결하기'}
+                    ? 'Jack과 서로 알아가기'
+                    : `${practiceCharacter.displayName}와 영어 과제 해결하기`}
                 </span>
               </button>
             ))}

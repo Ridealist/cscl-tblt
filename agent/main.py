@@ -86,7 +86,9 @@ REALTIME_AGENT_NAMES = {
 }
 REALTIME_AGENT_NAME = "realtime-agent"
 REALTIME_TTS_VOICE_BY_SESSION_PURPOSE = {
-    "evaluation": "b7d50908-b17c-442d-ad8d-810c63997ed9",  # Kate / Sierra - California Girl
+    # "evaluation": "86e30c1d-714b-4074-a1f2-1cb6b552fb49", # Jack / Carson - Curious Conversationalist
+    "evaluation": "630ed21c-2c5c-41cf-9d82-10a7fd668370",  # Jack / Corey - Supportive Buddy
+    # "evaluation": "b7d50908-b17c-442d-ad8d-810c63997ed9",  # Kate / Sierra - California Girl
     "practice": "b7d50908-b17c-442d-ad8d-810c63997ed9",  # Kate / Sierra - California Girl
 }
 REALTIME_TTS_EXTRA_KWARGS_BY_SESSION_PURPOSE = {
@@ -678,7 +680,11 @@ class RealtimeAssistant(Agent):
         )
         await self.update_instructions(self.build_instructions(name))
 
-        character = getattr(self._prompt_source, "evaluation_character", None) or "Kate"
+        character = (
+            getattr(self._prompt_source, "evaluation_character", None)
+            or getattr(self._prompt_source, "character_name", None)
+            or "Kate"
+        )
         instruction = (
             f"Say only this exact opening as {character}, a friendly classmate, and nothing else: "
             f"{json.dumps(self._opening_sentence, ensure_ascii=False)}"
@@ -718,6 +724,10 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
         get_opening_sentence_fn = get_evaluation_opening_sentence_from_source
         resolved_task_card_id = None
         resolved_feedback_condition_id = None
+        resolved_character_id = "jack"
+        resolved_character_name = prompt_source.evaluation_character
+        tts_voice = _realtime_tts_voice_for_session_purpose("evaluation")
+        tts_extra_kwargs = _realtime_tts_extra_kwargs_for_session_purpose("evaluation")
     else:
         prompt_source = await asyncio.to_thread(
             load_realtime_prompt_source,
@@ -730,10 +740,13 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
         get_opening_sentence_fn = get_realtime_opening_sentence_from_source
         resolved_task_card_id = prompt_source.task_card_id or task_card_id
         resolved_feedback_condition_id = prompt_source.feedback_condition
-    tts_voice = _realtime_tts_voice_for_session_purpose(activity_context.get("session_purpose"))
-    tts_extra_kwargs = _realtime_tts_extra_kwargs_for_session_purpose(
-        activity_context.get("session_purpose")
-    )
+        resolved_character_id = prompt_source.character_id
+        resolved_character_name = prompt_source.character_name
+        tts_voice = prompt_source.character_voice_id
+        tts_extra_kwargs = {
+            "speed": prompt_source.character_tts_speed,
+            "volume": prompt_source.character_tts_volume,
+        }
     ctx.log_context_fields = {
         "room": ctx.room.name,
         "mode": "realtime",
@@ -746,6 +759,8 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
         "tts_voice_id": tts_voice,
         "tts_speed": tts_extra_kwargs["speed"],
         "tts_volume": tts_extra_kwargs["volume"],
+        "character_id": resolved_character_id,
+        "character_name": resolved_character_name,
     }
     log.info(
         "Starting realtime job: room=%s room_sid=%s job_id=%s role=%s "
@@ -784,6 +799,8 @@ async def _run_realtime(ctx: JobContext, role: str) -> None:
             "agent_role": role,
             "feedback_condition_id": resolved_feedback_condition_id,
             "task_card_id": resolved_task_card_id,
+            "character_id": resolved_character_id,
+            "character_name": resolved_character_name,
             "prompt_source": prompt_source.source,
             "prompt_id": prompt_source.prompt_version_id or "default",
             "prompt_version_id": prompt_source.prompt_version_id,

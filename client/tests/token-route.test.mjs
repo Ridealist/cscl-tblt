@@ -201,6 +201,36 @@ function loadTokenRoute(options = {}) {
             mode === 'realtime' ? 'realtime-agent' : 'pipeline-agent',
         };
       }
+      if (specifier === '@/lib/agent-character') {
+        return {
+          JACK_CHARACTER: {
+            id: 'jack',
+            displayName: 'Jack',
+            avatarSrc: '/agents/jack_photo.png',
+          },
+          KATE_CHARACTER: {
+            id: 'kate',
+            displayName: 'Kate',
+            avatarSrc: '/agents/kate_photo_20260615.png',
+          },
+        };
+      }
+      if (specifier === '@/lib/realtime-character-source') {
+        return {
+          readRealtimeTaskCharacter: async (taskCardId) =>
+            !taskCardId || taskCardId === 'birthday_party_plan'
+              ? {
+                  id: 'jack',
+                  displayName: 'Jack',
+                  avatarSrc: '/agents/jack_photo.png',
+                }
+              : {
+                  id: 'kate',
+                  displayName: 'Kate',
+                  avatarSrc: '/agents/kate_photo_20260615.png',
+                },
+        };
+      }
       if (specifier === '@/lib/realtime-prompt-config') {
         return {
           DEFAULT_REALTIME_PROMPT_METADATA: {
@@ -226,9 +256,9 @@ function loadTokenRoute(options = {}) {
               evaluationId: evaluationId ?? 'pretest_6_10',
               evaluationPromptId: 'pretest_6_10',
               evaluationPromptVersion: '2026-06-10',
-              evaluationCharacter: 'Kate',
-              openingSentence: 'Hi, I’m Kate. I just moved to Korea. Nice to meet you!',
-              prompt: '# PRE-TEST INTERACTION PROMPT: Kate',
+              evaluationCharacter: 'Jack',
+              openingSentence: 'Hi, I’m Jack. I just moved to Korea. Nice to meet you!',
+              prompt: '# PRE-TEST INTERACTION PROMPT: Jack',
               promptVersionId: null,
               savedAt: null,
               evaluations: [],
@@ -302,6 +332,7 @@ test('token route creates a named realtime room config for token-based agent dis
   assert.equal(response.status, 200);
   assert.equal(response.jsonBody.participantToken, 'fake-token');
   assert.equal(response.jsonBody.participantName, 'Debug User');
+  assert.equal(response.jsonBody.agentCharacter.displayName, 'Kate');
 
   const token = accessTokens[0];
   assert.match(token.tokenOptions.identity, /^student-20260001-/);
@@ -323,9 +354,64 @@ test('token route creates a named realtime room config for token-based agent dis
   assert.equal(metadata.studentDisplayName, 'Debug User');
   assert.equal(metadata.studentClassNumber, 9);
   assert.equal(metadata.studentRollNumber, 2);
+  assert.equal(metadata.agentCharacterId, 'kate');
 
   assert.equal(createdRooms.length, 0);
   assert.equal(createdDispatches.length, 0);
+});
+
+test('token route prefers immutable character metadata from the active prompt version', async () => {
+  const { exports, accessTokens } = loadTokenRoute({
+    activePromptVersion: {
+      ...CUSTOM_PROMPT_VERSION,
+      taskCharacter: {
+        id: 'jack',
+        displayName: 'Snapshot Jack',
+        avatarSrc: '/agents/snapshot-jack.png',
+        voiceId: 'snapshot-voice',
+        ttsSpeed: 0.7,
+        ttsVolume: 0.9,
+      },
+    },
+  });
+
+  const response = await exports.POST({
+    json: async () => ({
+      display_name: 'Debug User',
+      room_name: 'task_9_2_snapshot_character_a1b2c3d4',
+      agent_mode: 'realtime',
+      activity_type: 'task_solution',
+      session_purpose: 'practice',
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.jsonBody.agentCharacter.displayName, 'Snapshot Jack');
+  const metadata = JSON.parse(accessTokens[0].assignedRoomConfig.metadata);
+  assert.equal(metadata.taskCardId, 'morning_exercise_challenge');
+  assert.equal(metadata.agentCharacterName, 'Snapshot Jack');
+});
+
+test('token route uses Jack for the default birthday practice task', async () => {
+  const { exports, accessTokens } = loadTokenRoute();
+
+  const response = await exports.POST({
+    json: async () => ({
+      display_name: 'Debug User',
+      room_name: 'task_9_2_default_birthday_a1b2c3d4',
+      agent_mode: 'realtime',
+      activity_type: 'task_solution',
+      session_purpose: 'practice',
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.jsonBody.agentCharacter.id, 'jack');
+  assert.equal(response.jsonBody.agentCharacter.displayName, 'Jack');
+  assert.equal(response.jsonBody.agentCharacter.avatarSrc, '/agents/jack_photo.png');
+  const metadata = JSON.parse(accessTokens[0].assignedRoomConfig.metadata);
+  assert.equal(metadata.agentCharacterId, 'jack');
+  assert.equal(metadata.agentCharacterName, 'Jack');
 });
 
 test('token route marks eval-prefixed realtime rooms as evaluation sessions', async () => {
@@ -337,9 +423,9 @@ test('token route marks eval-prefixed realtime rooms as evaluation sessions', as
       evaluationId: 'pretest_6_10',
       evaluationPromptId: 'manifest-prompt-id',
       evaluationPromptVersion: 'manifest-version-1',
-      evaluationCharacter: 'Kate',
-      openingSentence: 'Hi, I’m Kate. I just moved to Korea. Nice to meet you!',
-      prompt: '# PRE-TEST INTERACTION PROMPT: Kate',
+      evaluationCharacter: 'Jack',
+      openingSentence: 'Hi, I’m Jack. I just moved to Korea. Nice to meet you!',
+      prompt: '# PRE-TEST INTERACTION PROMPT: Jack',
       promptVersionId: 'eval-version-1',
       savedAt: '2026-06-13T01:00:00.000Z',
       evaluations: [],
@@ -359,6 +445,7 @@ test('token route marks eval-prefixed realtime rooms as evaluation sessions', as
   });
 
   assert.equal(response.status, 200);
+  assert.equal(response.jsonBody.agentCharacter.displayName, 'Jack');
 
   const token = accessTokens[0];
   assert.equal(token.grant.room, 'eval_9_2_debug_user_a1b2c3d4');
@@ -367,7 +454,7 @@ test('token route marks eval-prefixed realtime rooms as evaluation sessions', as
   assert.equal(metadata.agentMode, 'realtime');
   assert.equal(metadata.sessionPurpose, 'evaluation');
   assert.equal(metadata.activityType, 'free_conversation');
-  assert.equal(metadata.evaluationCharacter, 'Kate');
+  assert.equal(metadata.evaluationCharacter, 'Jack');
   assert.equal(metadata.evaluationId, 'pretest_6_10');
   assert.equal(metadata.evaluationPromptId, 'manifest-prompt-id');
   assert.equal(metadata.evaluationPromptVersion, 'manifest-version-1');

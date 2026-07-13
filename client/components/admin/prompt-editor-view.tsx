@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { KATE_TASK_CHARACTER } from '@/lib/agent-character';
+import {
+  promptVersionCustomLabelDisplay,
+  promptVersionDisplayLabel,
+} from '@/lib/prompt-version-display';
 import type {
   ConditionCombinationPromptKey,
   RealtimePromptConfig,
@@ -13,7 +18,10 @@ import type {
 import { normalizeConditionCombinationPrompts } from '@/lib/realtime-prompt-config';
 import type { SessionPurpose } from '@/lib/session-activity';
 
-type PromptField = Exclude<keyof RealtimePromptConfig, 'conditionCombinationPrompts'>;
+type PromptField = Exclude<
+  keyof RealtimePromptConfig,
+  'conditionCombinationPrompts' | 'taskCharacter'
+>;
 
 type PromptResponse = RealtimePromptState;
 type PromptVersionSummary = RealtimePromptVersionSummary;
@@ -70,14 +78,8 @@ const PROMPT_GROUPS: PromptGroup[] = [
   },
   {
     title: 'Interlocutor Role Prompt',
-    description: '이 버전에 함께 저장되는 Dominant/Collaborative 역할 규칙입니다.',
+    description: '이 버전에 함께 저장되는 Collaborative 역할 규칙입니다.',
     fields: [
-      {
-        key: 'dominantPrompt',
-        title: 'Dominant Prompt',
-        description: 'Dominant Condition에서 추가되는 주도적 상호작용 규칙입니다.',
-        rows: 14,
-      },
       {
         key: 'collaborativePrompt',
         title: 'Collaborative Prompt',
@@ -95,19 +97,12 @@ const EMPTY_PROMPT: RealtimePromptConfig = {
   feedbackConditionId: 'no_corrective',
   feedbackPrompt: '',
   conditionCombinationPrompts: normalizeConditionCombinationPrompts(null),
-  taskCardId: 'school_event_invitation',
+  taskCardId: 'special_activity_plan',
   taskCardPrompt: '',
+  taskCharacter: KATE_TASK_CHARACTER,
 };
 
 const CONDITION_COMBINATION_PROMPTS = [
-  {
-    key: 'dominant_no_feedback',
-    title: 'Dominant - No Feedback',
-  },
-  {
-    key: 'dominant_explicit_correction',
-    title: 'Dominant - Explicit Correction',
-  },
   {
     key: 'collaborative_no_feedback',
     title: 'Collaborative - No Feedback',
@@ -130,6 +125,7 @@ function promptConfigFromResponse(data: RealtimePromptConfig): RealtimePromptCon
     ),
     taskCardId: data.taskCardId,
     taskCardPrompt: data.taskCardPrompt,
+    taskCharacter: data.taskCharacter,
   };
 }
 
@@ -144,7 +140,8 @@ function samePrompt(a: RealtimePromptConfig | null, b: RealtimePromptConfig | nu
     JSON.stringify(a.conditionCombinationPrompts) ===
       JSON.stringify(b.conditionCombinationPrompts) &&
     a.taskCardId === b.taskCardId &&
-    a.taskCardPrompt === b.taskCardPrompt
+    a.taskCardPrompt === b.taskCardPrompt &&
+    JSON.stringify(a.taskCharacter) === JSON.stringify(b.taskCharacter)
   );
 }
 
@@ -186,14 +183,41 @@ function practicePromptUrl(versionId?: string, useDefault = false) {
   return `/api/admin/prompts/realtime${query ? `?${query}` : ''}`;
 }
 
-function isGeneratedVersionLabel(version: PromptVersionSummary) {
-  return /^(realtime|evaluation) \d{4}-\d{2}-\d{2}T/.test(version.label);
+function versionDisplayLabel(version: PromptVersionSummary) {
+  return promptVersionDisplayLabel(version);
 }
 
-function formatVersionOption(version: PromptVersionSummary, activeVersionId: string | null) {
+function formatEvaluationVersionOption(
+  version: PromptVersionSummary,
+  activeVersionId: string | null
+) {
   const savedAt = new Date(version.createdAt).toLocaleString('ko-KR');
-  const customLabel = isGeneratedVersionLabel(version) ? null : version.label.trim();
-  return [version.id === activeVersionId ? '활성' : null, savedAt, customLabel]
+  return [version.id === activeVersionId ? '활성' : null, savedAt, versionDisplayLabel(version)]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+function taskCardLabelForVersion(
+  version: PromptVersionSummary,
+  taskCards: RealtimeTaskCardSummary[]
+) {
+  const taskCardId = version.taskCardId?.trim();
+  if (!taskCardId) return null;
+  return taskCards.find((taskCard) => taskCard.id === taskCardId)?.title.trim() || taskCardId;
+}
+
+function formatPracticeVersionOption(
+  version: PromptVersionSummary,
+  activeVersionId: string | null,
+  taskCards: RealtimeTaskCardSummary[]
+) {
+  const savedAt = new Date(version.createdAt).toLocaleString('ko-KR');
+  return [
+    version.id === activeVersionId ? '활성' : null,
+    savedAt,
+    taskCardLabelForVersion(version, taskCards),
+    versionDisplayLabel(version),
+  ]
     .filter(Boolean)
     .join(' · ');
 }
@@ -389,7 +413,7 @@ function EvaluationPromptView() {
           <div>
             <h2 className="text-foreground text-sm font-semibold">Evaluation 프롬프트</h2>
             <p className="text-muted-foreground text-xs">
-              자유 대화 평가 세션에서 Kate가 사용하는 manifest 기반 프롬프트입니다.
+              자유 대화 평가 세션에서 Jack이 사용하는 manifest 기반 프롬프트입니다.
             </p>
             <p className="text-muted-foreground text-xs">
               {promptState?.usingDefault
@@ -410,10 +434,13 @@ function EvaluationPromptView() {
               </span>
             </span>
             <span>
-              버전 이름:{' '}
+              사용자 지정 버전명:{' '}
               <span className="text-foreground font-semibold">
-                {promptState.promptVersionLabel ??
-                  (promptState.usingDefault ? 'Tracked markdown default' : '이름 없음')}
+                {promptVersionCustomLabelDisplay({
+                  id: promptState.evaluationPromptId,
+                  label: promptState.promptVersionLabel,
+                  usingDefault: promptState.usingDefault,
+                })}
               </span>
             </span>
             <span>
@@ -455,7 +482,7 @@ function EvaluationPromptView() {
               <option value="default">기본값</option>
               {promptState.promptVersions.map((version) => (
                 <option key={version.id} value={version.id}>
-                  {formatVersionOption(version, promptState.activePromptVersionId)}
+                  {formatEvaluationVersionOption(version, promptState.activePromptVersionId)}
                 </option>
               ))}
             </select>
@@ -611,7 +638,7 @@ function EvaluationPromptView() {
 
             <div className="mt-5 flex flex-col gap-2">
               <label className="text-sm font-medium" htmlFor="evaluation-version-label">
-                버전 이름
+                사용자 지정 버전명
               </label>
               <input
                 id="evaluation-version-label"
@@ -619,7 +646,7 @@ function EvaluationPromptView() {
                 onChange={(event) => setVersionLabel(event.target.value)}
                 disabled={saving}
                 autoFocus
-                placeholder="비워두면 저장 시각만 표시됩니다"
+                placeholder="비워두면 '사용자 지정 버전명 없음'으로 표시됩니다"
                 className="border-input bg-background text-foreground focus:ring-primary w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 disabled:opacity-50"
               />
             </div>
@@ -727,8 +754,9 @@ function PracticePromptEditorView() {
   const hasChanges = useMemo(() => !samePrompt(prompt, savedPrompt), [prompt, savedPrompt]);
   const conditionCombinationPromptLength = useMemo(
     () =>
-      Object.values(prompt.conditionCombinationPrompts).reduce(
-        (total, value) => total + value.length,
+      CONDITION_COMBINATION_PROMPTS.reduce(
+        (total, conditionPrompt) =>
+          total + prompt.conditionCombinationPrompts[conditionPrompt.key].length,
         0
       ),
     [prompt.conditionCombinationPrompts]
@@ -1010,9 +1038,13 @@ function PracticePromptEditorView() {
             프롬프트 ID: <span className="text-foreground font-mono font-semibold">{promptId}</span>
           </span>
           <span>
-            버전 이름:{' '}
+            사용자 지정 버전명:{' '}
             <span className="text-foreground font-semibold">
-              {promptVersionLabel ?? (usingDefault ? 'Tracked markdown default' : '이름 없음')}
+              {promptVersionCustomLabelDisplay({
+                id: promptId,
+                label: promptVersionLabel,
+                usingDefault,
+              })}
             </span>
           </span>
           <span>
@@ -1051,7 +1083,7 @@ function PracticePromptEditorView() {
               <option value="default">기본값</option>
               {promptVersions.map((version) => (
                 <option key={version.id} value={version.id}>
-                  {formatVersionOption(version, activePromptVersionId)}
+                  {formatPracticeVersionOption(version, activePromptVersionId, taskCards)}
                 </option>
               ))}
             </select>
@@ -1079,7 +1111,7 @@ function PracticePromptEditorView() {
           </section>
 
           {PROMPT_GROUPS.map((group) => {
-            const singleField = group.fields.length === 1 ? group.fields[0] : null;
+            const singleField = group.fields[0]?.key === 'basePrompt' ? group.fields[0] : null;
             const characterCount = group.fields.reduce(
               (total, field) => total + prompt[field.key].length,
               0
@@ -1241,7 +1273,7 @@ function PracticePromptEditorView() {
 
             <div className="mt-5 flex flex-col gap-2">
               <label className="text-sm font-medium" htmlFor="practice-version-label">
-                버전 이름
+                사용자 지정 버전명
               </label>
               <input
                 id="practice-version-label"
@@ -1249,7 +1281,7 @@ function PracticePromptEditorView() {
                 onChange={(event) => setVersionLabel(event.target.value)}
                 disabled={saving}
                 autoFocus
-                placeholder="비워두면 저장 시각만 표시됩니다"
+                placeholder="비워두면 '사용자 지정 버전명 없음'으로 표시됩니다"
                 className="border-input bg-background text-foreground focus:ring-primary w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 disabled:opacity-50"
               />
             </div>

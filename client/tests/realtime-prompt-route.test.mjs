@@ -43,6 +43,14 @@ const EMPTY_CONDITION_COMBINATION_PROMPTS = {
   collaborative_no_feedback: '',
   collaborative_explicit_correction: '',
 };
+const KATE_TASK_CHARACTER = {
+  id: 'kate',
+  displayName: 'Kate',
+  avatarSrc: '/agents/kate_photo.png',
+  voiceId: 'kate-voice',
+  ttsSpeed: 0.8,
+  ttsVolume: 1.1,
+};
 
 const CUSTOM_CONDITION_COMBINATION_PROMPTS = {
   dominant_no_feedback: 'Dominant no feedback condition prompt.',
@@ -69,9 +77,13 @@ const DEFAULT_PROMPT = {
   feedbackConditionId: 'explicit_correction',
   feedbackPrompt: '# FEEDBACK CONDITION: Explicit Correction\nDefault explicit feedback',
   conditionCombinationPrompts: DEFAULT_CONDITION_COMBINATION_PROMPTS,
-  taskCardId: 'school_event_invitation',
-  taskCardPrompt: '# TASK CARD: School Event Invitation\nDefault task card',
+  taskCardId: 'special_activity_plan',
+  taskCardPrompt: '# TASK CARD: Our Class Special Activity Plan\nDefault special task card',
+  taskCharacter: KATE_TASK_CHARACTER,
 };
+
+const SCHOOL_EVENT_TASK_CARD_PROMPT =
+  '# TASK CARD: School Event Invitation\nDefault school task card';
 
 const CUSTOM_PROMPT = {
   basePrompt: '# BASE PROMPT:\nEdited base prompt',
@@ -82,6 +94,7 @@ const CUSTOM_PROMPT = {
   conditionCombinationPrompts: CUSTOM_CONDITION_COMBINATION_PROMPTS,
   taskCardId: 'school_event_invitation',
   taskCardPrompt: '# TASK CARD: School Event Invitation\nEdited task card prompt',
+  taskCharacter: KATE_TASK_CHARACTER,
 };
 
 const CUSTOM_VERSION = {
@@ -111,7 +124,7 @@ const FILES = new Map(
       defaultFeedbackConditionId: 'no_corrective',
       conditionCombinationManifest: 'condition-combinations/manifest.json',
       taskCardManifest: 'task-cards/manifest.json',
-      defaultTaskCardId: 'school_event_invitation',
+      defaultTaskCardId: 'special_activity_plan',
     }),
     '/repo/prompts/realtime/base.md': DEFAULT_PROMPT.basePrompt,
     '/repo/prompts/realtime/roles/dominant.md': DEFAULT_PROMPT.dominantPrompt,
@@ -169,8 +182,16 @@ const FILES = new Map(
         level: 'A2',
         marker: '# TASK CARD: School Event Invitation',
       },
+      special_activity_plan: {
+        file: 'special_activity_plan.md',
+        title: 'L5-T3. Our Class Special Activity Plan',
+        topic: 'planning a special class activity',
+        level: 'A1-A2',
+        marker: '# TASK CARD:',
+      },
     }),
-    '/repo/prompts/realtime/task-cards/school_event_invitation.md': DEFAULT_PROMPT.taskCardPrompt,
+    '/repo/prompts/realtime/task-cards/school_event_invitation.md': SCHOOL_EVENT_TASK_CARD_PROMPT,
+    '/repo/prompts/realtime/task-cards/special_activity_plan.md': DEFAULT_PROMPT.taskCardPrompt,
   })
 );
 
@@ -224,6 +245,7 @@ function validateRealtimePromptConfig(value) {
         ...EMPTY_CONDITION_COMBINATION_PROMPTS,
         ...(value.conditionCombinationPrompts ?? {}),
       },
+      taskCharacter: value.taskCharacter ?? KATE_TASK_CHARACTER,
     },
   };
 }
@@ -275,6 +297,15 @@ function loadRealtimePromptRoute(options = {}) {
         };
       }
 
+      if (specifier === '@/lib/realtime-character-source') {
+        return {
+          readRealtimeTaskCharacter: async (_taskCardId, prompt) =>
+            /\bJack\b/.test(prompt)
+              ? { ...KATE_TASK_CHARACTER, id: 'jack', displayName: 'Jack' }
+              : KATE_TASK_CHARACTER,
+        };
+      }
+
       if (specifier === '@/lib/realtime-prompt-store') {
         return {
           RealtimePromptStoreError,
@@ -299,6 +330,7 @@ function loadRealtimePromptRoute(options = {}) {
                   label: CUSTOM_VERSION.label,
                   createdAt: CUSTOM_VERSION.savedAt,
                   hash: CUSTOM_VERSION.hash,
+                  taskCardId: CUSTOM_VERSION.taskCardId,
                 },
               ]
             );
@@ -369,6 +401,7 @@ function promptFields(value) {
     conditionCombinationPrompts: value.conditionCombinationPrompts,
     taskCardId: value.taskCardId,
     taskCardPrompt: value.taskCardPrompt,
+    taskCharacter: value.taskCharacter,
   };
 }
 
@@ -386,6 +419,7 @@ test('GET returns active Supabase prompt version without leaking internal row fi
   assert.equal(response.jsonBody.usingDefault, false);
   assert.deepEqual(promptFields(response.jsonBody), CUSTOM_PROMPT);
   assert.equal(response.jsonBody.promptId, CUSTOM_VERSION.promptId);
+  assert.equal(response.jsonBody.promptVersions[0].taskCardId, CUSTOM_VERSION.taskCardId);
   assert.equal(response.jsonBody.savedAt, CUSTOM_VERSION.savedAt);
   assert.equal(response.jsonBody.source, 'custom');
   assert.equal('isActive' in response.jsonBody, false);

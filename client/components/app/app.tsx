@@ -11,6 +11,11 @@ import { ViewController } from '@/components/app/view-controller';
 import { Toaster } from '@/components/ui/sonner';
 import { useAgentErrors } from '@/hooks/useAgentErrors';
 import { useDebugMode } from '@/hooks/useDebug';
+import {
+  type AgentCharacter,
+  KATE_CHARACTER,
+  normalizeAgentCharacter,
+} from '@/lib/agent-character';
 import type { AgentMode } from '@/lib/agent-mode';
 import type { ActivityType, SessionPurpose } from '@/lib/session-activity';
 import type { StudentProfile } from '@/lib/student';
@@ -35,6 +40,7 @@ export function App({ appConfig }: AppProps) {
     roomName: string;
     agentMode: AgentMode;
     activityType?: ActivityType;
+    agentCharacter?: AgentCharacter;
     evaluationId?: string;
     sessionPurpose?: SessionPurpose;
   } | null>(null);
@@ -44,6 +50,8 @@ export function App({ appConfig }: AppProps) {
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const [student, setStudent] = useState<StudentProfile | null>(null);
   const [checkingStudent, setCheckingStudent] = useState(true);
+  const [sessionAgentCharacter, setSessionAgentCharacter] =
+    useState<AgentCharacter>(KATE_CHARACTER);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,7 +100,9 @@ export function App({ appConfig }: AppProps) {
           typeof data.error === 'string' ? data.error : '세션 입장 준비에 실패했습니다.';
         throw new Error(message);
       }
-      return res.json();
+      const data = await res.json();
+      setSessionAgentCharacter(normalizeAgentCharacter(data.agentCharacter));
+      return data;
     });
   }, [appConfig, student]);
 
@@ -115,6 +125,7 @@ export function App({ appConfig }: AppProps) {
     if (!hadConnectedSessionRef.current) return;
     hadConnectedSessionRef.current = false;
     sessionInfoRef.current = null;
+    setSessionAgentCharacter(KATE_CHARACTER);
     setSessionNotice('이전 세션이 종료되었습니다. 최신 설정으로 다시 입장해주세요.');
     setRoom(new Room());
     forceRender((n) => n + 1);
@@ -127,16 +138,19 @@ export function App({ appConfig }: AppProps) {
       agentMode: AgentMode,
       options?: {
         activityType?: ActivityType;
+        agentCharacter?: AgentCharacter;
         evaluationId?: string;
         sessionPurpose?: SessionPurpose;
       }
     ) => {
       sessionInfoRef.current = { displayName, roomName, agentMode, ...options };
+      setSessionAgentCharacter(options?.agentCharacter ?? KATE_CHARACTER);
       setSessionNotice(null);
       forceRender((n) => n + 1);
       void session.start({ tracks: { microphone: { enabled: false } } }).catch((error) => {
         const message = error instanceof Error ? error.message : '세션 입장에 실패했습니다.';
         sessionInfoRef.current = null;
+        setSessionAgentCharacter(KATE_CHARACTER);
         setSessionNotice(message);
         setRoom(new Room());
         forceRender((n) => n + 1);
@@ -148,6 +162,7 @@ export function App({ appConfig }: AppProps) {
   const handleStudentLogout = useCallback(() => {
     void fetch('/api/student/logout', { method: 'POST' }).finally(() => {
       sessionInfoRef.current = null;
+      setSessionAgentCharacter(KATE_CHARACTER);
       setStudent(null);
       setSessionNotice(null);
       setRoom(new Room());
@@ -165,7 +180,7 @@ export function App({ appConfig }: AppProps) {
           onJoin={handleJoin}
           onStudentLogin={setStudent}
           onStudentLogout={handleStudentLogout}
-          sessionActivityType={sessionInfoRef.current?.activityType}
+          sessionAgentCharacter={sessionAgentCharacter}
           sessionNotice={sessionNotice}
           student={student}
         />

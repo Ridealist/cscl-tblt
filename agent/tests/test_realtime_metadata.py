@@ -146,7 +146,7 @@ def test_metadata_activity_context_maps_evaluation_fields() -> None:
         {
             "activityType": "free_conversation",
             "agentMode": "realtime",
-            "evaluationCharacter": "Kate",
+            "evaluationCharacter": "Jack",
             "evaluationId": "pretest_6_10",
             "evaluationPromptId": "pretest_6_10",
             "evaluationPromptVersion": "2026-06-10",
@@ -157,7 +157,7 @@ def test_metadata_activity_context_maps_evaluation_fields() -> None:
 
     assert _metadata_activity_context(metadata) == {
         "activity_type": "free_conversation",
-        "evaluation_character": "Kate",
+        "evaluation_character": "Jack",
         "evaluation_id": "pretest_6_10",
         "evaluation_prompt_id": "pretest_6_10",
         "evaluation_prompt_version": "2026-06-10",
@@ -205,7 +205,7 @@ def test_normalize_activity_context_prioritizes_free_conversation() -> None:
 def test_realtime_tts_voice_changes_by_session_purpose() -> None:
     assert (
         _realtime_tts_voice_for_session_purpose("evaluation")
-        == "b7d50908-b17c-442d-ad8d-810c63997ed9"
+        == "630ed21c-2c5c-41cf-9d82-10a7fd668370"
     )
     assert (
         _realtime_tts_voice_for_session_purpose("practice")

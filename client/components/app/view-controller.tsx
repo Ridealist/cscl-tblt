@@ -7,6 +7,7 @@ import type { AppConfig } from '@/app-config';
 import { AgentSessionView_01 } from '@/components/agents-ui/blocks/agent-session-view-01';
 import { LobbyView } from '@/components/app/lobby-view';
 import { StudentLoginView } from '@/components/app/student-login-view';
+import type { AgentCharacter } from '@/lib/agent-character';
 import type { AgentMode } from '@/lib/agent-mode';
 import type { ActivityType, SessionPurpose } from '@/lib/session-activity';
 import type { StudentProfile } from '@/lib/student';
@@ -38,13 +39,14 @@ interface ViewControllerProps {
     agentMode: AgentMode,
     options?: {
       activityType?: ActivityType;
+      agentCharacter?: AgentCharacter;
       evaluationId?: string;
       sessionPurpose?: SessionPurpose;
     }
   ) => void;
   onStudentLogin: (student: StudentProfile) => void;
   onStudentLogout: () => void;
-  sessionActivityType?: ActivityType;
+  sessionAgentCharacter: AgentCharacter;
   sessionNotice?: string | null;
   student: StudentProfile | null;
 }
@@ -55,13 +57,14 @@ export function ViewController({
   onJoin,
   onStudentLogin,
   onStudentLogout,
+  sessionAgentCharacter,
   sessionNotice,
   student,
 }: ViewControllerProps) {
   const { isConnected } = useSessionContext();
   const { resolvedTheme } = useTheme();
-  const agentDisplayName = 'Kate';
-  const agentAvatarSrc = '/agents/kate_photo_20260615.png';
+  const agentDisplayName = sessionAgentCharacter.displayName;
+  const agentAvatarSrc = sessionAgentCharacter.avatarSrc;
 
   return (
     <AnimatePresence mode="wait">

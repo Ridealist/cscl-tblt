@@ -117,14 +117,14 @@ async function readEvaluationSummaries(): Promise<{
       }
       return {
         id,
-        character: text(entry.character) ?? 'Kate',
+        character: text(entry.character) ?? 'Jack',
         file: filename,
         marker,
         prompt,
         promptId: text(entry.promptId) ?? id,
         version: text(entry.version) ?? undefined,
         openingSentence:
-          extractOpening(prompt) ?? 'Hi, I’m Kate. I just moved to Korea. Nice to meet you!',
+          extractOpening(prompt) ?? 'Hi, I’m Jack. I just moved to Korea. Nice to meet you!',
       };
     })
   );
