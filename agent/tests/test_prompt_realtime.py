@@ -279,8 +279,12 @@ def test_realtime_default_prompt_source_records_default_task_card_id() -> None:
     source = prompt_realtime.load_prompt_source()
 
     assert source.source == "default"
-    assert source.task_card_id == "special_activity_plan"
-    assert source.task_card_prompt.startswith("# TASK CARD: Our Class Special Activity Plan")
+    assert source.task_card_id == "birthday_party_plan"
+    assert source.task_card_prompt.startswith("# TASK CARD: Birthday Party Plan")
+    assert source.character_id == "jack"
+    assert source.character_name == "Jack"
+    assert source.character_avatar_src == "/agents/jack_photo.png"
+    assert source.character_voice_id == "630ed21c-2c5c-41cf-9d82-10a7fd668370"
     assert source.prompt_version_id is None
 
 
@@ -328,6 +332,64 @@ def test_realtime_prompt_source_maps_supabase_prompt_version_metadata(monkeypatc
     assert source.saved_at == "2026-06-12T00:00:00.000Z"
     assert source.task_card_id == "morning_exercise_challenge"
     assert source.feedback_condition == "explicit_correction"
+    assert source.character_id == "kate"
+    assert source.character_name == "Kate"
+
+
+def test_realtime_prompt_uses_selected_task_character() -> None:
+    jack = prompt_realtime.load_prompt_source("birthday_party_plan")
+    kate = prompt_realtime.load_prompt_source("special_activity_plan")
+
+    assert (jack.character_name, jack.character_tts_volume) == ("Jack", 1.0)
+    assert (kate.character_name, kate.character_tts_volume) == ("Kate", 1.1)
+
+
+def test_realtime_prompt_unknown_custom_task_character_falls_back_to_kate(monkeypatch) -> None:
+    row = _prompt_version_row(task_card_id="unknown_custom_task")
+    monkeypatch.setattr(prompt_realtime, "_fetch_prompt_version_row", lambda _version_id: row)
+
+    source = prompt_realtime.load_prompt_source(prompt_version_id=row["id"])
+
+    assert source.character_id == "kate"
+    assert source.character_name == "Kate"
+
+
+def test_realtime_prompt_custom_version_prefers_character_snapshot(monkeypatch) -> None:
+    row = _prompt_version_row(task_card_id="morning_exercise_challenge")
+    row["task_character"] = {
+        "id": "jack",
+        "displayName": "Snapshot Jack",
+        "avatarSrc": "/agents/snapshot-jack.png",
+        "voiceId": "snapshot-jack-voice",
+        "ttsSpeed": 0.7,
+        "ttsVolume": 0.9,
+    }
+    monkeypatch.setattr(prompt_realtime, "_fetch_prompt_version_row", lambda _version_id: row)
+
+    source = prompt_realtime.load_prompt_source(prompt_version_id=row["id"])
+
+    assert source.character_id == "jack"
+    assert source.character_name == "Snapshot Jack"
+    assert source.character_voice_id == "snapshot-jack-voice"
+    assert source.character_tts_speed == 0.7
+
+
+def test_realtime_prompt_legacy_version_infers_character_from_prompt(monkeypatch) -> None:
+    row = _prompt_version_row(
+        task_card_id="birthday_party_plan",
+        task_card_prompt=(
+            "# TASK CARD: Legacy Kate\n"
+            "# Opening\nHi, I'm Kate. Let's begin.\n"
+            "# Character Information\n* Name: Kate\n* Age: 11"
+        ),
+    )
+    monkeypatch.setattr(prompt_realtime, "_fetch_prompt_version_row", lambda _version_id: row)
+
+    source = prompt_realtime.load_prompt_source(prompt_version_id=row["id"])
+
+    assert source.character_id == "kate"
+    assert source.character_name == "Kate"
+    assert source.character_voice_id == "b7d50908-b17c-442d-ad8d-810c63997ed9"
 
 
 def test_realtime_prompt_version_uses_task_card_snapshot_without_examples(
@@ -544,13 +606,119 @@ def test_realtime_prompt_call_healthy_habit_task_card_id_overrides_default_selec
     assert "# TASK CARD: Our Class Morning Exercise Challenge" not in prompt
 
 
-def test_realtime_prompt_default_uses_special_activity_plan_task_card(
+def test_realtime_prompt_default_uses_birthday_party_plan_task_card(
     tmp_path, monkeypatch
 ) -> None:
-    prompt = build_prompt(role="dominant")
+    prompt = build_prompt(role="collaborative")
 
-    assert "# TASK CARD: Our Class Special Activity Plan" in prompt
+    assert "# TASK CARD: Birthday Party Plan" in prompt
     assert "# TASK CARD: Our Class Healthy Habit Stamp Card" not in prompt
+
+
+def test_birthday_party_plan_preserves_jack_character_information() -> None:
+    prompts_dir = prompt_realtime.DEFAULT_PROMPT_SOURCE_DIR.parent
+    evaluation_prompt = (prompts_dir / "evaluation" / "pretest_6_10.md").read_text(
+        encoding="utf-8"
+    )
+    birthday_prompt = (
+        prompt_realtime.DEFAULT_PROMPT_SOURCE_DIR
+        / "task-cards"
+        / "birthday_party_plan.md"
+    ).read_text(encoding="utf-8")
+
+    def character_bullets(prompt: str) -> list[str]:
+        section = prompt.split("Character Information", 1)[1]
+        return [
+            line.strip()
+            for line in section.splitlines()
+            if line.strip().startswith("* ")
+        ][:18]
+
+    assert character_bullets(birthday_prompt) == character_bullets(evaluation_prompt)
+
+
+def test_birthday_party_plan_enforces_information_ownership_and_final_outcome() -> None:
+    task_card = (
+        prompt_realtime.DEFAULT_PROMPT_SOURCE_DIR
+        / "task-cards"
+        / "birthday_party_plan.md"
+    ).read_text(encoding="utf-8")
+
+    assert "The student owns Options 1 and 3." in task_card
+    assert "Jack owns Options 2 and 4." in task_card
+    assert "1 -> 2 -> 3 -> 4 strictly" in task_card
+    assert "Never dump the full option" in task_card
+    assert '"We choose ___ and ___ because ___."' in task_card
+    assert "compare all four options in the current category" in task_card
+    assert "every option must be mentioned at least once" in task_card
+    assert "after all four have been considered" in task_card
+
+
+def test_realtime_base_restores_child_safety_boundaries() -> None:
+    base = (prompt_realtime.DEFAULT_PROMPT_SOURCE_DIR / "base.md").read_text(encoding="utf-8")
+
+    for boundary in (
+        "adult content",
+        "sexual content",
+        "violence",
+        "discrimination",
+        "unsafe behavior",
+        "private personal information",
+        "inappropriate school content",
+        "Let's go back to the task.",
+        "Please ask your teacher.",
+    ):
+        assert boundary in base
+
+
+def test_registered_kate_task_cards_preserve_character_profile() -> None:
+    task_dir = prompt_realtime.DEFAULT_PROMPT_SOURCE_DIR / "task-cards"
+    for task_id in (
+        "school_event_invitation",
+        "morning_exercise_challenge",
+        "healthy_habit_stamp_card",
+        "special_activity_plan",
+    ):
+        task_card = (task_dir / f"{task_id}.md").read_text(encoding="utf-8")
+        assert "# Character Information" in task_card
+        assert "* Name: Kate" in task_card
+        assert "* Age: 11" in task_card
+        assert "* Country: Canada" in task_card
+        assert "* Favorite games: Minecraft and Mario Kart" in task_card
+
+
+def test_shared_realtime_prompts_do_not_hardcode_character_or_task_facts() -> None:
+    source_dir = prompt_realtime.DEFAULT_PROMPT_SOURCE_DIR
+    shared_paths = [
+        source_dir / "base.md",
+        source_dir / "roles" / "dominant.md",
+        source_dir / "roles" / "collaborative.md",
+        *sorted((source_dir / "condition-combinations").glob("*.md")),
+    ]
+
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in shared_paths)
+    assert "Kate" not in combined
+    assert "Jack" not in combined
+    assert "Class 1" not in combined
+    assert "Morning Exercise" not in combined
+
+
+def test_birthday_party_feedback_conditions_remain_separate() -> None:
+    explicit_prompt = build_prompt(
+        role="collaborative",
+        task_card_id="birthday_party_plan",
+        feedback_condition_id="explicit_correction",
+    )
+    no_feedback_prompt = build_prompt(
+        role="collaborative",
+        task_card_id="birthday_party_plan",
+        feedback_condition_id="no_corrective",
+    )
+
+    assert "# CONDITION COMBINATION PROMPT: Collaborative + Explicit Correction" in explicit_prompt
+    assert "# CONDITION COMBINATION PROMPT: Collaborative + No Feedback" not in explicit_prompt
+    assert "# CONDITION COMBINATION PROMPT: Collaborative + No Feedback" in no_feedback_prompt
+    assert "# CONDITION COMBINATION PROMPT: Collaborative + Explicit Correction" not in no_feedback_prompt
 
 
 def test_special_activity_plan_prompt_sources_stay_consistent() -> None:
@@ -585,6 +753,10 @@ def test_special_activity_plan_prompt_sources_stay_consistent() -> None:
 
 
 def test_realtime_opening_comes_from_selected_task_card(tmp_path, monkeypatch) -> None:
+    assert get_opening_sentence("birthday_party_plan") == (
+        "Hi, I'm Jack. Let's plan your birthday party together. Let's start with Option 1. "
+        'When you\'re ready, say "Okay."'
+    )
     assert get_opening_sentence("morning_exercise_challenge") == (
         "Hi, I'm Kate. Let's choose one morning exercise activity for our Class."
     )

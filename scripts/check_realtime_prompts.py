@@ -62,6 +62,7 @@ def read_manifest(path):
     feedback_condition_manifest = manifest.get("feedbackConditionManifest")
     default_feedback_condition_id = manifest.get("defaultFeedbackConditionId")
     condition_combination_manifest = manifest.get("conditionCombinationManifest")
+    character_manifest = manifest.get("characterManifest")
     if not isinstance(feedback_condition_manifest, str) or not feedback_condition_manifest:
         raise ValueError("Prompt manifest entry feedbackConditionManifest must be a string.")
     if not isinstance(default_feedback_condition_id, str) or not default_feedback_condition_id:
@@ -75,6 +76,8 @@ def read_manifest(path):
     entries["feedbackConditionManifest"] = feedback_condition_manifest
     entries["defaultFeedbackConditionId"] = default_feedback_condition_id
     entries["conditionCombinationManifest"] = condition_combination_manifest
+    if isinstance(character_manifest, str) and character_manifest:
+        entries["characterManifest"] = character_manifest
     entries["taskCardManifest"] = task_card_manifest
     entries["defaultTaskCardId"] = default_task_card_id
     return entries
@@ -139,9 +142,36 @@ def read_task_card_manifest(path, manifest):
         entries[task_card_id] = {
             "file": filename,
             "marker": marker,
+            "characterId": entry.get("characterId"),
             "base_path": task_card_manifest_path.parent,
         }
     return entries
+
+
+def read_character_manifest(path, manifest):
+    manifest_file = manifest.get("characterManifest")
+    if not isinstance(manifest_file, str):
+        return None
+    character_manifest_path = path / manifest_file
+    try:
+        characters = json.loads(character_manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Character manifest is not readable: {character_manifest_path}") from exc
+    if not isinstance(characters, dict) or not characters:
+        raise ValueError("Character manifest must be a non-empty JSON object.")
+    required = ("displayName", "avatarSrc", "voiceId", "ttsSpeed", "ttsVolume")
+    for character_id, entry in characters.items():
+        if not isinstance(character_id, str) or not isinstance(entry, dict):
+            raise ValueError("Character manifest entries must be named objects.")
+        for field in required:
+            value = entry.get(field)
+            if field in ("ttsSpeed", "ttsVolume"):
+                valid = isinstance(value, (int, float))
+            else:
+                valid = isinstance(value, str) and bool(value)
+            if not valid:
+                raise ValueError(f"Character {character_id}.{field} is invalid.")
+    return characters
 
 
 def read_condition_combination_manifest(path, manifest):
@@ -286,6 +316,14 @@ def read_prompt_folder(path):
     realtime["conditionCombinationPrompts"] = condition_combination_prompts
 
     task_cards = read_task_card_manifest(path, manifest)
+    characters = read_character_manifest(path, manifest)
+    if characters is not None:
+        for task_card_id, entry in task_cards.items():
+            character_id = entry.get("characterId")
+            if not isinstance(character_id, str) or character_id not in characters:
+                raise ValueError(
+                    f"Task card {task_card_id} has an unregistered characterId: {character_id}"
+                )
     default_task_card_id = manifest["defaultTaskCardId"]
     if default_task_card_id not in task_cards:
         raise ValueError(f"defaultTaskCardId is not registered: {default_task_card_id}")

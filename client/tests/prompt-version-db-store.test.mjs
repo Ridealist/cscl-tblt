@@ -24,6 +24,14 @@ const PRACTICE_ROW = {
   },
   task_card_id: 'school_event_invitation',
   task_card_prompt: 'Task card prompt',
+  task_character: {
+    id: 'jack',
+    displayName: 'Jack',
+    avatarSrc: '/agents/jack_photo.png',
+    voiceId: 'jack-voice',
+    ttsSpeed: 0.8,
+    ttsVolume: 1,
+  },
   source: 'custom',
   is_active: true,
   label: 'Practice version',
@@ -105,6 +113,7 @@ function validateRealtimePromptConfig(value) {
       conditionCombinationPrompts: normalizeConditionCombinationPrompts(
         value.conditionCombinationPrompts
       ),
+      taskCharacter: value.taskCharacter ?? value.task_character,
     },
   };
 }
@@ -278,6 +287,7 @@ test('savePracticePromptVersion sends condition-combination prompts to the RPC',
     conditionCombinationPrompts: PRACTICE_ROW.condition_combination_prompts,
     taskCardId: 'school_event_invitation',
     taskCardPrompt: 'Task card prompt',
+    taskCharacter: PRACTICE_ROW.task_character,
   };
 
   const version = await savePracticePromptVersion(config, {
@@ -286,11 +296,13 @@ test('savePracticePromptVersion sends condition-combination prompts to the RPC',
   });
 
   assert.deepEqual(version.conditionCombinationPrompts, PRACTICE_ROW.condition_combination_prompts);
+  assert.deepEqual(version.taskCharacter, PRACTICE_ROW.task_character);
   assert.equal(calls.rpcs[0].name, 'save_practice_prompt_version');
   assert.deepEqual(
     calls.rpcs[0].args.p_condition_combination_prompts,
     PRACTICE_ROW.condition_combination_prompts
   );
+  assert.deepEqual(calls.rpcs[0].args.p_task_character, PRACTICE_ROW.task_character);
 });
 
 test('hashPracticePromptConfig changes when condition-combination prompt changes', () => {
