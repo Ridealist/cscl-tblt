@@ -1,3 +1,10 @@
+import {
+  KATE_TASK_CHARACTER,
+  type RealtimeTaskCharacter,
+  inferRealtimeTaskCharacter,
+  normalizeRealtimeTaskCharacter,
+} from '@/lib/agent-character';
+
 export interface RealtimePromptConfig {
   basePrompt: string;
   dominantPrompt: string;
@@ -7,6 +14,7 @@ export interface RealtimePromptConfig {
   conditionCombinationPrompts: ConditionCombinationPrompts;
   taskCardId: string;
   taskCardPrompt: string;
+  taskCharacter: RealtimeTaskCharacter;
 }
 
 export const CONDITION_COMBINATION_PROMPT_KEYS = [
@@ -35,6 +43,7 @@ export interface RealtimeFeedbackConditionSummary {
 
 export interface RealtimeTaskCardSummary {
   id: string;
+  characterId: string;
   title: string;
   topic: string | null;
   level: string | null;
@@ -120,7 +129,8 @@ export function validateRealtimePromptConfig(
       | 'feedbackPrompt'
       | 'conditionCombinationPrompts'
       | 'taskCardId'
-      | 'taskCardPrompt',
+      | 'taskCardPrompt'
+      | 'taskCharacter',
       unknown
     >
   >;
@@ -177,6 +187,10 @@ export function validateRealtimePromptConfig(
   }
   config.taskCardId = taskCardId;
   config.taskCardPrompt = taskCardPrompt.trim();
+  config.taskCharacter =
+    normalizeRealtimeTaskCharacter(source.taskCharacter) ??
+    inferRealtimeTaskCharacter(config.taskCardPrompt) ??
+    KATE_TASK_CHARACTER;
 
   return { ok: true, config };
 }

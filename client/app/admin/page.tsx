@@ -651,8 +651,6 @@ export default function AdminPage() {
   const [classStartInput, setClassStartInput] = useState('');
   const [groupsInput, setGroupsInput] = useState('');
   const [realtimeSessionKey, setRealtimeSessionKey] = useState(0);
-  const [pendingRole, setPendingRole] = useState<AgentRole | null>(null);
-  const [roleChangeStatus, setRoleChangeStatus] = useState<string | null>(null);
   const [feedbackConditions, setFeedbackConditions] = useState<FeedbackConditionOption[]>([]);
   const [pendingFeedbackCondition, setPendingFeedbackCondition] = useState<string | null>(null);
   const [feedbackChangeStatus, setFeedbackChangeStatus] = useState<string | null>(null);
@@ -745,47 +743,6 @@ export default function AdminPage() {
       if (remainingRooms.length > 0 && Date.now() - startedAt >= REALTIME_TERMINATION_TIMEOUT_MS) {
         throw new Error(`아직 종료되지 않은 개별 세션이 있습니다: ${remainingRooms.join(', ')}`);
       }
-    }
-  }
-
-  async function handleAgentRoleChange(role: AgentRole) {
-    if (!settings || settings.agentRole === role) return;
-
-    const nextLabel = getAgentRoleLabel(role);
-    const confirmed = window.confirm(
-      [
-        `에이전트 상호작용 방식을 [${nextLabel} 에이전트]로 변경하면 현재 진행 중인 모든 개별 세션이 종료됩니다.`,
-        '',
-        `변경 후에는 [${nextLabel} 에이전트] 방식으로만 새 개별 세션을 생성할 수 있습니다.`,
-        '',
-        '계속하시겠습니까?',
-      ].join('\n')
-    );
-    if (!confirmed) return;
-
-    setSaving(true);
-    setPendingRole(role);
-    setRoleChangeStatus(null);
-    let resetLocked = false;
-    try {
-      setRoleChangeStatus('학생 재입장을 잠시 중지하는 중입니다...');
-      await saveSettings({ ...settings, realtimeResetting: true });
-      resetLocked = true;
-      await terminateRealtimeSessionsAndWait(setRoleChangeStatus);
-      setRoleChangeStatus('모든 개별 세션 종료를 확인했습니다. 설정을 저장하는 중입니다...');
-      await saveSettings({ ...settings, agentRole: role, realtimeResetting: false });
-      resetLocked = false;
-      setRealtimeSessionKey((key) => key + 1);
-    } catch (error) {
-      if (resetLocked) {
-        await saveSettings({ ...settings, realtimeResetting: false }).catch(() => undefined);
-      }
-      const message = error instanceof Error ? error.message : '상호작용 방식 변경에 실패했습니다.';
-      window.alert(message);
-    } finally {
-      setSaving(false);
-      setPendingRole(null);
-      setRoleChangeStatus(null);
     }
   }
 
@@ -1120,48 +1077,21 @@ export default function AdminPage() {
                   <div>
                     <h2 className="text-foreground text-sm font-semibold">Agent Role</h2>
                     <p className="text-muted-foreground text-xs">
-                      실험 조건(1) 입니다. 에이전트의 상호작용 방식을 정합니다.
+                      수업 운영에서는 Collaborative Agent만 사용합니다.
                     </p>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(['dominant', 'collaborative'] as AgentRole[]).map((role) => (
-                      <button
-                        key={role}
-                        onClick={() => handleAgentRoleChange(role)}
-                        disabled={saving}
-                        aria-busy={pendingRole === role}
-                        className={`rounded-lg border px-4 py-3 text-left transition-colors disabled:opacity-50 ${
-                          settings.agentRole === role
-                            ? 'bg-primary text-primary-foreground border-primary'
-                            : 'border-border hover:bg-muted text-foreground'
-                        }`}
-                      >
-                        <span className="block text-sm font-semibold">
-                          {pendingRole === role ? '변경 중...' : `${getAgentRoleLabel(role)} Agent`}
-                        </span>
-                        <span
-                          className={`mt-1 block text-xs ${settings.agentRole === role ? 'opacity-80' : 'text-muted-foreground'}`}
-                        >
-                          {role === 'dominant'
-                            ? '에이전트가 대화와 과제 진행을 주도'
-                            : '학생과 에이전트가 선택과 결정을 공유'}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                  {pendingRole && roleChangeStatus && (
-                    <div
-                      role="status"
-                      aria-live="polite"
-                      className="border-border bg-muted/60 text-muted-foreground flex items-center gap-2 rounded-md border px-3 py-2 text-xs"
+                  <div className="grid grid-cols-1 gap-2">
+                    <button
+                      type="button"
+                      aria-pressed="true"
+                      className="bg-primary text-primary-foreground border-primary rounded-lg border px-4 py-3 text-left"
                     >
-                      <span
-                        aria-hidden="true"
-                        className="border-muted-foreground/30 border-t-foreground size-4 shrink-0 animate-spin rounded-full border-2"
-                      />
-                      <span>{roleChangeStatus}</span>
-                    </div>
-                  )}
+                      <span className="block text-sm font-semibold">Collaborative Agent</span>
+                      <span className="mt-1 block text-xs opacity-80">
+                        학생과 에이전트가 선택과 결정을 공유
+                      </span>
+                    </button>
+                  </div>
                 </section>
               )}
 

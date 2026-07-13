@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import { RoomServiceClient } from 'livekit-server-sdk';
 import { ParticipantInfo_Kind } from '@livekit/protocol';
+import { JACK_CHARACTER, KATE_CHARACTER } from '@/lib/agent-character';
 import { type AgentRole, normalizeAgentRole } from '@/lib/agent-role';
+import { readRealtimeTaskCharacter } from '@/lib/realtime-character-source';
 import type { RealtimePromptSource } from '@/lib/realtime-prompt-config';
+import { readActiveRealtimePromptVersion } from '@/lib/realtime-prompt-store';
 import type { ActivityType, SessionPurpose } from '@/lib/session-activity';
 import { SettingsStoreError, readSettings } from '@/lib/settings-store';
 
@@ -27,6 +30,9 @@ function parseRealtimeRoomMetadata(metadata?: string): {
   evaluationId?: string;
   evaluationPromptId?: string;
   evaluationPromptVersion?: string;
+  agentCharacterId?: string;
+  agentCharacterName?: string;
+  agentCharacterAvatarSrc?: string;
   feedbackConditionId?: string;
   promptId?: string;
   promptVersionId?: string;
@@ -46,6 +52,9 @@ function parseRealtimeRoomMetadata(metadata?: string): {
       evaluationId?: unknown;
       evaluationPromptId?: unknown;
       evaluationPromptVersion?: unknown;
+      agentCharacterId?: unknown;
+      agentCharacterName?: unknown;
+      agentCharacterAvatarSrc?: unknown;
       feedbackConditionId?: unknown;
       promptId?: unknown;
       promptVersionId?: unknown;
@@ -58,6 +67,14 @@ function parseRealtimeRoomMetadata(metadata?: string): {
     if (parsed.agentMode !== 'realtime') return {};
     return {
       ...(rawRole ? { agentRole: normalizeAgentRole(rawRole) } : {}),
+      agentCharacterId:
+        typeof parsed.agentCharacterId === 'string' ? parsed.agentCharacterId : undefined,
+      agentCharacterName:
+        typeof parsed.agentCharacterName === 'string' ? parsed.agentCharacterName : undefined,
+      agentCharacterAvatarSrc:
+        typeof parsed.agentCharacterAvatarSrc === 'string'
+          ? parsed.agentCharacterAvatarSrc
+          : undefined,
       activityType:
         parsed.activityType === 'free_conversation' || parsed.activityType === 'task_solution'
           ? parsed.activityType
@@ -142,6 +159,21 @@ export async function GET() {
   }
 
   const { activeClass, numGroupsPerClass, agentMode, realtimeResetting, sessionPurpose } = settings;
+  let practiceCharacter = KATE_CHARACTER;
+  if (agentMode === 'realtime') {
+    if (sessionPurpose === 'evaluation') {
+      practiceCharacter = JACK_CHARACTER;
+    } else {
+      try {
+        const activeVersion = await readActiveRealtimePromptVersion();
+        practiceCharacter =
+          activeVersion?.taskCharacter ??
+          (await readRealtimeTaskCharacter(activeVersion?.taskCardId));
+      } catch {
+        practiceCharacter = await readRealtimeTaskCharacter();
+      }
+    }
+  }
 
   const predefinedNames: string[] = Array.from(
     { length: numGroupsPerClass },
@@ -182,7 +214,15 @@ export async function GET() {
     .sort((a, b) => a.name.localeCompare(b.name));
 
   return NextResponse.json(
-    { rooms, activeClass, agentMode, realtimeResetting, sessionPurpose, realtimeRooms },
+    {
+      rooms,
+      activeClass,
+      agentMode,
+      realtimeResetting,
+      sessionPurpose,
+      practiceCharacter,
+      realtimeRooms,
+    },
     { headers: { 'Cache-Control': 'no-store' } }
   );
 }

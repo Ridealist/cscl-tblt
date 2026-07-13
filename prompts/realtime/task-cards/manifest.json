@@ -1,5 +1,6 @@
 {
   "school_event_invitation": {
+    "characterId": "kate",
     "file": "school_event_invitation.md",
     "title": "L4. School Event Invitation",
     "topic": "school event planning and invitation",
@@ -7,6 +8,7 @@
     "marker": "# TASK CARD:"
   },
   "morning_exercise_challenge": {
+    "characterId": "kate",
     "file": "morning_exercise_challenge.md",
     "title": "L5-T1. Our Class Morning Exercise Challenge",
     "topic": "choosing and recommending a morning exercise activity",
@@ -14,6 +16,7 @@
     "marker": "# TASK CARD:"
   },
   "healthy_habit_stamp_card": {
+    "characterId": "kate",
     "file": "healthy_habit_stamp_card.md",
     "title": "L5-T2. Our Class Healthy Habit Stamp Card",
     "topic": "choosing healthy habits for a class stamp card",
@@ -21,9 +24,18 @@
     "marker": "# TASK CARD:"
   },
   "special_activity_plan": {
+    "characterId": "kate",
     "file": "special_activity_plan.md",
     "title": "L5-T3. Our Class Special Activity Plan",
     "topic": "planning a special class activity",
+    "level": "A1-A2",
+    "marker": "# TASK CARD:"
+  },
+  "birthday_party_plan": {
+    "characterId": "jack",
+    "file": "birthday_party_plan.md",
+    "title": "L6. Birthday Party Plan",
+    "topic": "comparing and choosing a birthday activity and gift",
     "level": "A1-A2",
     "marker": "# TASK CARD:"
   }

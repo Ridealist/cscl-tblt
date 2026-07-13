@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { KATE_TASK_CHARACTER } from '@/lib/agent-character';
 import {
   promptVersionCustomLabelDisplay,
   promptVersionDisplayLabel,
@@ -17,7 +18,10 @@ import type {
 import { normalizeConditionCombinationPrompts } from '@/lib/realtime-prompt-config';
 import type { SessionPurpose } from '@/lib/session-activity';
 
-type PromptField = Exclude<keyof RealtimePromptConfig, 'conditionCombinationPrompts'>;
+type PromptField = Exclude<
+  keyof RealtimePromptConfig,
+  'conditionCombinationPrompts' | 'taskCharacter'
+>;
 
 type PromptResponse = RealtimePromptState;
 type PromptVersionSummary = RealtimePromptVersionSummary;
@@ -74,14 +78,8 @@ const PROMPT_GROUPS: PromptGroup[] = [
   },
   {
     title: 'Interlocutor Role Prompt',
-    description: '이 버전에 함께 저장되는 Dominant/Collaborative 역할 규칙입니다.',
+    description: '이 버전에 함께 저장되는 Collaborative 역할 규칙입니다.',
     fields: [
-      {
-        key: 'dominantPrompt',
-        title: 'Dominant Prompt',
-        description: 'Dominant Condition에서 추가되는 주도적 상호작용 규칙입니다.',
-        rows: 14,
-      },
       {
         key: 'collaborativePrompt',
         title: 'Collaborative Prompt',
@@ -101,17 +99,10 @@ const EMPTY_PROMPT: RealtimePromptConfig = {
   conditionCombinationPrompts: normalizeConditionCombinationPrompts(null),
   taskCardId: 'special_activity_plan',
   taskCardPrompt: '',
+  taskCharacter: KATE_TASK_CHARACTER,
 };
 
 const CONDITION_COMBINATION_PROMPTS = [
-  {
-    key: 'dominant_no_feedback',
-    title: 'Dominant - No Feedback',
-  },
-  {
-    key: 'dominant_explicit_correction',
-    title: 'Dominant - Explicit Correction',
-  },
   {
     key: 'collaborative_no_feedback',
     title: 'Collaborative - No Feedback',
@@ -134,6 +125,7 @@ function promptConfigFromResponse(data: RealtimePromptConfig): RealtimePromptCon
     ),
     taskCardId: data.taskCardId,
     taskCardPrompt: data.taskCardPrompt,
+    taskCharacter: data.taskCharacter,
   };
 }
 
@@ -148,7 +140,8 @@ function samePrompt(a: RealtimePromptConfig | null, b: RealtimePromptConfig | nu
     JSON.stringify(a.conditionCombinationPrompts) ===
       JSON.stringify(b.conditionCombinationPrompts) &&
     a.taskCardId === b.taskCardId &&
-    a.taskCardPrompt === b.taskCardPrompt
+    a.taskCardPrompt === b.taskCardPrompt &&
+    JSON.stringify(a.taskCharacter) === JSON.stringify(b.taskCharacter)
   );
 }
 
@@ -761,8 +754,9 @@ function PracticePromptEditorView() {
   const hasChanges = useMemo(() => !samePrompt(prompt, savedPrompt), [prompt, savedPrompt]);
   const conditionCombinationPromptLength = useMemo(
     () =>
-      Object.values(prompt.conditionCombinationPrompts).reduce(
-        (total, value) => total + value.length,
+      CONDITION_COMBINATION_PROMPTS.reduce(
+        (total, conditionPrompt) =>
+          total + prompt.conditionCombinationPrompts[conditionPrompt.key].length,
         0
       ),
     [prompt.conditionCombinationPrompts]
@@ -1117,7 +1111,7 @@ function PracticePromptEditorView() {
           </section>
 
           {PROMPT_GROUPS.map((group) => {
-            const singleField = group.fields.length === 1 ? group.fields[0] : null;
+            const singleField = group.fields[0]?.key === 'basePrompt' ? group.fields[0] : null;
             const characterCount = group.fields.reduce(
               (total, field) => total + prompt[field.key].length,
               0

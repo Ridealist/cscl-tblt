@@ -7,12 +7,19 @@ import {
   type VideoGrant,
 } from 'livekit-server-sdk';
 import { RoomConfiguration } from '@livekit/protocol';
+import {
+  type AgentCharacter,
+  JACK_CHARACTER,
+  KATE_CHARACTER,
+  type RealtimeTaskCharacter,
+} from '@/lib/agent-character';
 import { type AgentMode, normalizeAgentMode } from '@/lib/agent-mode';
 import { type AgentRole, getAgentNameForConfig } from '@/lib/agent-role';
 import {
   EvaluationPromptSourceError,
   readEvaluationPromptState,
 } from '@/lib/evaluation-prompt-source';
+import { readRealtimeTaskCharacter } from '@/lib/realtime-character-source';
 import {
   DEFAULT_REALTIME_PROMPT_METADATA,
   type RealtimePromptMetadata,
@@ -32,6 +39,7 @@ import { studentDefaultDisplayName } from '@/lib/student';
 import { type StudentSession, getStudentSession } from '@/lib/student-auth';
 
 type ConnectionDetails = {
+  agentCharacter: AgentCharacter;
   serverUrl: string;
   roomName: string;
   participantName: string;
@@ -55,6 +63,7 @@ type RealtimePromptSnapshot = RealtimePromptMetadata & {
   feedbackConditionId?: string;
   promptVersionId?: string;
   taskCardId?: string;
+  taskCharacter?: RealtimeTaskCharacter;
 };
 
 type StudentTokenContext = {
@@ -164,6 +173,16 @@ export async function POST(req: Request) {
       agentMode === 'realtime' && sessionActivity?.sessionPurpose !== 'evaluation'
         ? await readRealtimePromptSnapshot()
         : undefined;
+    const agentCharacter =
+      agentMode !== 'realtime'
+        ? KATE_CHARACTER
+        : sessionActivity?.sessionPurpose === 'evaluation'
+          ? {
+              ...JACK_CHARACTER,
+              displayName: sessionActivity.evaluationCharacter ?? JACK_CHARACTER.displayName,
+            }
+          : (promptSnapshot?.taskCharacter ??
+            (await readRealtimeTaskCharacter(promptSnapshot?.taskCardId)));
     const roomConfig = buildRoomConfig(
       roomName,
       agentName,
@@ -171,6 +190,7 @@ export async function POST(req: Request) {
       config.agentRole,
       config.feedbackConditionId,
       promptSnapshot,
+      agentCharacter,
       { displayName, student },
       sessionActivity
     );
@@ -196,6 +216,7 @@ export async function POST(req: Request) {
       runtimeAgentRole: config.agentRole,
       runtimeFeedbackConditionId: config.feedbackConditionId,
       agentName,
+      agentCharacter,
       roomMetadata,
       requestedAgents,
       promptSnapshot: promptSnapshot ?? null,
@@ -219,6 +240,7 @@ export async function POST(req: Request) {
 
     // Return connection details
     const data: ConnectionDetails = {
+      agentCharacter,
       serverUrl: LIVEKIT_URL,
       roomName,
       participantName: displayName,
@@ -486,6 +508,7 @@ async function readRealtimePromptSnapshot(): Promise<RealtimePromptSnapshot> {
     source: activeVersion.source,
     feedbackConditionId: activeVersion.feedbackConditionId,
     taskCardId: activeVersion.taskCardId,
+    taskCharacter: activeVersion.taskCharacter,
   };
 }
 
@@ -496,6 +519,7 @@ function buildRoomConfig(
   agentRole: AgentRole,
   feedbackConditionId: string,
   promptSnapshot?: RealtimePromptSnapshot,
+  agentCharacter: AgentCharacter = KATE_CHARACTER,
   studentContext?: StudentTokenContext,
   sessionActivity?: SessionActivityContext
 ): RoomConfiguration {
@@ -516,6 +540,9 @@ function buildRoomConfig(
       ? {
           sessionPurpose: sessionActivity?.sessionPurpose ?? 'practice',
           activityType: sessionActivity?.activityType ?? 'task_solution',
+          agentCharacterId: agentCharacter.id,
+          agentCharacterName: agentCharacter.displayName,
+          agentCharacterAvatarSrc: agentCharacter.avatarSrc,
           ...(sessionActivity?.sessionPurpose === 'evaluation'
             ? {
                 evaluationCharacter: sessionActivity.evaluationCharacter,

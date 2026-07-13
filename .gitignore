@@ -76,3 +76,6 @@ aws_cli/
 # ===== Leaf Work =====
 leaf-work/
 .leaf-work/
+
+# ===== Logs =====
+/docs/task_info/
