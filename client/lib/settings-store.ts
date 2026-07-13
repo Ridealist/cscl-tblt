@@ -2,13 +2,14 @@ import { mkdir, readFile, rename, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
 import 'server-only';
 import { type AgentMode, normalizeAgentMode } from '@/lib/agent-mode';
-import { type AgentRole, DEFAULT_AGENT_ROLE, normalizeAgentRole } from '@/lib/agent-role';
+import type { AgentRole } from '@/lib/agent-role';
 import { type SessionPurpose, normalizeSessionPurpose } from '@/lib/session-activity';
 import { createSupabaseAdminClient, hasSupabaseAdminEnv } from '@/lib/supabase/admin';
 
 const SETTINGS_ID = 'default';
 const CONFIG_PATH = join(process.cwd(), '..', 'config.json');
 const DEFAULT_FEEDBACK_CONDITION_ID = 'no_corrective';
+const FIXED_AGENT_ROLE: AgentRole = 'collaborative';
 
 export interface AppSettings {
   numClasses: number;
@@ -59,7 +60,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   classStart: 1,
   activeClass: 1,
   agentMode: 'pipeline',
-  agentRole: DEFAULT_AGENT_ROLE,
+  agentRole: FIXED_AGENT_ROLE,
   feedbackConditionId: DEFAULT_FEEDBACK_CONDITION_ID,
   sessionPurpose: 'practice',
   realtimeResetting: false,
@@ -121,7 +122,7 @@ export function normalizeSettings(
     classStart,
     activeClass: clampActiveClass(value.activeClass, classStart, numClasses),
     agentMode: normalizeAgentMode(value.agentMode),
-    agentRole: normalizeAgentRole(value.agentRole ?? value.agentStance),
+    agentRole: FIXED_AGENT_ROLE,
     feedbackConditionId: normalizeFeedbackConditionId(value.feedbackConditionId, options),
     sessionPurpose: normalizeSessionPurpose(value.sessionPurpose),
     realtimeResetting: value.realtimeResetting === true,
@@ -149,7 +150,7 @@ export function mergeSettings(
         ? clampActiveClass(current.activeClass, classStart, numClasses)
         : clampActiveClass(input.activeClass, classStart, numClasses),
     agentMode: normalizeAgentMode(input.agentMode ?? current.agentMode),
-    agentRole: normalizeAgentRole(input.agentRole ?? input.agentStance ?? current.agentRole),
+    agentRole: FIXED_AGENT_ROLE,
     feedbackConditionId: normalizeFeedbackConditionId(
       input.feedbackConditionId ?? current.feedbackConditionId,
       options

@@ -78,14 +78,8 @@ const PROMPT_GROUPS: PromptGroup[] = [
   },
   {
     title: 'Interlocutor Role Prompt',
-    description: '이 버전에 함께 저장되는 Dominant/Collaborative 역할 규칙입니다.',
+    description: '이 버전에 함께 저장되는 Collaborative 역할 규칙입니다.',
     fields: [
-      {
-        key: 'dominantPrompt',
-        title: 'Dominant Prompt',
-        description: 'Dominant Condition에서 추가되는 주도적 상호작용 규칙입니다.',
-        rows: 14,
-      },
       {
         key: 'collaborativePrompt',
         title: 'Collaborative Prompt',
@@ -109,14 +103,6 @@ const EMPTY_PROMPT: RealtimePromptConfig = {
 };
 
 const CONDITION_COMBINATION_PROMPTS = [
-  {
-    key: 'dominant_no_feedback',
-    title: 'Dominant - No Feedback',
-  },
-  {
-    key: 'dominant_explicit_correction',
-    title: 'Dominant - Explicit Correction',
-  },
   {
     key: 'collaborative_no_feedback',
     title: 'Collaborative - No Feedback',
@@ -768,8 +754,9 @@ function PracticePromptEditorView() {
   const hasChanges = useMemo(() => !samePrompt(prompt, savedPrompt), [prompt, savedPrompt]);
   const conditionCombinationPromptLength = useMemo(
     () =>
-      Object.values(prompt.conditionCombinationPrompts).reduce(
-        (total, value) => total + value.length,
+      CONDITION_COMBINATION_PROMPTS.reduce(
+        (total, conditionPrompt) =>
+          total + prompt.conditionCombinationPrompts[conditionPrompt.key].length,
         0
       ),
     [prompt.conditionCombinationPrompts]
@@ -1124,7 +1111,7 @@ function PracticePromptEditorView() {
           </section>
 
           {PROMPT_GROUPS.map((group) => {
-            const singleField = group.fields.length === 1 ? group.fields[0] : null;
+            const singleField = group.fields[0]?.key === 'basePrompt' ? group.fields[0] : null;
             const characterCount = group.fields.reduce(
               (total, field) => total + prompt[field.key].length,
               0
